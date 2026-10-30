@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {webcrypto}=require('node:crypto');
-const {DemoAPI,DemoEngine,DemoError,rounded,breakout,exitPrice,combinedValue}=require('./engine.js');
+const {DemoAPI,DemoEngine,DemoError,rounded,breakout,qualifySetup,exitPrice,combinedValue}=require('./engine.js');
 const now=Date.now();
 const symbol='BTCUSDT';
 function fixture(){
@@ -16,7 +16,7 @@ function fixture(){
     if(path==='/fapi/v1/premiumIndex')return {markPrice:'100',time:Date.now()};
     if(path==='/fapi/v1/commissionRate')return {takerCommissionRate:'.0005'};
     if(path==='/fapi/v1/marginType')return {code:200};
-    if(path==='/fapi/v1/leverage')return {leverage:15,maxNotionalValue:'1000000'};
+    if(path==='/fapi/v1/leverage')return {leverage:p.leverage,maxNotionalValue:'1000000'};
     if(path==='/fapi/v1/income')return [];
     if(path==='/fapi/v1/order'){
       if(method==='GET'){if(!orders.has(p.origClientOrderId))throw new DemoError('not found',-2013);return orders.get(p.origClientOrderId);}
@@ -37,7 +37,7 @@ function fixture(){
   }};
   let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
-  const signal={side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
+  const signal={qualityConfirmed:true,strength:1,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   return {e,api,signal,calls,saved,orders,algos,get position(){return position},set position(p){position=p},set unknownEntry(v){unknownEntry=v},set failProtection(v){failProtection=v},set failClose(v){failClose=v}};
 }
 test('demo endpoint and signed request never contain raw secret; live URLs blocked',async()=>{
@@ -56,10 +56,10 @@ test('balance conversion requires fresh complete rates',()=>{
  const assets=[{asset:'USDT',marginBalance:'5000'},{asset:'USDC',marginBalance:'5000'},{asset:'BTC',marginBalance:'.01'}];const rates=[{symbol:'USDTUSD',index:1,time:now},{symbol:'USDCUSD',index:1,time:now},{symbol:'BTCUSD',index:76638.83,time:now}];
  assert.equal(combinedValue(assets,rates,now),10766.3883);assert.equal(combinedValue(assets,rates.slice(0,2),now),null);assert.equal(combinedValue(assets,rates,now+61000),null);
 });
-test('entry journals before POST, uses 15x, and installs exchange protection',async()=>{
+test('entry journals before POST, uses selected leverage, and installs exchange protection',async()=>{
  const f=fixture();await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,1);assert(f.e.active()[0].protected);assert.equal(f.algos.size,2);
- const entry=f.calls.find(c=>c.path==='/fapi/v1/order'&&c.method==='POST');assert.equal(entry.p.quantity,'15.000');assert(f.saved.some(s=>s.records[0]?.id===entry.p.newClientOrderId&&!s.records[0].orderId));
- assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,15);assert.equal(f.calls.find(c=>c.path==='/fapi/v1/marginType').p.marginType,'ISOLATED');
+ const entry=f.calls.find(c=>c.path==='/fapi/v1/order'&&c.method==='POST');assert.equal(entry.p.quantity,'2.901');assert(f.saved.some(s=>s.records[0]?.id===entry.p.newClientOrderId&&!s.records[0].orderId));
+ assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,3);assert.equal(f.calls.find(c=>c.path==='/fapi/v1/marginType').p.marginType,'ISOLATED');
  await f.e.enter(symbol,f.signal);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/order'&&c.method==='POST'&&!c.p.reduceOnly).length,1);
 });
 test('timeout after accepted entry reconciles client ID without duplicate POST',async()=>{
@@ -69,7 +69,7 @@ test('protective rejection stops auto and closes reduce-only',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(f.e.auto,false);assert.equal(f.position,null);assert(f.calls.some(c=>c.path==='/fapi/v1/order'&&c.p.reduceOnly==='true'));
 });
 test('profit floor is an additional exchange stop; manual close cleans protective orders',async()=>{
- const f=fixture();await f.e.enter(symbol,f.signal);f.position.markPrice='101.5';f.position.unRealizedProfit='22.5';await f.e.refresh();await f.e.reconcile();assert([...f.algos.values()].some(a=>a.clientAlgoId.endsWith('_floor')));assert.equal(f.algos.size,3);
+ const f=fixture();await f.e.enter(symbol,f.signal);f.position.markPrice='108';f.position.unRealizedProfit='22.5';await f.e.refresh();await f.e.reconcile();assert([...f.algos.values()].some(a=>a.clientAlgoId.endsWith('_floor')));assert.equal(f.algos.size,3);
  await f.e.close(symbol);assert.equal(f.position,null);assert.equal(f.e.active().length,0);assert([...f.algos.values()].every(a=>a.algoStatus==='CANCELED'));
 });
 test('Stop Auto during configuration prevents entry dispatch',async()=>{
@@ -131,13 +131,13 @@ test('failed symbol inventory never counts as an empty order list',async()=>{
  await assert.rejects(()=>f.e.readOrderInventory('/fapi/v1/openOrders'));assert.equal(f.e.inventoryCache['/fapi/v1/openOrders'],undefined);
 });
 
-test('long and short entries cap exposure at $1500 and protect near $9 net loss',async()=>{
+test('long and short entries cap exposure by volatility and protect near $9 net loss and protect near $9 net loss',async()=>{
  for(const side of ['BUY','SELL']){
   const f=fixture();f.signal.side=side;if(side==='SELL')f.signal.low=101;
   await f.e.enter(symbol,f.signal);
   const sl=[...f.algos.values()].find(a=>a.type==='STOP_MARKET');
   const qty=Math.abs(Number(f.position.positionAmt)),price=Number(sl.triggerPrice);
-  assert(qty*100<=1500);
+  assert(qty*100<=300);
   const net=(price-100)*qty*(side==='BUY'?1:-1)-(100+price)*qty*.0005;
   assert(net>=-9-.000001&&net<=-8.8);
   f.position.unRealizedProfit='-9';await f.e.refresh();await f.e.reconcile();
@@ -200,4 +200,28 @@ test('$1000 budget excludes extra demo money, reserves $200 and tracks losses',(
  f.e.state.budgetWalletBaseline=1000;f.e.account.assets[0].walletBalance='1000';
  assert.equal(f.e.budgetStatus().free,800);
  f.e.account.assets[0].unrealizedProfit='-50';assert.equal(f.e.budgetStatus().free,750);
+});
+test('trend and volume confirmation reject weak signals; stronger rule agreement selects more leverage',()=>{
+ const end=Math.floor(now/3600000)*3600000;
+ const hourly=Array.from({length:60},(_,i)=>[end-(60-i)*3600000,0,0,0,100+i,10,end-(59-i)*3600000-1]);
+ const base=Math.floor(now/300000)*300000;
+ const bars=Array.from({length:21},(_,i)=>[base-(21-i)*300000,100,102,99,101,10,base-(20-i)*300000-1]);
+ const signal={side:'BUY',atr:3};bars[20][1]=100;bars[20][2]=104;bars[20][3]=100;bars[20][4]=103.2;bars[20][5]=16;
+ assert.equal(qualifySetup(signal,bars,hourly,now).leverage,3);
+ bars[20][5]=22;assert.equal(qualifySetup(signal,bars,hourly,now).leverage,5);
+ bars[20][4]=103.8;assert.equal(qualifySetup(signal,bars,hourly,now).leverage,8);
+ bars[20][5]=10;assert.equal(qualifySetup(signal,bars,hourly,now),null);
+ bars[20][5]=22;assert.equal(qualifySetup({...signal,side:'SELL'},bars,hourly,now),null);
+ assert.equal(qualifySetup(signal,bars,hourly,now+7200000),null);
+});
+test('unconfirmed setup cannot submit an entry',async()=>{
+ const f=fixture();delete f.signal.qualityConfirmed;await f.e.enter(symbol,f.signal);assert.equal(f.calls.length,0);
+});
+test('higher leverage remains limited by volatility risk sizing',async()=>{
+ for(const leverage of [3,5,8]){
+ const f=fixture();f.signal.leverage=leverage;f.signal.stopDistance=5;await f.e.enter(symbol,f.signal);
+ const entry=f.calls.find(c=>c.method==='POST'&&c.path==='/fapi/v1/order');const qty=Number(entry.p.quantity);
+ assert(qty*(5+.0005*205)<=9);assert(qty*100<=100*leverage);
+ assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,leverage);
+ }
 });
