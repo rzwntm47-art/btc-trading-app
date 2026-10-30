@@ -250,7 +250,7 @@ test('minute policy has only SL, closes losing after 60s and leaves profit for m
   const r=f.e.active()[0];
   assert.deepEqual(r.exits.map(x=>x.kind),['sl']);
   r.openedAt=Date.now()-59000;await f.e.reconcile();assert.equal(f.e.active().length,1);
-  r.openedAt=Date.now()-61000;f.position.unRealizedProfit='50';f.position.markPrice='117';
+  r.openedAt=Date.now()-61000;f.position.unRealizedProfit='0.8';f.position.markPrice='100';
   await f.e.reconcile();assert.equal(f.e.active().length,1);assert.deepEqual(r.exits.map(x=>x.kind),['sl']);
   f.position.unRealizedProfit='-1';f.position.markPrice='99.7';await f.e.reconcile();
   assert.equal(f.e.active().length,1);r.lossSince=Date.now()-61000;await f.e.reconcile();
@@ -338,7 +338,7 @@ test('qualified entry reports progress through submission',async()=>{
 test('loss timer resets on recovery and restarts on a later loss regardless of trade age',async()=>{
  const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
  const r=f.e.active()[0];r.openedAt=Date.now()-3600000;
- r.lossSince=Date.now()-59000;f.position.unRealizedProfit='2';await f.e.reconcile();
+ r.lossSince=Date.now()-59000;f.position.unRealizedProfit='0.8';await f.e.reconcile();
  assert.equal(r.lossSince,null);assert.equal(f.e.active().length,1);
  f.position.unRealizedProfit='-1';await f.e.reconcile();
  assert.ok(Date.now()-r.lossSince<1000);assert.equal(f.e.active().length,1);
@@ -350,4 +350,23 @@ test('net break-even resets the loss timer',async()=>{
  const r=f.e.active()[0];r.lossSince=Date.now()-61000;
  f.position.unRealizedProfit=String(r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));
  await f.e.reconcile();assert.equal(r.lossSince,null);assert.equal(f.e.active().length,1);
+});
+test('profit ladder arms at $1 and advances by whole-dollar peaks',()=>{
+ const {profitFloor}=require('./engine.js');
+ for(const [peak,floor] of [[.5,null],[.99,null],[1,.5],[1.99,.5],[2,1],[3,2],[4,3],[10.5,9]])
+ assert.equal(profitFloor(peak),floor);
+});
+test('BUY and SELL profit floors rise, never fall, and close on pullback',async()=>{
+ for(const side of ['BUY','SELL']){
+  const f=fixture();Object.assign(f.signal,{side,exitPolicy:'manual-profit-60s-loss',low:101,high:99});
+  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+  const setNet=n=>{f.position.unRealizedProfit=String(n+r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));};
+  setNet(1.1);await f.e.reconcile();assert.equal(r.profitFloor,.5);
+  setNet(.75);await f.e.reconcile();assert.equal(f.e.active().length,1);assert.equal(r.profitFloor,.5);
+  setNet(2.1);await f.e.reconcile();assert.equal(r.profitFloor,1);
+  setNet(3.1);await f.e.reconcile();assert.equal(r.profitFloor,2);
+  setNet(2.5);await f.e.reconcile();assert.equal(r.profitFloor,2);assert.equal(f.e.active().length,1);
+  setNet(1.99);await f.e.reconcile();assert.equal(f.e.active().length,0);
+  assert.equal(r.closeReason,'Profit pullback to $2.00 floor');
+ }
 });

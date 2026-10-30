@@ -104,6 +104,7 @@ function qualifySetup(signal,raw,hourly,now,explain=()=>{},trendMs=3600000){
   const score=moderate?1:1+Number(volumeRatio>=2)+Number(closeStrength>=.9&&body>=.7);
   return {...signal,qualityConfirmed:true,strength:score,leverage:score===3?8:score===2?5:3,stopDistance:1.5*signal.atr,volumeRatio};
 }
+function profitFloor(peak){return peak>=2?Math.floor(peak)-1:peak>=1?.5:null;}
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
   const sign=side==='BUY'?1:-1;
@@ -365,6 +366,10 @@ class DemoEngine {
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
         if(r.exitPolicy==='manual-profit-60s-loss'){
+          const raised=profitFloor(r.peak);
+          if(raised!==null)r.profitFloor=Math.max(r.profitFloor??0,raised);
+          this.save();
+          if(Number.isFinite(r.profitFloor)&&net<=r.profitFloor){await this.close(r.symbol,'Profit pullback to $'+r.profitFloor.toFixed(2)+' floor');continue;}
           const observedAt=Date.now()+this.api.offset;
           if(net<0){if(!Number.isFinite(r.lossSince))r.lossSince=observedAt;}else r.lossSince=null;
           this.save();
@@ -444,4 +449,4 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,qualifySetup,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,qualifySetup,profitFloor,exitPrice,combinedValue,DEMO_BASE};
