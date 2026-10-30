@@ -10,12 +10,13 @@ function line(parent,values){const tr=document.createElement('tr');for(const v o
 function status(message){$('status').textContent=message;}
 function render(){
   const e=engine,connected=!!e?.connected;
-  $('connect').disabled=connectionBusy||connected;$('disconnect').disabled=!connected||e.busy;
+  $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
+  $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
   $('start').disabled=!connected||e.busy||e.auto||e.state.goal;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.busy;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
-  status((e.auto?'AUTO RUNNING':'AUTO STOPPED')+(e.busy?' · checking orders…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  status((e.auto?'AUTO RUNNING':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   $('balanceNote').textContent='Converted from Binance Demo asset indices; price timing may differ.';
   const usdt=e.account?.assets.find(a=>a.asset==='USDT');$('available').textContent=money(Number(usdt?.availableBalance));$('wallet').textContent='USDT wallet: '+money(Number(usdt?.walletBalance));
@@ -42,7 +43,7 @@ function render(){
   $('assets').replaceChildren();for(const a of e.account?.assets||[])if(Number(a.walletBalance)!==0||Number(a.unrealizedProfit)!==0)line($('assets'),[a.asset,a.walletBalance,a.availableBalance,a.marginBalance]);
   $('log').replaceChildren();for(const v of e.events){const d=document.createElement('div');d.textContent=new Date(v.at).toLocaleTimeString()+' · '+v.text;$('log').append(d);}
 }
-async function run(fn){if(!engine||engine.busy)return;engine.busy=true;render();try{await fn();await engine.refresh();}catch(e){engine.block=e.message;engine.pause(e.message);}finally{engine.busy=false;render();}}
+async function run(fn){if(!engine||engine.busy)return;engine.busy=true;render();try{await fn();if(engine.tradingReady)await engine.refresh();else await engine.refreshBalance();}catch(e){engine.block=e.message;engine.pause(e.message);}finally{engine.busy=false;render();}}
 async function acquireLock(){
   if(!navigator.locks)throw new Error('This browser cannot prevent duplicate trading tabs. Use current Chrome or Edge.');
   await new Promise((resolve,reject)=>{navigator.locks.request('btc-binance-demo-order-writer',{ifAvailable:true},lock=>{if(!lock){reject(new Error('Another tab is connected to Demo. Disconnect that tab first.'));return;}return new Promise(done=>{releaseLock=done;resolve();});}).catch(reject);});
@@ -61,13 +62,19 @@ $('connectform').onsubmit=async event=>{
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
     engine=new DemoEngine(new DemoAPI(key,signingKey),state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
     await engine.initialize();engine.save();$('credentials').open=false;
-  }catch(e){if(engine){engine.pause();engine.connected=false;engine.api.clear();}releaseLock?.();releaseLock=null;status(e.message+' No new auto entries enabled.');}
+  }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();}
 };
 $('start').onclick=()=>run(()=>engine.start());
+$('retry').onclick=async()=>{
+  if(!engine?.api?.key||engine.busy)return;engine.busy=true;render();status('Retrying saved demo credentials…');
+  try{await engine.initialize();engine.save();if(engine.connected)$('credentials').open=false;}
+  catch(e){engine.block=e.message;engine.pause();status(e.message+' Use Retry connection or Disconnect.');}
+  finally{engine.busy=false;render();}
+};
 $('stop').onclick=()=>{engine?.pause('Stopped by user. Existing protective exits remain.');render();};
 $('again').onclick=()=>run(()=>engine.again());
-$('refresh').onclick=()=>run(async()=>{await engine.refresh();await engine.reconcile();await engine.updateIncome();});
+$('refresh').onclick=()=>run(async()=>{if(!engine.tradingReady){await engine.refreshBalance();return;}await engine.refresh();await engine.reconcile();await engine.updateIncome();});
 $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
