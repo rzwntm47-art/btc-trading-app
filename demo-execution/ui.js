@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 let engine=null,releaseLock=null,connectionBusy=false;
 function demoVisible(){
   if(document.hidden)return false;
-  try{const dialog=window.frameElement?.closest('dialog');return !dialog||dialog.open;}catch{return false;}
+  try{const frame=window.frameElement;const dialog=frame?.closest('dialog');return !frame?.closest('[hidden]')&&(!dialog||dialog.open);}catch{return false;}
 }
 const money=n=>Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
 function line(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');if(v instanceof Node)td.append(v);else td.textContent=String(v??'—');tr.append(td);}parent.append(tr);}
@@ -86,3 +86,6 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.c
 window.addEventListener('beforeunload',event=>{if(engine?.busy){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',()=>{engine?.pause();engine?.api.clear();releaseLock?.();});
 render();
+
+const paperLink=document.querySelector('a[href="./"]')||document.querySelector('a[href="index.html"]');
+if(paperLink&&window.parent!==window){paperLink.textContent='Paper simulator';paperLink.onclick=event=>{event.preventDefault();engine?.pause('Switched to paper simulation.');parent.postMessage('show-paper',location.origin);};}
