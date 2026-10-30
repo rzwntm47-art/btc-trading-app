@@ -238,9 +238,33 @@ test('scanner rotates bounded batches and explains WAIT without submitting order
   const e=new DemoEngine(api);e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
-  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 5m breakout'));
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 1m breakout'));
   e.auto=false;await e.scan();assert.equal(calls.length,24);
 });
 test('scanner handles an empty universe without requests',async()=>{
   const e=new DemoEngine({call:async()=>assert.fail('Unexpected request')});e.auto=true;await e.scan();
+});
+test('minute policy has only SL, closes losing after 60s and leaves profit for manual close',async()=>{
+  const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';f.signal.intervalMs=60000;
+  await f.e.enter(symbol,f.signal);
+  const r=f.e.active()[0];
+  assert.deepEqual(r.exits.map(x=>x.kind),['sl']);
+  r.openedAt=Date.now()-59000;await f.e.reconcile();assert.equal(f.e.active().length,1);
+  r.openedAt=Date.now()-61000;f.position.unRealizedProfit='50';f.position.markPrice='117';
+  await f.e.reconcile();assert.equal(f.e.active().length,1);assert.deepEqual(r.exits.map(x=>x.kind),['sl']);
+  f.position.unRealizedProfit='-1';f.position.markPrice='99.7';await f.e.reconcile();
+  assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'Losing after 60 seconds');
+});
+test('minute policy enforces $9 loss before 60 seconds',async()=>{
+  const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+  const r=f.e.active()[0];f.position.unRealizedProfit='-9';await f.e.reconcile();
+  assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$9 loss threshold');
+});
+test('one minute breakout accepts 1m candles and rejects 5m spacing',()=>{
+  const end=Math.floor(Date.now()/60000)*60000-1;
+  const bars=Array.from({length:22},(_,i)=>[end-(21-i)*60000-59999,'100','101','99',i===21?'102':'100','100',end-(21-i)*60000]);
+  bars[21][2]='103';
+  assert.equal(breakout(bars,end+1000,60000).side,'BUY');
+  assert.throws(()=>breakout(bars,end+1000),/candles/);
+  assert.equal(breakout(bars,end+76000,60000),null);
 });

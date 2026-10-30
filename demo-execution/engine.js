@@ -54,31 +54,31 @@ class DemoAPI {
 }
 function number(value){if(value===null||value===undefined||value==='')throw new DemoError('Missing Binance numeric value');const n=Number(value);if(!Number.isFinite(n))throw new DemoError('Invalid Binance numeric value');return n;}
 function rounded(value,step,up=false){const n=number(step);if(n<=0||value<=0)throw new DemoError('Invalid quantity or tick size');const decimals=Math.min(12,(String(step).split('.')[1]||'').replace(/0+$/,'').length);return ((up?Math.ceil(value/n-1e-9):Math.floor(value/n+1e-9))*n).toFixed(decimals);}
-function breakout(raw,now){
+function breakout(raw,now,intervalMs=300000){
   if(!Array.isArray(raw))throw new DemoError('Invalid candle response');
   const bars=raw.filter(x=>number(x[6])<now).map(x=>({t:number(x[0]),end:number(x[6]),h:number(x[2]),l:number(x[3]),c:number(x[4]),v:number(x[5])}));
   if(bars.length<21)return null;
-  for(let i=0;i<bars.length;i++){const b=bars[i];if(b.l<=0||b.h<b.l||b.c<b.l||b.c>b.h||b.v<0||b.end-b.t!==299999||(i&&b.t-bars[i-1].t!==300000))throw new DemoError('Invalid or missing candles');}
-  const latest=bars.at(-1);if(now-latest.end>315000)return null;
+  for(let i=0;i<bars.length;i++){const b=bars[i];if(b.l<=0||b.h<b.l||b.c<b.l||b.c>b.h||b.v<0||b.end-b.t!==intervalMs-1||(i&&b.t-bars[i-1].t!==intervalMs))throw new DemoError('Invalid or missing candles');}
+  const latest=bars.at(-1);if(now-latest.end>intervalMs+15000)return null;
   const prev=bars.slice(-21,-1),high=Math.max(...prev.map(x=>x.h)),low=Math.min(...prev.map(x=>x.l));
   const side=latest.c>high?'BUY':latest.c<low?'SELL':null;
   const atr=bars.slice(-20).reduce((s,b,i)=>{const last=bars[bars.length-21+i];return s+Math.max(b.h-b.l,Math.abs(b.h-last.c),Math.abs(b.l-last.c));},0)/20;
   return side&&atr>0?{side,close:latest.end,price:latest.c,high,low,atr}:null;
 }
 // Experimental entry filters: score describes rule agreement, not win probability.
-function qualifySetup(signal,raw,hourly,now,explain=()=>{}){
+function qualifySetup(signal,raw,hourly,now,explain=()=>{},trendMs=3600000){
   const reject=reason=>{explain(reason);return null;};
   if(!signal)return null;
   const bars=raw.filter(b=>number(b[6])<now),hours=hourly.filter(b=>number(b[6])<now);
   if(bars.length<21||hours.length<50)return reject('Not enough candle history');
   for(let i=0;i<hours.length;i++){
-    const b=hours[i];if(number(b[4])<=0||number(b[6])-number(b[0])!==3599999||(i&&number(b[0])-number(hours[i-1][0])!==3600000))return null;
+    const b=hours[i];if(number(b[4])<=0||number(b[6])-number(b[0])!==trendMs-1||(i&&number(b[0])-number(hours[i-1][0])!==trendMs))return null;
   }
-  if(now-number(hours.at(-1)[6])>3615000)return reject('Hourly candles are stale');
+  if(now-number(hours.at(-1)[6])>trendMs+15000)return reject('Confirmation candles are stale');
   const mean=a=>a.reduce((v,b)=>v+number(b[4]),0)/a.length;
   const fast=mean(hours.slice(-20)),slow=mean(hours.slice(-50)),prior=mean(hours.slice(-21,-1)),last=number(hours.at(-1)[4]);
   const buy=signal.side==='BUY';
-  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return reject('Hourly trend does not confirm breakout');
+  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return reject('Confirmation trend does not confirm breakout');
   const b=bars.at(-1),range=number(b[2])-number(b[3]);if(range<=0)return null;
   const volumeMean=bars.slice(-21,-1).reduce((v,b)=>v+number(b[5]),0)/20;
   if(volumeMean<=0)return null;
@@ -262,7 +262,7 @@ class DemoEngine {
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return;
     const mark=await this.api.call('GET','/fapi/v1/premiumIndex',{symbol},false);const price=number(mark.markPrice);
-    if(Math.abs(Date.now()+this.api.offset-number(mark.time))>15000||Date.now()+this.api.offset-signal.close>315000)return;
+    if(Math.abs(Date.now()+this.api.offset-number(mark.time))>15000||Date.now()+this.api.offset-signal.close>(signal.intervalMs||300000)+15000)return;
     if(Math.abs(price-signal.price)>.5*signal.atr||(signal.side==='BUY'?price<=signal.high:price>=signal.low))return;
     const feeInfo=await this.api.call('GET','/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
@@ -281,13 +281,13 @@ class DemoEngine {
     if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
-    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exits:[],protected:false};
+    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
       // Install protection directly from a confirmed fill before slower balance reads.
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
-        try{await this.ensureExit(r,filled,'sl',-9);if(!r.closedAt)await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
+        try{await this.ensureExit(r,filled,'sl',-9);if(!r.closedAt&&r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
         catch(e){this.pause('Protection failed immediately after fill.');await this.close(symbol,'Protection failure');throw e;}
       }
     }
@@ -334,13 +334,17 @@ class DemoEngine {
       const p=this.position(r.symbol);
       if(!p){if(r.observedOpen||(['CANCELED','EXPIRED','REJECTED'].includes(order.status)&&Number(order.executedQty)===0)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();continue;}throw new DemoError('Filled entry awaiting position confirmation; no new orders');}
       if((number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot');
-      r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
+      r.openedAt=r.openedAt||Number(order.updateTime)||r.at;r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       try{
         await this.ensureExit(r,p,'sl',-9);if(r.closedAt||r.pendingClose)continue;
-        await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
+        if(r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
+        if(r.exitPolicy==='manual-profit-60s-loss'){
+          if(net<=-9||(net<0&&Date.now()+this.api.offset-r.openedAt>=60000)){await this.close(r.symbol,net<=-9?'$9 loss threshold':'Losing after 60 seconds');continue;}
+          this.save();continue;
+        }
         if(net<=-9||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-9?'$9 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
         if(r.peak>10)await this.ensureExit(r,p,'floor',10);
         this.save();
@@ -357,10 +361,10 @@ class DemoEngine {
     const epoch=this.stopEpoch;this.lastScan=Date.now();
     for(let i=0;i<Math.min(12,this.symbols.length)&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
       const symbol=this.symbols[this.cursor++%this.symbols.length];if(this.owned(symbol))continue;
-      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
-      const candidate=breakout(raw,Date.now()+this.api.offset);
-      let signal=null,reason='No closed 5m breakout';
-      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset,r=>reason=r);}
+      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:60},false);
+      const candidate=breakout(raw,Date.now()+this.api.offset,60000);
+      let signal=null,reason='No closed 1m breakout';
+      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset,r=>reason=r,300000);if(signal)signal={...signal,exitPolicy:"manual-profit-60s-loss",intervalMs:60000};}
       this.scanChecked=(this.scanChecked||0)+1;
       this.scanned.unshift({symbol,reason:signal?'Entry checks required':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);}
@@ -373,7 +377,7 @@ class DemoEngine {
       await this.refresh();await this.reconcile();if(Date.now()-this.lastIncome>15000)await this.updateIncome();
       if(this.auto&&Date.now()-this.metaAt>600000){const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');for(const symbol of [...this.meta.keys()]){const m=info.symbols.find(x=>x.symbol===symbol&&x.status==='TRADING');if(m)this.meta.set(symbol,m);else this.meta.delete(symbol);}this.symbols=[...this.meta.keys()].sort();this.metaAt=Date.now();}
       if(this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; closing bot positions.');this.save();}
-      if(this.state.goal)for(const r of this.active())await this.close(r.symbol,'$100 session goal');
+      if(this.state.goal)for(const r of this.active().filter(r=>r.exitPolicy!=='manual-profit-60s-loss'))await this.close(r.symbol,'$100 session goal');
       if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol)))this.pause('Unmanaged position detected; auto entries stopped.');
       if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
       if(this.auto&&Date.now()-this.lastScan>=5000)await this.scan();
