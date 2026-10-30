@@ -410,4 +410,10 @@ render();
 const paperLink=document.querySelector('a[href="./"]')||document.querySelector('a[href="index.html"]');
 if(paperLink&&window.parent!==window){paperLink.textContent='Paper simulator';paperLink.onclick=event=>{event.preventDefault();engine?.pause('Switched to paper simulation.');parent.postMessage('show-paper',location.origin);};}
 
+window.addEventListener('message',event=>{
+ if(event.origin!==location.origin||event.source!==parent||event.data!=='demo-refresh-assets')return;
+ if(!engine?.connected){$('credentials').open=true;status('Connect Demo first to refresh Binance assets.');return;}
+ $('refresh').click();
+});
+
 </script></body></html>
