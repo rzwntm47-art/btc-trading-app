@@ -159,3 +159,18 @@ test('reset refuses open exchange positions and preserves journal',async()=>{
  await assert.rejects(()=>f.e.resetFromBinance(),/Reset blocked/);
  assert.equal(f.e.state,old);assert(f.position);assert.equal(f.e.auto,false);
 });
+
+test('backend rate limit is identified and cooldown blocks more requests',async()=>{
+ const key=await webcrypto.subtle.importKey('raw',new TextEncoder().encode('fake'),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ let count=0;const api=new DemoAPI('fake',key,async()=>{count++;return {status:429,ok:false,headers:{get:()=>null},json:async()=>({error:'Backend rate limit; no request forwarded'})};},webcrypto);
+ api.relayToken='fake-token';api.synced=Date.now();
+ await assert.rejects(()=>api.call('GET','/fapi/v3/account'),/Local backend rate limit/);
+ await assert.rejects(()=>api.call('GET','/fapi/v3/account'),/seconds remaining/);
+ assert.equal(count,1);
+});
+test('local unauthorized token is not described as a Binance key failure',async()=>{
+ const key=await webcrypto.subtle.importKey('raw',new TextEncoder().encode('fake'),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ const api=new DemoAPI('fake',key,async()=>({status:401,ok:false,json:async()=>({error:'Backend access token rejected'})}),webcrypto);
+ api.relayToken='fake-token';api.synced=Date.now();
+ await assert.rejects(()=>api.call('GET','/fapi/v3/account'),/Local connection token rejected/);
+});
