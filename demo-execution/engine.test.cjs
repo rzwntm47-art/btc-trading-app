@@ -23,7 +23,7 @@ function fixture(){
       if(method==='DELETE')return {status:'CANCELED'};
       if(failClose&&p.reduceOnly)throw new DemoError('unknown close',0,true);
       const o={orderId:orders.size+1,status:'FILLED',clientOrderId:p.newClientOrderId,avgPrice:'100',executedQty:p.quantity};orders.set(p.newClientOrderId,o);
-      if(p.reduceOnly){assert.equal(p.reduceOnly,'true');position=null;}else{position={symbol,positionSide:'BOTH',positionAmt:p.side==='BUY'?p.quantity:String(-p.quantity),entryPrice:'100',markPrice:'100',unRealizedProfit:'0',positionInitialMargin:'500'};if(unknownEntry)throw new DemoError('timeout',0,true);}
+      if(p.reduceOnly){assert.equal(p.reduceOnly,'true');position=null;}else{position={symbol,positionSide:'BOTH',positionAmt:p.side==='BUY'?p.quantity:String(-p.quantity),entryPrice:'100',markPrice:'100',unRealizedProfit:'0',positionInitialMargin:'100'};if(unknownEntry)throw new DemoError('timeout',0,true);}
       return o;
     }
     if(path==='/fapi/v1/algoOrder'){
@@ -58,7 +58,7 @@ test('balance conversion requires fresh complete rates',()=>{
 });
 test('entry journals before POST, uses 3x, and installs exchange protection',async()=>{
  const f=fixture();await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,1);assert(f.e.active()[0].protected);assert.equal(f.algos.size,2);
- const entry=f.calls.find(c=>c.path==='/fapi/v1/order'&&c.method==='POST');assert.equal(entry.p.quantity,'15.000');assert(f.saved.some(s=>s.records[0]?.id===entry.p.newClientOrderId&&!s.records[0].orderId));
+ const entry=f.calls.find(c=>c.path==='/fapi/v1/order'&&c.method==='POST');assert.equal(entry.p.quantity,'3.000');assert(f.saved.some(s=>s.records[0]?.id===entry.p.newClientOrderId&&!s.records[0].orderId));
  assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,3);assert.equal(f.calls.find(c=>c.path==='/fapi/v1/marginType').p.marginType,'ISOLATED');
  await f.e.enter(symbol,f.signal);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/order'&&c.method==='POST'&&!c.p.reduceOnly).length,1);
 });
@@ -69,7 +69,7 @@ test('protective rejection stops auto and closes reduce-only',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(f.e.auto,false);assert.equal(f.position,null);assert(f.calls.some(c=>c.path==='/fapi/v1/order'&&c.p.reduceOnly==='true'));
 });
 test('profit floor is an additional exchange stop; manual close cleans protective orders',async()=>{
- const f=fixture();await f.e.enter(symbol,f.signal);f.position.markPrice='101.5';f.position.unRealizedProfit='22.5';await f.e.refresh();await f.e.reconcile();assert([...f.algos.values()].some(a=>a.clientAlgoId.endsWith('_floor')));assert.equal(f.algos.size,3);
+ const f=fixture();await f.e.enter(symbol,f.signal);f.position.markPrice='107.5';f.position.unRealizedProfit='22.5';await f.e.refresh();await f.e.reconcile();assert([...f.algos.values()].some(a=>a.clientAlgoId.endsWith('_floor')));assert.equal(f.algos.size,3);
  await f.e.close(symbol);assert.equal(f.position,null);assert.equal(f.e.active().length,0);assert([...f.algos.values()].every(a=>a.algoStatus==='CANCELED'));
 });
 test('Stop Auto during configuration prevents entry dispatch',async()=>{
@@ -131,16 +131,16 @@ test('failed symbol inventory never counts as an empty order list',async()=>{
  await assert.rejects(()=>f.e.readOrderInventory('/fapi/v1/openOrders'));assert.equal(f.e.inventoryCache['/fapi/v1/openOrders'],undefined);
 });
 
-test('long and short entries cap exposure at $1500 and protect near $9 net loss',async()=>{
+test('long and short entries cap exposure at $300 and protect near $9 net loss',async()=>{
  for(const side of ['BUY','SELL']){
   const f=fixture();f.signal.side=side;if(side==='SELL')f.signal.low=101;
   await f.e.enter(symbol,f.signal);
   const sl=[...f.algos.values()].find(a=>a.type==='STOP_MARKET');
   const qty=Math.abs(Number(f.position.positionAmt)),price=Number(sl.triggerPrice);
-  assert(qty*100<=1500);
+  assert(qty*100<=300);
   const net=(price-100)*qty*(side==='BUY'?1:-1)-(100+price)*qty*.0005;
   assert(net>=-9-.000001&&net<=-8.8);
-  f.position.unRealizedProfit='-8';await f.e.refresh();await f.e.reconcile();
+  f.position.unRealizedProfit='-9';await f.e.refresh();await f.e.reconcile();
   assert.equal(f.position,null);assert.match(f.e.state.records[0].closeReason,/\$9 loss threshold/);
   assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/leverage').length,1);
  }
@@ -187,4 +187,17 @@ test('fresh positions reach display before a slow or failed order inventory',asy
  let published=false;f.e.notify=()=>{if(f.e.positionAt&&f.e.positions.length===0)published=true;};
  f.e.readOrderInventory=async()=>{assert(published);throw new DemoError('inventory temporarily unavailable');};
  await assert.rejects(()=>f.e.refresh());assert(published);assert.equal(f.e.positions.length,0);
+});
+
+test('$1000 budget excludes extra demo money, reserves $200 and tracks losses',()=>{
+ const f=fixture();f.e.account={assets:[{asset:'USDT',walletBalance:'5000',availableBalance:'5000',unrealizedProfit:'0'}]};
+ f.e.state.budgetWalletBaseline=5000;
+ assert.deepEqual(f.e.budgetStatus(),{equity:1000,reserved:0,free:800});
+ f.e.positions=[{positionInitialMargin:'800'}];assert.equal(f.e.budgetStatus().free,0);
+ f.e.account.assets[0].walletBalance='4900';assert.equal(f.e.budgetStatus().equity,900);
+ f.e.positions=[];assert.equal(f.e.budgetStatus().free,700);
+ f.e.account.assets[0].walletBalance='6000';assert.equal(f.e.budgetStatus().equity,1000);
+ f.e.state.budgetWalletBaseline=1000;f.e.account.assets[0].walletBalance='1000';
+ assert.equal(f.e.budgetStatus().free,800);
+ f.e.account.assets[0].unrealizedProfit='-50';assert.equal(f.e.budgetStatus().free,750);
 });
