@@ -174,3 +174,17 @@ test('local unauthorized token is not described as a Binance key failure',async(
  api.relayToken='fake-token';api.synced=Date.now();
  await assert.rejects(()=>api.call('GET','/fapi/v3/account'),/Local connection token rejected/);
 });
+test('external Binance close removes position and cancels sibling exits without another close order',async()=>{
+ const f=fixture();await f.e.enter(symbol,f.signal);f.position=null;
+ const before=f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order').length;
+ await f.e.refresh();await f.e.reconcile();
+ assert.equal(f.e.positions.length,0);assert.equal(f.e.active().length,0);
+ assert([...f.algos.values()].every(a=>a.algoStatus==='CANCELED'));
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order').length,before);
+});
+test('fresh positions reach display before a slow or failed order inventory',async()=>{
+ const f=fixture();await f.e.enter(symbol,f.signal);f.position=null;
+ let published=false;f.e.notify=()=>{if(f.e.positionAt&&f.e.positions.length===0)published=true;};
+ f.e.readOrderInventory=async()=>{assert(published);throw new DemoError('inventory temporarily unavailable');};
+ await assert.rejects(()=>f.e.refresh());assert(published);assert.equal(f.e.positions.length,0);
+});
