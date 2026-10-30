@@ -351,9 +351,9 @@ test('net break-even resets the loss timer',async()=>{
  f.position.unRealizedProfit=String(r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));
  await f.e.reconcile();assert.equal(r.lossSince,null);assert.equal(f.e.active().length,1);
 });
-test('profit ladder arms at $1 and advances by whole-dollar peaks',()=>{
+test('profit ladder arms at $1 and doubles at each milestone',()=>{
  const {profitFloor}=require('./engine.js');
- for(const [peak,floor] of [[.5,null],[.99,null],[1,.5],[1.99,.5],[2,1],[3,2],[4,3],[10.5,9]])
+ for(const [peak,floor] of [[.5,null],[.99,null],[1,.5],[1.99,.5],[2,1],[3,1],[4,2],[7.99,2],[8,4],[10.5,4],[16,8],[32,16]])
  assert.equal(profitFloor(peak),floor);
 });
 test('BUY and SELL profit floors rise, never fall, and close on pullback',async()=>{
@@ -364,7 +364,8 @@ test('BUY and SELL profit floors rise, never fall, and close on pullback',async(
   setNet(1.1);await f.e.reconcile();assert.equal(r.profitFloor,.5);
   setNet(.75);await f.e.reconcile();assert.equal(f.e.active().length,1);assert.equal(r.profitFloor,.5);
   setNet(2.1);await f.e.reconcile();assert.equal(r.profitFloor,1);
-  setNet(3.1);await f.e.reconcile();assert.equal(r.profitFloor,2);
+  setNet(3.1);await f.e.reconcile();assert.equal(r.profitFloor,1);
+  setNet(4.1);await f.e.reconcile();assert.equal(r.profitFloor,2);
   setNet(2.5);await f.e.reconcile();assert.equal(r.profitFloor,2);assert.equal(f.e.active().length,1);
   setNet(1.99);await f.e.reconcile();assert.equal(f.e.active().length,0);
   assert.equal(r.closeReason,'Profit pullback to $2.00 floor');

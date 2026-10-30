@@ -104,7 +104,7 @@ function qualifySetup(signal,raw,hourly,now,explain=()=>{},trendMs=3600000){
   const score=moderate?1:1+Number(volumeRatio>=2)+Number(closeStrength>=.9&&body>=.7);
   return {...signal,qualityConfirmed:true,strength:score,leverage:score===3?8:score===2?5:3,stopDistance:1.5*signal.atr,volumeRatio};
 }
-function profitFloor(peak){return peak>=2?Math.floor(peak)-1:peak>=1?.5:null;}
+function profitFloor(peak){if(!Number.isFinite(peak)||peak<1)return null;let floor=.5;while(peak>=floor*4)floor*=2;return floor;}
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
   const sign=side==='BUY'?1:-1;
