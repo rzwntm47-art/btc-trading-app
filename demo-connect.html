@@ -4,16 +4,16 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.12</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.13</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" disabled>New $100 session</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
-<small>15× isolated · up to $100 margin / $1,500 exposure per trade · $1,000 USDT budget · $800 total margin cap · $200 reserve · $9 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
-<section><h2>$1,000 USDT trading budget · 15× leverage</h2><b id="budgetValue">Awaiting account</b><small>Only this budget is used for new trades. BTC, USDC and extra demo USDT are excluded. Losses reduce the budget; profits do not raise its $1,000 ceiling. Existing positions count toward the cap.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>USDT account session P&amp;L / $100</small><b id="session">—</b><small id="sessionNote">Realized P&amp;L + fees + funding + open P&amp;L</small></div></div>
+<small>Adaptive 3× / 5× / 8× isolated · up to $100 margin / $800 exposure per trade · maximum 3 positions · $1,000 USDT budget · $800 total margin cap · $200 reserve · $9 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
+<section><h2>$1,000 USDT budget · adaptive leverage</h2><b id="budgetValue">Awaiting account</b><small>Only this budget is used for new trades. BTC, USDC and extra demo USDT are excluded. Losses reduce the budget; profits do not raise its $1,000 ceiling. Existing positions count toward the cap.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>USDT account session P&amp;L / $100</small><b id="session">—</b><small id="sessionNote">Realized P&amp;L + fees + funding + open P&amp;L</small></div></div>
 <div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
 <details open><summary>Activity &amp; connection</summary><div id="log"></div></details>
-<details><summary>How this demo works</summary><p>Start Demo Auto scans eligible crypto perpetuals in rotating batches. A closed 5-minute candle must break the previous 20-candle range; stale signals and chased prices are skipped. This rules-based strategy has not demonstrated profitability. Starting does not guarantee an immediate entry or $100 profit.</p><p>Entries are market orders. Each confirmed position receives Binance conditional stop-market and take-profit-market exits. Above estimated $10 net profit, the page adds a $10 profit-floor stop. Stop Auto prevents new entries; it keeps managing existing bot positions. Close sends a reduce-only order. Other positions are not adopted or automatically closed.</p><p>Keep this page open and visible for new entries and profit-floor updates. Accepted exchange protective orders remain on Binance after disconnect or closure. A session goal cannot be enforced while the page is closed. Do not close the page during an order submission; review Binance directly if a connection fails.</p><p>Use a dedicated demo account without other orders or trading sessions. The account session goal includes all USDT trading income and open USDT P&amp;L after the session starts. Wallet transfers and changes in BTC/USDC value are excluded. No withdrawals, asset conversions or live-account endpoints are available.</p></details>
+<details><summary>How this demo works</summary><p>Start Demo Auto scans eligible crypto perpetuals in rotating batches. A closed 5-minute breakout must agree with the 1-hour trend, have at least 1.5× recent average volume, and close strongly within its candle. Weak, stale and chased signals are skipped. Rule agreement selects 3×, 5× or 8× leverage; this score is not a win probability. Size is reduced so the $9 planned loss allows at least 1.5 ATR of price movement including estimated fees. Maximum 3 bot positions. These experimental filters have not been backtested for profitability. This rules-based strategy has not demonstrated profitability. Starting does not guarantee an immediate entry or $100 profit.</p><p>Entries are market orders. Each confirmed position receives Binance conditional stop-market and take-profit-market exits. Above estimated $10 net profit, the page adds a $10 profit-floor stop. Stop Auto prevents new entries; it keeps managing existing bot positions. Close sends a reduce-only order. Other positions are not adopted or automatically closed.</p><p>Keep this page open and visible for new entries and profit-floor updates. Accepted exchange protective orders remain on Binance after disconnect or closure. A session goal cannot be enforced while the page is closed. Do not close the page during an order submission; review Binance directly if a connection fails.</p><p>Use a dedicated demo account without other orders or trading sessions. The account session goal includes all USDT trading income and open USDT P&amp;L after the session starts. Wallet transfers and changes in BTC/USDC value are excluded. No withdrawals, asset conversions or live-account endpoints are available.</p></details>
 </main><script>
 'use strict';
 const DEMO_BASE = 'https://demo-fapi.binance.com';
@@ -81,6 +81,28 @@ function breakout(raw,now){
   const side=latest.c>high?'BUY':latest.c<low?'SELL':null;
   const atr=bars.slice(-20).reduce((s,b,i)=>{const last=bars[bars.length-21+i];return s+Math.max(b.h-b.l,Math.abs(b.h-last.c),Math.abs(b.l-last.c));},0)/20;
   return side&&atr>0?{side,close:latest.end,price:latest.c,high,low,atr}:null;
+}
+// Experimental entry filters: score describes rule agreement, not win probability.
+function qualifySetup(signal,raw,hourly,now){
+  if(!signal)return null;
+  const bars=raw.filter(b=>number(b[6])<now),hours=hourly.filter(b=>number(b[6])<now);
+  if(bars.length<21||hours.length<50)return null;
+  for(let i=0;i<hours.length;i++){
+    const b=hours[i];if(number(b[4])<=0||number(b[6])-number(b[0])!==3599999||(i&&number(b[0])-number(hours[i-1][0])!==3600000))return null;
+  }
+  if(now-number(hours.at(-1)[6])>3615000)return null;
+  const mean=a=>a.reduce((v,b)=>v+number(b[4]),0)/a.length;
+  const fast=mean(hours.slice(-20)),slow=mean(hours.slice(-50)),prior=mean(hours.slice(-21,-1)),last=number(hours.at(-1)[4]);
+  const buy=signal.side==='BUY';
+  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return null;
+  const b=bars.at(-1),range=number(b[2])-number(b[3]);if(range<=0)return null;
+  const volumeMean=bars.slice(-21,-1).reduce((v,b)=>v+number(b[5]),0)/20;
+  if(volumeMean<=0)return null;
+  const volumeRatio=number(b[5])/volumeMean,closeStrength=buy?(number(b[4])-number(b[3]))/range:(number(b[2])-number(b[4]))/range;
+  const body=Math.abs(number(b[4])-number(b[1]))/range;
+  if(volumeRatio<1.5||closeStrength<.75||body<.5||range>2*signal.atr)return null;
+  const score=1+Number(volumeRatio>=2)+Number(closeStrength>=.9&&body>=.7);
+  return {...signal,qualityConfirmed:true,strength:score,leverage:score===3?8:score===2?5:3,stopDistance:1.5*signal.atr,volumeRatio};
 }
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
@@ -193,7 +215,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · 15× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · filtered signals · adaptive 3× / 5× / 8× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -243,6 +265,8 @@ class DemoEngine {
   async enter(symbol,signal){
     const epoch=this.stopEpoch;
     if(!this.auto||this.state.goal||this.owned(symbol))return;
+    if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return;
+    if(this.active().length>=3){this.block='Maximum 3 bot positions; waiting for a close';return;}
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<300000)))return;
     await this.refresh();
     if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))return;
@@ -259,15 +283,16 @@ class DemoEngine {
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
-    const budget=Math.min(100,capital.free/(1+30*fee),number(usdt.availableBalance)/(1+30*fee));
+    const selectedLeverage=signal.leverage;
+    const budget=Math.min(100,capital.free/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    const quantity=rounded(Math.min(budget*15/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    const quantity=rounded(Math.min(budget*selectedLeverage/price,9/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=9){this.block=symbol+': quantity/cost filter';return;}
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'ISOLATED'});}catch(e){if(e.code!==-4046)throw e;}
-    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:15});
-    if(number(leverage.leverage)!==15||number(leverage.maxNotionalValue)<notional)throw new DemoError('15× leverage or position size not accepted');
+    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
+    if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exits:[],protected:false};
@@ -347,7 +372,10 @@ class DemoEngine {
     for(let i=0;i<12&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
       const symbol=this.symbols[this.cursor++%this.symbols.length];if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
-      const signal=breakout(raw,Date.now()+this.api.offset);this.scanned.unshift({symbol,side:signal?.side||'WAIT',at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      const candidate=breakout(raw,Date.now()+this.api.offset);
+      let signal=null;
+      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset);}
+      this.scanned.unshift({symbol,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);}
     }
   }
@@ -366,7 +394,7 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,qualifySetup,exitPrice,combinedValue,DEMO_BASE};
 
 </script><script>
 'use strict';
@@ -420,7 +448,7 @@ function render(){
   $('session').textContent=e.state.startedAt?money(e.sessionNet()):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
   $('sessionNote').textContent=e.state.startedAt?'Since '+new Date(e.state.startedAt).toLocaleString()+(e.state.goal?' · goal reached':''):'Starts when you enable auto';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' eligible coins';$('setups').replaceChildren();
-  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG':s.side==='SELL'?'SHORT':'WAIT',new Date(s.at).toLocaleTimeString()]);
+  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG · '+s.leverage+'×':s.side==='SELL'?'SHORT · '+s.leverage+'×':'WAIT',new Date(s.at).toLocaleTimeString()]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);
@@ -537,4 +565,5 @@ $('resetDemo').onclick=()=>run(()=>engine.resetFromBinance());
 
 $('positionsTab').onclick=()=>{ $('positions').hidden=false;$('orderPanel').hidden=true;$('positionsTab').classList.add('selected');$('ordersTab').classList.remove('selected');};
 $('ordersTab').onclick=()=>{ $('positions').hidden=true;$('orderPanel').hidden=false;$('ordersTab').classList.add('selected');$('positionsTab').classList.remove('selected');};
+
 </script></body></html>
