@@ -27,7 +27,11 @@ class DemoAPI {
       let data;try{data=await r.json();}catch{throw new DemoError('Unreadable Binance response; reconcile order status.',0,method!=='GET');}
       if(!r.ok||Number(data.code)<0){const c=Number(data.code)||r.status;const messages={[-2015]:'Demo API permission or IP restriction rejected. Enable Futures trading on the demo key.',[-1022]:'Demo signature rejected. Check the HMAC secret.',[-1021]:'Timestamp rejected. Reconnect to synchronize time.',[-2019]:'Insufficient demo margin.',[-4067]:'Open orders prevent changing margin mode.',[-4168]:'Isolated margin requires Single-Asset Mode.'};throw new DemoError(messages[c]||'Binance Demo rejected request ('+c+').',c,r.status>=500||[-1006,-1007,-4116].includes(c));}
       return data;
-    }catch(e){if(e instanceof DemoError)throw e;throw new DemoError('Demo network request failed. Check connection; order status may be unknown.',0,method!=='GET');}finally{clearTimeout(timer);}
+    }catch(e){
+      const label=method+' '+path;
+      if(e instanceof DemoError){e.message=label+': '+e.message;throw e;}
+      throw new DemoError(label+': '+(e.name==='AbortError'?'Request timed out.':'The browser could not reach this Binance Demo endpoint (network or CORS block).')+(method==='GET'?' This read request did not submit an order.':' Order status must be reconciled before retrying.'),0,method!=='GET');
+    }finally{clearTimeout(timer);}
   }
   clear(){this.key='';this.signingKey=null;}
 }
@@ -68,6 +72,22 @@ class DemoEngine {
   owned(symbol){return this.active().find(r=>r.symbol===symbol);}
   position(symbol){return this.positions.find(p=>p.symbol===symbol&&number(p.positionAmt)!==0);}
   async initialize(){
+    this.pause();
+    // The previously working account read must not depend on trading-only routes.
+    await this.refreshBalance();this.connected=true;this.notify();
+    try{await this.prepareTrading();await this.reconcile();await this.updateIncome();this.event('Demo connected. Auto entries are stopped until Start Demo Auto.');}
+    catch(e){this.block='Balance connected; trading check failed. '+e.message;this.pause(this.block);}
+  }
+  async refreshBalance(){
+    const account=await this.api.call('GET','/fapi/v3/account');
+    if(!Array.isArray(account.assets)||!Array.isArray(account.positions))throw new DemoError('Invalid Binance account response');
+    this.account=account;this.accountAt=Date.now();
+    if(!this.tradingReady)this.positions=account.positions.map(p=>({...p,markPrice:p.markPrice??'—',entryPrice:p.entryPrice??'—',unRealizedProfit:p.unrealizedProfit??p.unRealizedProfit??'0'}));
+    try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}
+    this.notify();
+  }
+  async prepareTrading(){
+    this.tradingReady=false;
     const mode=await this.api.call('GET','/fapi/v1/positionSide/dual');const multi=await this.api.call('GET','/fapi/v1/multiAssetsMargin');
     if(mode.dualSidePosition!==false)throw new DemoError('Set Binance Demo Futures to One-way Mode before starting. No account mode was changed.');
     if(multi.multiAssetsMargin!==false)throw new DemoError('Set Binance Demo Futures to Single-Asset Mode for isolated trades. No account mode was changed.');
@@ -75,7 +95,7 @@ class DemoEngine {
     if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');
     for(const m of info.symbols)if(m.status==='TRADING'&&m.contractType==='PERPETUAL'&&m.quoteAsset==='USDT'&&m.marginAsset==='USDT'&&m.underlyingType==='COIN'&&/^[A-Z0-9]+USDT$/.test(m.symbol)&&!['USDC','USDT','BUSD','FDUSD','TUSD','DAI','USDP','USDD','USD1','USDE'].includes(m.baseAsset))this.meta.set(m.symbol,m);
     this.symbols=[...this.meta.keys()].sort();if(!this.symbols.length)throw new DemoError('No eligible crypto futures found');
-    this.metaAt=Date.now();this.connected=true;await this.refresh();await this.reconcile();try{await this.updateIncome();}catch(e){this.block=e.message;this.event(e.message);}this.event('Demo connected. Auto entries are stopped until Start Demo Auto.');
+    this.metaAt=Date.now();await this.refresh();this.tradingReady=true;
   }
   async refresh(){
     const account=await this.api.call('GET','/fapi/v3/account');
@@ -103,6 +123,7 @@ class DemoEngine {
   sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0);}
   async start(){
     if(!this.connected)throw new DemoError('Connect demo credentials first');
+    await this.prepareTrading();
     await this.refresh();await this.reconcile();
     if(this.active().some(r=>r.pendingClose||!r.protected))throw new DemoError('Resolve pending or unprotected orders before starting.');
     if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol))||this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))throw new DemoError('Unmanaged positions or orders exist in this demo account. Close/cancel them in Binance before starting this bot.');
@@ -231,6 +252,7 @@ class DemoEngine {
   async tick(){
     if(!this.connected||this.busy)return;this.busy=true;
     try{
+      if(!this.tradingReady){await this.refreshBalance();return;}
       await this.refresh();await this.reconcile();if(Date.now()-this.lastIncome>15000)await this.updateIncome();
       if(this.auto&&Date.now()-this.metaAt>600000){const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');for(const symbol of [...this.meta.keys()]){const m=info.symbols.find(x=>x.symbol===symbol&&x.status==='TRADING');if(m)this.meta.set(symbol,m);else this.meta.delete(symbol);}this.symbols=[...this.meta.keys()].sort();this.metaAt=Date.now();}
       if(this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; closing bot positions.');this.save();}
