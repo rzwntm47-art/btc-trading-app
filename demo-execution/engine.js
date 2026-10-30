@@ -65,6 +65,19 @@ function breakout(raw,now,intervalMs=300000){
   const atr=bars.slice(-20).reduce((s,b,i)=>{const last=bars[bars.length-21+i];return s+Math.max(b.h-b.l,Math.abs(b.h-last.c),Math.abs(b.l-last.c));},0)/20;
   return side&&atr>0?{side,close:latest.end,price:latest.c,high,low,atr}:null;
 }
+function twoMinuteBars(raw,now){
+  // Build only complete UTC-aligned pairs of closed one-minute candles.
+  breakout(raw,now,60000);
+  const closed=raw.filter(b=>number(b[6])<now),result=[];
+  for(let i=0;i<closed.length;i++){const b=closed[i];if(number(b[6])-number(b[0])!==59999||(i&&number(b[0])-number(closed[i-1][0])!==60000))throw new DemoError('Invalid or missing candles');}
+  for(let i=0;i<closed.length-1;i++){
+    const a=closed[i],b=closed[i+1],t=number(a[0]);
+    if(t%120000!==0||number(b[0])!==t+60000)continue;
+    result.push([t,a[1],Math.max(number(a[2]),number(b[2])),Math.min(number(a[3]),number(b[3])),b[4],number(a[5])+number(b[5]),b[6]]);
+    i++;
+  }
+  return result;
+}
 // Experimental entry filters: score describes rule agreement, not win probability.
 function qualifySetup(signal,raw,hourly,now,explain=()=>{},trendMs=3600000){
   const reject=reason=>{explain(reason);return null;};
@@ -250,23 +263,28 @@ class DemoEngine {
     return {equity,reserved,free};
   }
   async enter(symbol,signal){
-    const skip=reason=>{this.entryOutcome=reason;return false;};
+    const progress=reason=>{this.entryOutcome=reason;const row=this.scanned.find(s=>s.symbol===symbol);if(row){row.reason=reason;this.notify();}};
+    const skip=reason=>{progress(reason);return false;};
     this.entryOutcome='Checking entry';
     const epoch=this.stopEpoch;
     if(!this.auto||this.state.goal||this.owned(symbol))return skip('Auto paused, session goal reached, or already owned');
     if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return skip('Signal validation failed');
     const lossLimit=signal.exitPolicy==='manual-profit-60s-loss'?5:9;
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<60000)))return skip('Already traded this candle or 60s re-entry cooldown');
+    progress('Checking Binance balance, positions and open orders');
     await this.refresh();
     if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))return skip('Auto changed or existing position/order');
     // Candidate-specific reads prevent stale cached inventories admitting duplicates.
+    progress('Checking this symbol for existing orders');
     for(const path of ['/fapi/v1/openOrders','/fapi/v1/openAlgoOrders']){const existing=await this.api.call('GET',path,{symbol});if(!Array.isArray(existing))throw new DemoError('Order check incomplete');if(existing.length)return skip('Existing Binance order on this symbol');}
     if(Date.now()-this.metaAt>900000)throw new DemoError('Exchange filters expired. Reconnect to refresh.');
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return skip('Market-order filters unavailable');
+    progress('Checking current entry price');
     const mark=await this.api.call('GET','/fapi/v1/premiumIndex',{symbol},false);const price=number(mark.markPrice);
     if(Math.abs(Date.now()+this.api.offset-number(mark.time))>15000||Date.now()+this.api.offset-signal.close>(signal.intervalMs||300000)+15000)return skip('Signal or mark price became stale');
     if(Math.abs(price-signal.price)>.5*signal.atr||(signal.side==='BUY'?price<=signal.high:price>=signal.low))return skip('Price moved too far or breakout reversed');
+    progress('Checking commission and position size');
     const feeInfo=await this.api.call('GET','/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
@@ -279,6 +297,7 @@ class DemoEngine {
     const quantity=rounded(Math.min(budget*selectedLeverage/price,lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=lossLimit){this.block=symbol+': quantity/cost filter';return skip(this.block);}
+    progress('Configuring Cross margin and leverage');
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
     const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
     if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
@@ -286,6 +305,7 @@ class DemoEngine {
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
+    progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
       // Install protection directly from a confirmed fill before slower balance reads.
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
@@ -371,14 +391,16 @@ class DemoEngine {
       if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)break;
       if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:60},false);
-      const candidate=breakout(raw,Date.now()+this.api.offset,60000);
+      const now=Date.now()+this.api.offset;
+      let bars=raw,intervalMs=60000,candidate=breakout(raw,now,60000);
+      if(!candidate){bars=twoMinuteBars(raw,now);intervalMs=120000;candidate=breakout(bars,now,120000);}
       if(candidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
-      let signal=null,reason='No closed 1m breakout';
-      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset,r=>reason=r,300000);if(signal)signal={...signal,exitPolicy:"manual-profit-60s-loss",intervalMs:60000};}
+      let signal=null,reason='No closed 1m or 2m breakout';
+      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,bars,hourly,Date.now()+this.api.offset,r=>reason=r,300000);if(signal)signal={...signal,exitPolicy:"manual-profit-60s-loss",intervalMs};}
       this.scanChecked=(this.scanChecked||0)+1;
       this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
-      this.scanned.unshift({symbol,reason:signal?'Entry checks required':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
-      if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}try{await this.enter(symbol,signal);this.scanned[0].reason=this.entryOutcome;}catch(e){this.scanned[0].reason='Entry failed: '+e.message;throw e;}finally{this.notify();}}
+      this.scanned.unshift({symbol,reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      if(signal&&this.auto&&epoch===this.stopEpoch){try{await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.scanned[0].reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);this.scanned[0].reason=this.entryOutcome;}catch(e){this.scanned[0].reason='Entry failed: '+e.message;throw e;}finally{this.notify();}}
     }
   }
   async reviewContinuation(){
@@ -419,4 +441,4 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,qualifySetup,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,qualifySetup,exitPrice,combinedValue,DEMO_BASE};

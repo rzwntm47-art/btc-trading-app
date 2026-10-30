@@ -238,7 +238,7 @@ test('scanner rotates bounded batches and explains WAIT without submitting order
   const e=new DemoEngine(api);e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
-  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 1m breakout'));
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 1m or 2m breakout'));
   e.auto=false;await e.scan();assert.equal(calls.length,24);
 });
 test('scanner handles an empty universe without requests',async()=>{
@@ -316,4 +316,21 @@ test('a qualifying signal reports why execution was skipped',async()=>{
  const f=fixture();f.signal.price=90;await f.e.enter(symbol,f.signal);
  assert.equal(f.e.entryOutcome,'Price moved too far or breakout reversed');
  assert.equal(f.calls.some(c=>c.method==='POST'&&c.path==='/fapi/v1/order'),false);
+});
+test('two-minute fallback aggregates complete aligned pairs and excludes unfinished pairs',()=>{
+ const {twoMinuteBars}=require('./engine.js');
+ const t=Math.floor(Date.now()/120000)*120000-240000;
+ const bars=Array.from({length:5},(_,i)=>[t+i*60000,100+i,103+i,99+i,102+i,10+i,t+(i+1)*60000-1]);
+ const paired=twoMinuteBars(bars,t+240000);
+ assert.equal(paired.length,2);assert.deepEqual(paired[0],[t,100,104,99,103,21,t+119999]);
+ assert.equal(twoMinuteBars(bars.slice(1),t+240000).length,1);
+ const broken=bars.slice();broken[1]=[...broken[1]];broken[1][0]+=100;
+ assert.throws(()=>twoMinuteBars(broken,t+240000),/candles/);
+});
+test('qualified entry reports progress through submission',async()=>{
+ const f=fixture(),seen=[];f.e.scanned=[{symbol,reason:''}];f.e.notify=()=>seen.push(f.e.scanned[0].reason);
+ await f.e.enter(symbol,f.signal);
+ assert.ok(seen.includes('Checking Binance balance, positions and open orders'));
+ assert.ok(seen.includes('Checking commission and position size'));
+ assert.ok(seen.includes('Submitting demo order'));
 });
