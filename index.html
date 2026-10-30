@@ -1,5 +1,37 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V19.2 · Paper Trader</title><meta name="theme-color" content="#09121d"><link rel="manifest" href="manifest.webmanifest"><style>
 *{box-sizing:border-box}body{margin:0;background:#09121d;color:#edf4fc;font:14px system-ui}main{max-width:900px;margin:auto;padding:12px}header{display:flex;justify-content:space-between;align-items:center}h1{font-size:20px;margin:8px 0}h2{font-size:16px;margin:0;padding:12px}small{display:block;font-size:11px;color:#96a9bf}p{color:#96a9bf}.muted{color:#96a9bf}.green{color:#4bd9a4}.red{color:#ff8396}.yellow{color:#f5c575}.card{background:#112235;border:1px solid #23374c;border-radius:12px;margin:10px 0;overflow:hidden}button{border:1px solid #35526d;background:#203d58;color:white;border-radius:7px;padding:8px 10px;font:inherit;cursor:pointer}button:disabled{opacity:.4}.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{text-align:left;padding:9px 7px;border-bottom:1px solid #22384c;overflow-wrap:anywhere}th{font-size:11px;color:#96a9bf}td{font-size:12px}th:first-child{width:32%}th:last-child{width:22%}#setups{max-height:320px;overflow:auto}thead{position:sticky;top:0;background:#112235}.summary{display:flex;gap:8px;margin:10px 0}.summary>div{flex:1;background:#112235;border-radius:9px;padding:10px}.summary b{font-size:17px;display:block}.empty{margin:12px}.notice{font-size:12px;margin:8px 0}details{margin-top:10px;border:1px solid #23374c;border-radius:9px;padding:10px}summary{cursor:pointer;color:#b8cadd}canvas{width:100%;height:240px}textarea{width:100%;min-height:240px;background:#09121d;color:white;font:14px system-ui}#err{font-size:12px;color:#ff8396}.legacy{display:none!important}.scroll{overflow:auto}#details{font-size:12px;margin:10px 0}#rows tr{cursor:pointer}@media(min-width:650px){td{font-size:14px}#setups{max-height:380px}}
+
+/* Desktop workspace only. Mobile retains its original document flow. */
+@media (min-width:1100px) and (min-height:600px) and (hover:hover) and (pointer:fine){
+  html,body{height:100%;overflow:hidden}
+  main{max-width:none;width:100%;height:100vh;height:100dvh;margin:0;padding:14px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto auto auto auto minmax(0,1fr) auto;gap:8px 12px;overflow:hidden}
+  main>header{grid-column:1;grid-row:1;gap:12px;min-width:0}
+  main>header h1{font-size:19px}
+  main>.summary{grid-column:2 / 4;grid-row:1;margin:0;min-width:0}
+  main>.summary>div{padding:8px 12px}
+  main>.toolbar{grid-column:1 / 3;grid-row:2;margin:0}
+  main>#err{grid-column:3;grid-row:2;align-self:center;max-height:40px;overflow:auto}
+  main>.notice:not([id]){grid-column:1 / 4;grid-row:3;margin:0;font-size:11px}
+  main>#goalprogress{grid-column:1 / 4;grid-row:4;margin:0;padding:8px 10px;background:#112235;border-radius:7px}
+  main>#entrynotice{grid-column:1 / 3;grid-row:5;margin:0;align-self:center}
+  main>#scancoverage{grid-column:3;grid-row:5;align-self:center}
+  main>section.card{grid-row:6;min-width:0;min-height:0;margin:0;display:flex;flex-direction:column}
+  main>section.card:nth-of-type(1){grid-column:1}
+  main>section.card:nth-of-type(2){grid-column:2}
+  main>section.card:nth-of-type(3){grid-column:3}
+  main>section.card>h2{flex:none;padding:12px;border-bottom:1px solid #23374c}
+  #setups,#positions,#history{flex:1;min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+  main>section.card td{font-size:12px;padding:9px 6px}
+  main>section.card button{font-size:12px;padding:7px}
+  main>section.card thead{top:0;z-index:1}
+  main>details{grid-row:7;min-width:0;margin:0;background:#112235}
+  main>details:nth-of-type(1){grid-column:1}
+  main>details:nth-of-type(2){grid-column:2}
+  main>details:nth-of-type(3){grid-column:3}
+  main>details[open]{position:fixed;z-index:20;top:90px;bottom:20px;left:50%;transform:translateX(-50%);width:min(860px,calc(100vw - 48px));overflow:auto;overscroll-behavior:contain;padding:16px;box-shadow:0 0 0 100vmax #0009}
+  main>details[open]>summary{position:sticky;top:-16px;z-index:2;padding:14px 4px;background:#112235;border-bottom:1px solid #35526d}
+  main>details[open]>summary::after{content:" — click to close";font-size:12px;color:#96a9bf}
+}
 </style></head><body><main><header><div><h1>Paper Trader <small style="display:inline">V19.2</small></h1><small>BTC-1000-50-2026 · $5,000 paper · USDⓈ-M perpetuals</small></div><button id="stopall">Stop auto</button></header>
 <div class="toolbar"><button id="scan">Scan</button><button id="refresh">Refresh</button><button id="earnagain">Earn $100 again</button><small id="status">Ready</small></div><div id="err"></div><div class="notice">$500 margin × 15 = $7,500 exposure. Estimated round-trip costs: $9 at 0.12%. New entries are blocked when costs alone exceed the $35 net loss limit.</div>
 <section class="card"><h2><span id="readycount" class="green">Ready to start · 0</span><small>All eligible crypto · 5m signals · all eligible markets · ready first</small></h2><div id="setups"><table><thead><tr><th>Market / price</th><th>Side</th><th>Signal</th><th>Auto</th></tr></thead><tbody id="rows"></tbody></table></div></section><div id="entrynotice" class="notice"></div>
