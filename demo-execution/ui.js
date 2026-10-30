@@ -1,5 +1,28 @@
 'use strict';
 const $=id=>document.getElementById(id);
+
+const VAULT_ID='btc_demo_credentials_encrypted_v1';
+const pack=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
+const unpack=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function vaultKey(password,salt){
+ const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
+ return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:600000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function saveCredentials(value,password){
+ if(password.length<8)throw Error('Choose a save password with at least 8 characters.');
+ const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+ const key=await vaultKey(password,salt);
+ const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(value)));
+ localStorage.setItem(VAULT_ID,JSON.stringify({v:1,salt:pack(salt),iv:pack(iv),data:pack(data)}));
+}
+async function readCredentials(password){
+ const record=JSON.parse(localStorage.getItem(VAULT_ID)||'null');
+ if(!record)throw Error('No saved credentials on this browser yet.');
+ const key=await vaultKey(password,unpack(record.salt));
+ try{return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unpack(record.iv)},key,unpack(record.data))));}
+ catch{throw Error('Could not unlock saved credentials. Check your save password.');}
+}
+
 let engine=null,releaseLock=null,connectionBusy=false;
 function demoVisible(){
   if(document.hidden)return false;
@@ -54,6 +77,11 @@ $('connectform').onsubmit=async event=>{
   const key=$('key').value.trim(),secret=$('secret').value.trim();if(!key||!secret)return;
   const relayToken=$('localMode').checked?$('relayToken').value.trim():'';
   if($('localMode').checked&&relayToken.length<32){status('Paste the local connection token first.');return;}
+  if($('remember').checked){
+    try{await saveCredentials({key,secret,relayToken,localMode:$('localMode').checked},$('vaultPassword').value);}
+    catch(error){status(error.message);return;}
+  }
+  $('vaultPassword').value='';
   $('relayToken').value='';
   $('key').value='';$('secret').value='';connectionBusy=true;render();status('Connecting to Binance Demo…');
   try{
@@ -102,3 +130,19 @@ window.addEventListener('message',event=>{
  if(!engine?.connected){$('credentials').open=true;status('Connect Demo first to refresh Binance assets.');return;}
  $('refresh').click();
 });
+
+$('unlockSaved').onclick=async()=>{
+ if(connectionBusy||engine?.api?.key)return;
+ $('unlockSaved').disabled=true;
+ try{
+  const saved=await readCredentials($('vaultPassword').value);
+  $('key').value=saved.key;$('secret').value=saved.secret;$('relayToken').value=saved.relayToken;
+  $('localMode').checked=!!saved.localMode;$('remember').checked=false;$('vaultPassword').value='';
+  status('Credentials unlocked. Tick the Demo permission checkbox, then Connect & Start Demo.');
+ }catch(error){status(error.message);}
+ finally{$('unlockSaved').disabled=false;}
+};
+$('forgetSaved').onclick=()=>{
+ localStorage.removeItem(VAULT_ID);$('key').value='';$('secret').value='';$('relayToken').value='';$('vaultPassword').value='';
+ status('Saved credentials deleted from this browser. An existing connection stays active until Disconnect.');
+};
