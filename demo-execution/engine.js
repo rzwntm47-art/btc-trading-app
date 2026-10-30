@@ -176,7 +176,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $500 margin per entry · $5,000 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -197,6 +197,7 @@ class DemoEngine {
     }
     const previous=this.state;
     this.state={version:1,records:[],startedAt:0,goal:false,
+      budgetWalletBaseline:previous.budgetWalletBaseline,
       resetAt:Date.now()+this.api.offset,resetBalance:this.balance,
       archives:[...(previous.archives||[]),{at:Date.now(),records:previous.records,startedAt:previous.startedAt,goal:previous.goal}]};
     try{this.save();}catch(error){this.state=previous;throw error;}
@@ -211,6 +212,16 @@ class DemoEngine {
       // A transport error or timeout does NOT mean the order failed.
       try{return await query();}catch(q){if(!e.uncertain&&[-2013,-2011].includes(q.code))throw e;throw new DemoError('Order result unknown. Entries paused; reconciling the saved client ID.',0,true);}
     }
+  }
+  budgetStatus(){
+    const usdt=this.account?.assets.find(a=>a.asset==='USDT');
+    if(!usdt)return {equity:0,reserved:0,free:0};
+    const wallet=number(usdt.walletBalance),base=this.state.budgetWalletBaseline??wallet;
+    const unrealized=number(usdt.unrealizedProfit??0);
+    const equity=Math.max(0,Math.min(1000,1000+wallet-base+unrealized,wallet+unrealized));
+    const reserved=this.positions.reduce((sum,p)=>sum+Math.abs(number(p.positionInitialMargin||0)),0);
+    const free=Math.max(0,Math.min(800,equity-200)-reserved);
+    return {equity,reserved,free};
   }
   async enter(symbol,signal){
     const epoch=this.stopEpoch;
@@ -229,9 +240,10 @@ class DemoEngine {
     const feeInfo=await this.api.call('GET','/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
-    const reserved=this.positions.reduce((s,p)=>s+Math.abs(number(p.positionInitialMargin||0)),0);
-    const budget=Math.min(500,5000-reserved,number(usdt.availableBalance)/(1+6*fee));
-    if(budget<=0){this.block='Waiting for available USDT margin';return;}
+    if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
+    const capital=this.budgetStatus();
+    const budget=Math.min(100,capital.free/(1+6*fee),number(usdt.availableBalance)/(1+6*fee));
+    if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
     const quantity=rounded(Math.min(budget*3/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
