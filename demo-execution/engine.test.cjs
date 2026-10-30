@@ -300,3 +300,20 @@ test('failed advisory review leaves positions and protection untouched',async()=
  const e=new DemoEngine({offset:0,call:async()=>{throw Error('Offline');}},{version:1,records:[r]},()=>{},()=>{});
  await e.reviewContinuation();assert.match(r.continuation,/unavailable/);assert.equal(r.closedAt,undefined);
 });
+test('scanner wraps to checked markets and keeps one latest row per coin',async()=>{
+ const calls=[],e=new DemoEngine({offset:0,call:async(m,p,q)=>{calls.push(q.symbol);return [];}});
+ e.auto=true;e.symbols=['AUSDT','BUSDT','CUSDT'];await e.scan();await e.scan();
+ assert.deepEqual(calls,['AUSDT','BUSDT','CUSDT','AUSDT','BUSDT','CUSDT']);
+ assert.equal(e.scanned.length,3);assert.equal(e.scanChecked,6);
+});
+test('recent candidate is rechecked before cursor reaches it without starving the full scan',async()=>{
+ const calls=[],e=new DemoEngine({offset:0,call:async(m,p,q)=>{calls.push(q.symbol);return [];}});
+ e.auto=true;e.symbols=Array.from({length:40},(_,i)=>'C'+i+'USDT');e.cursor=15;
+ e.rechecks=new Map([['C0USDT',{seen:Date.now(),checked:Date.now()-31000}]]);
+ await e.scan();assert.equal(calls[0],'C0USDT');assert.equal(calls.length,13);assert.equal(e.cursor,27);
+});
+test('a qualifying signal reports why execution was skipped',async()=>{
+ const f=fixture();f.signal.price=90;await f.e.enter(symbol,f.signal);
+ assert.equal(f.e.entryOutcome,'Price moved too far or breakout reversed');
+ assert.equal(f.calls.some(c=>c.method==='POST'&&c.path==='/fapi/v1/order'),false);
+});
