@@ -1,9 +1,9 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://demo-fapi.binance.com; base-uri 'none'; form-action 'none'; img-src 'self'"><title>Binance Demo Auto Trader</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://demo-fapi.binance.com http://127.0.0.1:10000; base-uri 'none'; form-action 'none'; img-src 'self'"><title>Binance Demo Auto Trader</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#09121d;color:#edf4fc;font:14px system-ui}main{max-width:1400px;margin:auto;padding:16px}header,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between}h1{font-size:22px;margin:8px 0}h2{font-size:16px;margin:0 0 12px}h3{font-size:14px}a{color:#89caff}p,small{color:#a9bdd0;line-height:1.5}small{display:block}section,details,.metric{background:#112235;border:1px solid #294158;border-radius:10px;padding:14px;margin:10px 0}summary{cursor:pointer}label{display:block;margin:10px 0 6px}input[type=password]{width:100%;padding:10px;background:#09121d;color:white;border:1px solid #426079;border-radius:6px}button{padding:9px 12px;background:#234f6b;color:white;border:1px solid #52748c;border-radius:7px;font:inherit;cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{background:#146747}.danger{background:#793447}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.metric b{font-size:23px;display:block;margin-top:4px}.columns{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:12px}.columns section{min-width:0}.scroll{max-height:400px;overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 5px;border-bottom:1px solid #294158;font-size:12px;overflow-wrap:anywhere}th{color:#a9bdd0;background:#112235;position:sticky;top:0}#status{padding:12px;border:1px solid #426079;border-radius:8px;white-space:pre-wrap}#log{font-size:12px;line-height:1.6}.good{color:#4bd9a4}.bad{color:#ff8396}.authgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.columns{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.metric:last-child{grid-column:1/-1}.authgrid{grid-template-columns:1fr}.scroll{max-height:280px}}[hidden]{display:none!important}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.3</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
-<details id="credentials" open><summary>Demo connection</summary><form id="connectform" autocomplete="off"><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Credentials stay in memory until disconnect, refresh or closing this page. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.4</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<details id="credentials" open><summary>Demo connection</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox"> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Credentials stay in memory until disconnect, refresh or closing this page. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start Demo Auto</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Refresh account</button><button id="again" disabled>Earn $100 again</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
 <small>15× isolated · up to $500 margin / $7,500 exposure per trade · $5,000 total margin cap · $35 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
@@ -37,6 +37,11 @@ class DemoAPI {
       const opt={method,headers,signal:ctl.signal,cache:'no-store',credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'};
       let url=DEMO_BASE+path;
       if(method==='POST'){headers['Content-Type']='application/x-www-form-urlencoded';opt.body=query.toString();}else if(query.size)url+='?'+query.toString();
+      if(signed&&this.relayToken){
+        url='http://127.0.0.1:10000/relay';
+        opt.method='POST';opt.headers={'Content-Type':'application/json',Authorization:'Bearer '+this.relayToken};
+        opt.body=JSON.stringify({method,path,query:query.toString(),apiKey:this.key});
+      }
       const r=await this.fetcher(url,opt);
       if(r.status===429||r.status===418)this.blockUntil=Date.now()+Math.max(60000,Number(r.headers?.get('Retry-After')||60)*1000);
       let data;try{data=await r.json();}catch{throw new DemoError('Unreadable Binance response; reconcile order status.',0,method!=='GET');}
@@ -48,7 +53,7 @@ class DemoAPI {
       throw new DemoError(label+': '+(e.name==='AbortError'?'Request timed out.':'The browser could not reach this Binance Demo endpoint (network or CORS block).')+(method==='GET'?' This read request did not submit an order.':' Order status must be reconciled before retrying.'),0,method!=='GET');
     }finally{clearTimeout(timer);}
   }
-  clear(){this.key='';this.signingKey=null;}
+  clear(){this.key='';this.signingKey=null;this.relayToken='';}
 }
 function number(value){if(value===null||value===undefined||value==='')throw new DemoError('Missing Binance numeric value');const n=Number(value);if(!Number.isFinite(n))throw new DemoError('Invalid Binance numeric value');return n;}
 function rounded(value,step,up=false){const n=number(step);if(n<=0||value<=0)throw new DemoError('Invalid quantity or tick size');const decimals=Math.min(12,(String(step).split('.')[1]||'').replace(/0+$/,'').length);return ((up?Math.ceil(value/n-1e-9):Math.floor(value/n+1e-9))*n).toFixed(decimals);}
@@ -363,6 +368,9 @@ async function acquireLock(){
 $('connectform').onsubmit=async event=>{
   event.preventDefault();if(connectionBusy||engine?.connected||!$('demoOnly').checked)return;
   const key=$('key').value.trim(),secret=$('secret').value.trim();if(!key||!secret)return;
+  const relayToken=$('localMode').checked?$('relayToken').value.trim():'';
+  if($('localMode').checked&&relayToken.length<32){status('Paste the local connection token first.');return;}
+  $('relayToken').value='';
   $('key').value='';$('secret').value='';connectionBusy=true;render();status('Connecting to Binance Demo…');
   try{
     await acquireLock();
@@ -372,7 +380,8 @@ $('connectform').onsubmit=async event=>{
     // Only a one-way fingerprint and non-secret order journal are persisted.
     const saved=localStorage.getItem(journalKey);const state=saved?JSON.parse(saved):null;
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
-    engine=new DemoEngine(new DemoAPI(key,signingKey),state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
+    const api=new DemoAPI(key,signingKey);api.relayToken=relayToken;
+    engine=new DemoEngine(api,state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
     await engine.initialize();engine.save();$('credentials').open=false;
   }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();}
