@@ -129,7 +129,7 @@ class DemoEngine {
     this.tradingReady=false;
     const mode=await this.api.call('GET','/fapi/v1/positionSide/dual');const multi=await this.api.call('GET','/fapi/v1/multiAssetsMargin');
     if(mode.dualSidePosition!==false)throw new DemoError('Set Binance Demo Futures to One-way Mode before starting. No account mode was changed.');
-    if(multi.multiAssetsMargin!==false)throw new DemoError('Set Binance Demo Futures to Single-Asset Mode for isolated trades. No account mode was changed.');
+    if(multi.multiAssetsMargin!==false)throw new DemoError('Set Binance Demo Futures to Single-Asset Mode for USDT cross-margin trades. No account mode was changed.');
     const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);
     if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');
     this.orderUniverse=info.symbols.filter(m=>typeof m.symbol==='string'&&/^[A-Z0-9_]+$/.test(m.symbol)).map(m=>m.symbol);
@@ -198,7 +198,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · filtered signals · adaptive 3× / 5× / 8× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -263,7 +263,7 @@ class DemoEngine {
     if(Math.abs(price-signal.price)>.5*signal.atr||(signal.side==='BUY'?price<=signal.high:price>=signal.low))return;
     const feeInfo=await this.api.call('GET','/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
-    const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
+    const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
     const selectedLeverage=signal.leverage;
@@ -273,7 +273,7 @@ class DemoEngine {
     const quantity=rounded(Math.min(budget*selectedLeverage/price,9/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=9){this.block=symbol+': quantity/cost filter';return;}
-    try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'ISOLATED'});}catch(e){if(e.code!==-4046)throw e;}
+    try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
     const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
     if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;

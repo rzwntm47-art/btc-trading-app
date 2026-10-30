@@ -59,7 +59,7 @@ test('balance conversion requires fresh complete rates',()=>{
 test('entry journals before POST, uses selected leverage, and installs exchange protection',async()=>{
  const f=fixture();await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,1);assert(f.e.active()[0].protected);assert.equal(f.algos.size,2);
  const entry=f.calls.find(c=>c.path==='/fapi/v1/order'&&c.method==='POST');assert.equal(entry.p.quantity,'2.901');assert(f.saved.some(s=>s.records[0]?.id===entry.p.newClientOrderId&&!s.records[0].orderId));
- assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,3);assert.equal(f.calls.find(c=>c.path==='/fapi/v1/marginType').p.marginType,'ISOLATED');
+ assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,3);assert.equal(f.calls.find(c=>c.path==='/fapi/v1/marginType').p.marginType,'CROSSED');
  await f.e.enter(symbol,f.signal);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/order'&&c.method==='POST'&&!c.p.reduceOnly).length,1);
 });
 test('timeout after accepted entry reconciles client ID without duplicate POST',async()=>{
@@ -224,4 +224,10 @@ test('higher leverage remains limited by volatility risk sizing',async()=>{
  assert(qty*(5+.0005*205)<=9);assert(qty*100<=100*leverage);
  assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,leverage);
  }
+});
+
+test('existing position is not converted to Cross or given another entry',async()=>{
+ const f=fixture();f.position={symbol,positionSide:'BOTH',positionAmt:'1',entryPrice:'100',markPrice:'100',unRealizedProfit:'0',positionInitialMargin:'100',marginType:'isolated'};
+ await f.e.enter(symbol,f.signal);
+ assert(!f.calls.some(c=>c.method==='POST'));assert.equal(f.position.marginType,'isolated');
 });
