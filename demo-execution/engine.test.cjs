@@ -35,7 +35,7 @@ function fixture(){
     }
     throw Error('Unmocked '+method+' '+path);
   }};
-  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));
+  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.overrideUntil=0;
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
   const signal={qualityConfirmed:true,strength:1,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   return {e,api,signal,calls,saved,orders,algos,get position(){return position},set position(p){position=p},set unknownEntry(v){unknownEntry=v},set failProtection(v){failProtection=v},set failClose(v){failClose=v}};
@@ -370,4 +370,19 @@ test('BUY and SELL profit floors rise, never fall, and close on pullback',async(
   setNet(1.99);await f.e.reconcile();assert.equal(f.e.active().length,0);
   assert.equal(r.closeReason,'Profit pullback to $2.00 floor');
  }
+});
+test('50x override expires at its absolute deadline and retains $5 risk sizing',async()=>{
+ const f=fixture();f.e.overrideUntil=Date.now()+3600000;f.signal.exitPolicy='manual-profit-60s-loss';
+ assert.equal(f.e.entryLeverage(f.signal,f.e.overrideUntil-1),50);
+ assert.equal(f.e.entryLeverage(f.signal,f.e.overrideUntil),3);
+ await f.e.enter(symbol,f.signal);
+ assert.equal(f.calls.find(c=>c.path==='/fapi/v1/leverage').p.leverage,50);
+ const r=f.e.active()[0];assert.equal(r.leverage,50);assert.equal(r.lossLimit,5);
+ assert.ok(r.filledQty*(f.signal.stopDistance+r.fee*(200+f.signal.stopDistance))<=5);
+});
+test('expiry during leverage setup prevents a new 50x order',async()=>{
+ const f=fixture();f.e.overrideUntil=Date.now()+3600000;
+ const original=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await original(m,p,q,s);if(p==='/fapi/v1/leverage')f.e.overrideUntil=0;return r;};
+ await f.e.enter(symbol,f.signal);assert.equal(f.calls.some(c=>c.path==='/fapi/v1/order'&&c.method==='POST'),false);
+ assert.match(f.e.entryOutcome,/window expired/);
 });

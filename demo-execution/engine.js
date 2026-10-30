@@ -1,4 +1,5 @@
 'use strict';
+const LEVERAGE_OVERRIDE_UNTIL=1793405934000; // 31 Oct 2026, 04:18:54 Asia/Dubai
 const DEMO_BASE = 'https://demo-fapi.binance.com';
 const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
 const PRIVATE = {
@@ -118,10 +119,11 @@ function combinedValue(assets,indices,now){
 }
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
-    this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
+    this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
     for(const r of this.state.records)if(!/^[A-Z0-9]+USDT$/.test(r.symbol)||!/^bd1_[a-zA-Z0-9_-]+$/.test(r.id)||!['BUY','SELL'].includes(r.side))throw new DemoError('Invalid saved demo order record.');
   }
+  entryLeverage(signal,now=Date.now()+this.api.offset){return now<this.overrideUntil?50:signal.leverage;}
   save(){this.persist(this.state);}
   event(text){this.events.unshift({at:Date.now(),text});this.events=this.events.slice(0,60);this.notify();}
   pause(reason){this.auto=false;this.stopEpoch++;if(reason)this.event(reason);}
@@ -291,7 +293,7 @@ class DemoEngine {
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
-    const selectedLeverage=signal.leverage;
+    const selectedLeverage=this.entryLeverage(signal);
     const budget=Math.min(100,capital.free/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
@@ -303,8 +305,9 @@ class DemoEngine {
     const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
     if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return skip('Auto stopped before entry dispatch');
+    if(this.entryLeverage(signal)!==selectedLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
-    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
+    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -407,7 +410,7 @@ class DemoEngine {
       if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,bars,hourly,Date.now()+this.api.offset,r=>reason=r,300000);if(signal)signal={...signal,exitPolicy:"manual-profit-60s-loss",intervalMs};}
       this.scanChecked=(this.scanChecked||0)+1;
       this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
-      this.scanned.unshift({symbol,reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      this.scanned.unshift({symbol,reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?this.entryLeverage(signal):undefined,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){try{await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.scanned[0].reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);this.scanned[0].reason=this.entryOutcome;}catch(e){this.scanned[0].reason='Entry failed: '+e.message;throw e;}finally{this.notify();}}
     }
   }
