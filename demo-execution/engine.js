@@ -252,7 +252,7 @@ class DemoEngine {
     const epoch=this.stopEpoch;
     if(!this.auto||this.state.goal||this.owned(symbol))return;
     if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return;
-    if(this.active().length>=3){this.block='Maximum 3 bot positions; waiting for a close';return;}
+    const lossLimit=signal.exitPolicy==='manual-profit-60s-loss'?5:9;
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<300000)))return;
     await this.refresh();
     if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))return;
@@ -273,21 +273,21 @@ class DemoEngine {
     const budget=Math.min(100,capital.free/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    const quantity=rounded(Math.min(budget*selectedLeverage/price,9/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    const quantity=rounded(Math.min(budget*selectedLeverage/price,lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
-    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=9){this.block=symbol+': quantity/cost filter';return;}
+    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=lossLimit){this.block=symbol+': quantity/cost filter';return;}
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
     const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
     if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
-    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exitPolicy:signal.exitPolicy,exits:[],protected:false};
+    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
       // Install protection directly from a confirmed fill before slower balance reads.
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
-        try{await this.ensureExit(r,filled,'sl',-9);if(!r.closedAt&&r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
+        try{await this.ensureExit(r,filled,'sl',-(r.lossLimit??9));if(!r.closedAt&&r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
         catch(e){this.pause('Protection failed immediately after fill.');await this.close(symbol,'Protection failure');throw e;}
       }
     }
@@ -337,12 +337,12 @@ class DemoEngine {
       r.openedAt=r.openedAt||Number(order.updateTime)||r.at;r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       try{
-        await this.ensureExit(r,p,'sl',-9);if(r.closedAt||r.pendingClose)continue;
+        await this.ensureExit(r,p,'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
         if(r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
         if(r.exitPolicy==='manual-profit-60s-loss'){
-          if(net<=-9||(net<0&&Date.now()+this.api.offset-r.openedAt>=60000)){await this.close(r.symbol,net<=-9?'$9 loss threshold':'Losing after 60 seconds');continue;}
+          if(net<=-(r.lossLimit??9)||(net<0&&Date.now()+this.api.offset-r.openedAt>=60000)){await this.close(r.symbol,net<=-(r.lossLimit??9)?'$'+(r.lossLimit??9)+' loss threshold':'Losing after 60 seconds');continue;}
           this.save();continue;
         }
         if(net<=-9||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-9?'$9 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
@@ -370,16 +370,39 @@ class DemoEngine {
       if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);}
     }
   }
+  async reviewContinuation(){
+    // Advisory only; risk reconciliation always runs first. Review one position per tick.
+    const r=this.active().filter(r=>r.exitPolicy==='manual-profit-60s-loss'&&r.netEstimate>0&&Date.now()-(r.reviewAt||0)>=30000).sort((a,b)=>(a.reviewAt||0)-(b.reviewAt||0))[0];
+    if(!r)return;
+    r.reviewAt=Date.now();
+    try{
+      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'1m',limit:25},false);
+      const trend=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'5m',limit:25},false);
+      const now=Date.now()+this.api.offset;
+      const check=(raw,ms)=>{
+        breakout(raw,now,ms); // Validate OHLC and continuity, even without a breakout.
+        const bars=raw.filter(b=>number(b[6])<now);
+        if(bars.length<21||now-number(bars.at(-1)[6])>ms+15000)throw Error('Stale candles');
+        const mean=a=>a.reduce((v,b)=>v+number(b[4]),0)/a.length;
+        const fast=mean(bars.slice(-5)),slow=mean(bars.slice(-20));
+        const last=number(bars.at(-1)[4]),prev=number(bars.at(-2)[4]);
+        return r.side==='BUY'?last>fast&&fast>slow&&last>prev:last<fast&&fast<slow&&last<prev;
+      };
+      r.continuation=check(raw,60000)&&check(trend,300000)?'1m and 5m trend support this direction; profit is not guaranteed':'Continuation weakened or mixed; review for manual profit-taking';
+    }catch(e){r.continuation='Trend review unavailable: '+e.message;}
+    this.save();this.notify();
+  }
   async tick(){
     if(!this.connected||this.busy)return;this.busy=true;
     try{
       if(!this.tradingReady){await this.refreshBalance();return;}
       await this.refresh();await this.reconcile();if(Date.now()-this.lastIncome>15000)await this.updateIncome();
       if(this.auto&&Date.now()-this.metaAt>600000){const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');for(const symbol of [...this.meta.keys()]){const m=info.symbols.find(x=>x.symbol===symbol&&x.status==='TRADING');if(m)this.meta.set(symbol,m);else this.meta.delete(symbol);}this.symbols=[...this.meta.keys()].sort();this.metaAt=Date.now();}
-      if(this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; closing bot positions.');this.save();}
+      if(this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; new entries paused. Manual-profit positions remain open.');this.save();}
       if(this.state.goal)for(const r of this.active().filter(r=>r.exitPolicy!=='manual-profit-60s-loss'))await this.close(r.symbol,'$100 session goal');
       if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol)))this.pause('Unmanaged position detected; auto entries stopped.');
       if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
+      await this.reviewContinuation();
       if(this.auto&&Date.now()-this.lastScan>=5000)await this.scan();
       this.block='';
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}

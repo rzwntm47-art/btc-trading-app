@@ -255,10 +255,10 @@ test('minute policy has only SL, closes losing after 60s and leaves profit for m
   f.position.unRealizedProfit='-1';f.position.markPrice='99.7';await f.e.reconcile();
   assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'Losing after 60 seconds');
 });
-test('minute policy enforces $9 loss before 60 seconds',async()=>{
+test('minute policy enforces $5 loss before 60 seconds',async()=>{
   const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
-  const r=f.e.active()[0];f.position.unRealizedProfit='-9';await f.e.reconcile();
-  assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$9 loss threshold');
+  const r=f.e.active()[0];f.position.unRealizedProfit='-5';await f.e.reconcile();
+  assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$5 loss threshold');
 });
 test('one minute breakout accepts 1m candles and rejects 5m spacing',()=>{
   const end=Math.floor(Date.now()/60000)*60000-1;
@@ -267,4 +267,36 @@ test('one minute breakout accepts 1m candles and rejects 5m spacing',()=>{
   assert.equal(breakout(bars,end+1000,60000).side,'BUY');
   assert.throws(()=>breakout(bars,end+1000),/candles/);
   assert.equal(breakout(bars,end+76000,60000),null);
+});
+test('new minute BUY and SELL entries install a fee-adjusted $5 stop',async()=>{
+ for(const side of ['BUY','SELL']){
+  const f=fixture();Object.assign(f.signal,{side,exitPolicy:'manual-profit-60s-loss',high:99,low:101});
+  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.equal(r.lossLimit,5);
+  const sl=r.exits.find(x=>x.kind==='sl');const q=r.filledQty,p=Number(sl.triggerPrice),sign=side==='BUY'?1:-1;
+  const net=sign*(p-r.entry)*q-r.fee*q*(r.entry+p);
+  assert.ok(Math.abs(net+5)<.05);assert.equal(r.exits.length,1);
+ }
+});
+test('three existing records do not impose a count limit on a new entry',async()=>{
+ const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';
+ f.e.active=()=>[{},{},{}];f.e.reconcile=async()=>{};
+ await f.e.enter(symbol,f.signal);
+ assert.ok(f.calls.some(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly));
+});
+test('continuation review supports both directions and never sends orders',async()=>{
+ for(const side of ['BUY','SELL']){
+  const r={id:'bd1_test',symbol:'BTCUSDT',side,exitPolicy:'manual-profit-60s-loss',netEstimate:2,exits:[]};
+  const api={offset:0,call:async(method,path,p)=>{
+   assert.equal(method,'GET');assert.equal(path,'/fapi/v1/klines');
+   const ms=p.interval==='1m'?60000:300000,end=Math.floor(Date.now()/ms)*ms-1;
+   return Array.from({length:25},(_,i)=>{const v=side==='BUY'?100+i:150-i;return [end-(24-i)*ms-ms+1,v,v+1,v-1,v,100,end-(24-i)*ms];});
+  }};
+  const e=new DemoEngine(api,{version:1,records:[r]},()=>{},()=>{});await e.reviewContinuation();
+  assert.match(r.continuation,/support this direction/);assert.ok(r.reviewAt);
+ }
+});
+test('failed advisory review leaves positions and protection untouched',async()=>{
+ const r={id:'bd1_test',symbol:'BTCUSDT',side:'BUY',exitPolicy:'manual-profit-60s-loss',netEstimate:2,exits:[]};
+ const e=new DemoEngine({offset:0,call:async()=>{throw Error('Offline');}},{version:1,records:[r]},()=>{},()=>{});
+ await e.reviewContinuation();assert.match(r.continuation,/unavailable/);assert.equal(r.closedAt,undefined);
 });
