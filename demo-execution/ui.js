@@ -52,6 +52,9 @@ async function acquireLock(){
 $('connectform').onsubmit=async event=>{
   event.preventDefault();if(connectionBusy||engine?.connected||!$('demoOnly').checked)return;
   const key=$('key').value.trim(),secret=$('secret').value.trim();if(!key||!secret)return;
+  const relayToken=$('localMode').checked?$('relayToken').value.trim():'';
+  if($('localMode').checked&&relayToken.length<32){status('Paste the local connection token first.');return;}
+  $('relayToken').value='';
   $('key').value='';$('secret').value='';connectionBusy=true;render();status('Connecting to Binance Demo…');
   try{
     await acquireLock();
@@ -61,7 +64,8 @@ $('connectform').onsubmit=async event=>{
     // Only a one-way fingerprint and non-secret order journal are persisted.
     const saved=localStorage.getItem(journalKey);const state=saved?JSON.parse(saved):null;
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
-    engine=new DemoEngine(new DemoAPI(key,signingKey),state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
+    const api=new DemoAPI(key,signingKey);api.relayToken=relayToken;
+    engine=new DemoEngine(api,state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
     await engine.initialize();engine.save();$('credentials').open=false;
   }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();}
