@@ -2,11 +2,11 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#09121d;color:#edf4fc;font:14px system-ui}main{max-width:1400px;margin:auto;padding:16px}header,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between}h1{font-size:22px;margin:8px 0}h2{font-size:16px;margin:0 0 12px}h3{font-size:14px}a{color:#89caff}p,small{color:#a9bdd0;line-height:1.5}small{display:block}section,details,.metric{background:#112235;border:1px solid #294158;border-radius:10px;padding:14px;margin:10px 0}summary{cursor:pointer}label{display:block;margin:10px 0 6px}input[type=password]{width:100%;padding:10px;background:#09121d;color:white;border:1px solid #426079;border-radius:6px}button{padding:9px 12px;background:#234f6b;color:white;border:1px solid #52748c;border-radius:7px;font:inherit;cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{background:#146747}.danger{background:#793447}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.metric b{font-size:23px;display:block;margin-top:4px}.columns{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:12px}.columns section{min-width:0}.scroll{max-height:400px;overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 5px;border-bottom:1px solid #294158;font-size:12px;overflow-wrap:anywhere}th{color:#a9bdd0;background:#112235;position:sticky;top:0}#status{padding:12px;border:1px solid #426079;border-radius:8px;white-space:pre-wrap}#log{font-size:12px;line-height:1.6}.good{color:#4bd9a4}.bad{color:#ff8396}.authgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.columns{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.metric:last-child{grid-column:1/-1}.authgrid{grid-template-columns:1fr}.scroll{max-height:280px}}[hidden]{display:none!important}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.4</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.5</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Demo connection</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox"> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Credentials stay in memory until disconnect, refresh or closing this page. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start Demo Auto</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Refresh account</button><button id="again" disabled>Earn $100 again</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
-<small>15× isolated · up to $500 margin / $7,500 exposure per trade · $5,000 total margin cap · $35 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
+<small>3× isolated · up to $500 margin / $1,500 exposure per trade · $5,000 total margin cap · $9 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
 <div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>USDT account session P&amp;L / $100</small><b id="session">—</b><small id="sessionNote">Realized P&amp;L + fees + funding + open P&amp;L</small></div></div>
 <div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th></tr></thead><tbody id="setups"></tbody></table></div></section><section><h2>Binance Demo positions</h2><div class="scroll"><table><thead><tr><th>Coin / side</th><th>Entry / mark</th><th>Open P&amp;L</th><th>Protection / action</th></tr></thead><tbody id="positions"></tbody></table></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
@@ -175,7 +175,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · 15× isolated · up to $500 margin per entry · $5,000 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $500 margin per entry · $5,000 total margin cap');
   }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.state.startedAt=Date.now()+this.api.offset;this.state.goal=false;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
@@ -204,15 +204,15 @@ class DemoEngine {
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
     const reserved=this.positions.reduce((s,p)=>s+Math.abs(number(p.positionInitialMargin||0)),0);
-    const budget=Math.min(500,5000-reserved,number(usdt.availableBalance)/(1+30*fee));
+    const budget=Math.min(500,5000-reserved,number(usdt.availableBalance)/(1+6*fee));
     if(budget<=0){this.block='Waiting for available USDT margin';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    const quantity=rounded(Math.min(budget*15/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    const quantity=rounded(Math.min(budget*3/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
-    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=35){this.block=symbol+': quantity/cost filter';return;}
+    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=9){this.block=symbol+': quantity/cost filter';return;}
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'ISOLATED'});}catch(e){if(e.code!==-4046)throw e;}
-    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:15});
-    if(number(leverage.leverage)!==15||number(leverage.maxNotionalValue)<notional)throw new DemoError('15× leverage or position size not accepted');
+    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:3});
+    if(number(leverage.leverage)!==3||number(leverage.maxNotionalValue)<notional)throw new DemoError('3× leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exits:[],protected:false};
@@ -221,7 +221,7 @@ class DemoEngine {
       // Install protection directly from a confirmed fill before slower balance reads.
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
-        try{await this.ensureExit(r,filled,'sl',-35);if(!r.closedAt)await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
+        try{await this.ensureExit(r,filled,'sl',-9);if(!r.closedAt)await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
         catch(e){this.pause('Protection failed immediately after fill.');await this.close(symbol,'Protection failure');throw e;}
       }
     }
@@ -271,11 +271,11 @@ class DemoEngine {
       r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       try{
-        await this.ensureExit(r,p,'sl',-35);if(r.closedAt||r.pendingClose)continue;
+        await this.ensureExit(r,p,'sl',-9);if(r.closedAt||r.pendingClose)continue;
         await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
-        if(net<=-35||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-35?'$35 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
+        if(net<=-9||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-9?'$9 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
         if(r.peak>10)await this.ensureExit(r,p,'floor',10);
         this.save();
       }catch(e){
