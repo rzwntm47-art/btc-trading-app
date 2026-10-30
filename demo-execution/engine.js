@@ -160,7 +160,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · 15× isolated · up to $500 margin per entry · $5,000 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $500 margin per entry · $5,000 total margin cap');
   }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.state.startedAt=Date.now()+this.api.offset;this.state.goal=false;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
@@ -189,15 +189,15 @@ class DemoEngine {
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
     const reserved=this.positions.reduce((s,p)=>s+Math.abs(number(p.positionInitialMargin||0)),0);
-    const budget=Math.min(500,5000-reserved,number(usdt.availableBalance)/(1+30*fee));
+    const budget=Math.min(500,5000-reserved,number(usdt.availableBalance)/(1+6*fee));
     if(budget<=0){this.block='Waiting for available USDT margin';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    const quantity=rounded(Math.min(budget*15/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    const quantity=rounded(Math.min(budget*3/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
-    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=35){this.block=symbol+': quantity/cost filter';return;}
+    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=9){this.block=symbol+': quantity/cost filter';return;}
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'ISOLATED'});}catch(e){if(e.code!==-4046)throw e;}
-    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:15});
-    if(number(leverage.leverage)!==15||number(leverage.maxNotionalValue)<notional)throw new DemoError('15× leverage or position size not accepted');
+    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:3});
+    if(number(leverage.leverage)!==3||number(leverage.maxNotionalValue)<notional)throw new DemoError('3× leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exits:[],protected:false};
@@ -206,7 +206,7 @@ class DemoEngine {
       // Install protection directly from a confirmed fill before slower balance reads.
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
-        try{await this.ensureExit(r,filled,'sl',-35);if(!r.closedAt)await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
+        try{await this.ensureExit(r,filled,'sl',-9);if(!r.closedAt)await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;this.save();}
         catch(e){this.pause('Protection failed immediately after fill.');await this.close(symbol,'Protection failure');throw e;}
       }
     }
@@ -256,11 +256,11 @@ class DemoEngine {
       r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       try{
-        await this.ensureExit(r,p,'sl',-35);if(r.closedAt||r.pendingClose)continue;
+        await this.ensureExit(r,p,'sl',-9);if(r.closedAt||r.pendingClose)continue;
         await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
-        if(net<=-35||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-35?'$35 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
+        if(net<=-9||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-9?'$9 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
         if(r.peak>10)await this.ensureExit(r,p,'floor',10);
         this.save();
       }catch(e){
