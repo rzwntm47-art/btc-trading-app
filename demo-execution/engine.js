@@ -93,6 +93,7 @@ class DemoEngine {
     if(multi.multiAssetsMargin!==false)throw new DemoError('Set Binance Demo Futures to Single-Asset Mode for isolated trades. No account mode was changed.');
     const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);
     if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');
+    this.orderUniverse=info.symbols.filter(m=>typeof m.symbol==='string'&&/^[A-Z0-9_]+$/.test(m.symbol)).map(m=>m.symbol);
     for(const m of info.symbols)if(m.status==='TRADING'&&m.contractType==='PERPETUAL'&&m.quoteAsset==='USDT'&&m.marginAsset==='USDT'&&m.underlyingType==='COIN'&&/^[A-Z0-9]+USDT$/.test(m.symbol)&&!['USDC','USDT','BUSD','FDUSD','TUSD','DAI','USDP','USDD','USD1','USDE'].includes(m.baseAsset))this.meta.set(m.symbol,m);
     this.symbols=[...this.meta.keys()].sort();if(!this.symbols.length)throw new DemoError('No eligible crypto futures found');
     this.metaAt=Date.now();await this.refresh();this.tradingReady=true;
@@ -100,13 +101,37 @@ class DemoEngine {
   async refresh(){
     const account=await this.api.call('GET','/fapi/v3/account');
     const positions=await this.api.call('GET','/fapi/v3/positionRisk');
-    const orders=await this.api.call('GET','/fapi/v1/openOrders');
-    const algos=await this.api.call('GET','/fapi/v1/openAlgoOrders');
+    const orders=await this.readOrderInventory('/fapi/v1/openOrders');
+    const algos=await this.readOrderInventory('/fapi/v1/openAlgoOrders');
     if(!Array.isArray(account.assets)||!Array.isArray(positions)||!Array.isArray(orders)||!Array.isArray(algos))throw new DemoError('Invalid Binance account or order response');
     for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);if(number(p.positionAmt)!==0&&p.positionSide!=='BOTH')throw new DemoError('Hedge position detected. Auto entries stopped.');}
     this.account=account;this.positions=positions;this.orders=orders;this.algos=algos;this.accountAt=Date.now();
     try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}
     this.notify();
+  }
+  async readOrderInventory(path){
+    this.inventoryModes??={};this.inventoryCache??={};
+    if(!this.inventoryModes[path]){
+      try{const all=await this.api.call('GET',path);if(!Array.isArray(all))throw new DemoError('Invalid order inventory');return all;}
+      catch(e){if(e.code!==0||e.uncertain||!this.orderUniverse?.length)throw e;this.inventoryModes[path]='per-symbol';this.event('All-market order read failed. Checking each contract individually; this can take a few minutes.');}
+    }
+    const cached=this.inventoryCache[path];
+    if(cached&&Date.now()-cached.at<60000){
+      // Refresh owned contracts even between complete account-wide scans.
+      const symbols=new Set(this.active().map(r=>r.symbol));const rows=cached.rows.filter(x=>!symbols.has(x.symbol));
+      for(const symbol of symbols){const a=await this.api.call('GET',path,{symbol});if(!Array.isArray(a))throw new DemoError('Invalid symbol order inventory');rows.push(...a);}
+      return rows;
+    }
+    const rows=[];const epoch=this.stopEpoch;
+    for(let i=0;i<this.orderUniverse.length;i+=2){
+      if(epoch!==this.stopEpoch)throw new DemoError('Order check cancelled by Stop.');
+      const batch=this.orderUniverse.slice(i,i+2);
+      const results=await Promise.all(batch.map(symbol=>this.api.call('GET',path,{symbol})));
+      for(const a of results){if(!Array.isArray(a))throw new DemoError('Incomplete symbol order inventory');rows.push(...a);}
+      if(i%40===0)this.event('Checking orders: '+Math.min(i+2,this.orderUniverse.length)+' / '+this.orderUniverse.length+' contracts');
+      if(i+2<this.orderUniverse.length)await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    this.inventoryCache[path]={rows,at:Date.now()};return rows;
   }
   async updateIncome(){
     if(!this.state.startedAt){this.income=[];return;}
@@ -147,6 +172,8 @@ class DemoEngine {
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<300000)))return;
     await this.refresh();
     if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))return;
+    // Candidate-specific reads prevent stale cached inventories admitting duplicates.
+    for(const path of ['/fapi/v1/openOrders','/fapi/v1/openAlgoOrders']){const existing=await this.api.call('GET',path,{symbol});if(!Array.isArray(existing))throw new DemoError('Order check incomplete');if(existing.length)return;}
     if(Date.now()-this.metaAt>900000)throw new DemoError('Exchange filters expired. Reconnect to refresh.');
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return;
