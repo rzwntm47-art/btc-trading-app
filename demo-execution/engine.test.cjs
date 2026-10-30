@@ -231,3 +231,16 @@ test('existing position is not converted to Cross or given another entry',async(
  await f.e.enter(symbol,f.signal);
  assert(!f.calls.some(c=>c.method==='POST'));assert.equal(f.position.marginType,'isolated');
 });
+
+test('scanner rotates bounded batches and explains WAIT without submitting orders',async()=>{
+  const calls=[];
+  const api={offset:0,call:async(method,path,p)=>{calls.push(p.symbol);assert.equal(path,'/fapi/v1/klines');return [];}};
+  const e=new DemoEngine(api);e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
+  await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
+  await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 5m breakout'));
+  e.auto=false;await e.scan();assert.equal(calls.length,24);
+});
+test('scanner handles an empty universe without requests',async()=>{
+  const e=new DemoEngine({call:async()=>assert.fail('Unexpected request')});e.auto=true;await e.scan();
+});

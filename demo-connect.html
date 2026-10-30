@@ -4,7 +4,7 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.14</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.15</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for USDT cross-margin trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" disabled>New $100 session</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
@@ -83,24 +83,27 @@ function breakout(raw,now){
   return side&&atr>0?{side,close:latest.end,price:latest.c,high,low,atr}:null;
 }
 // Experimental entry filters: score describes rule agreement, not win probability.
-function qualifySetup(signal,raw,hourly,now){
+function qualifySetup(signal,raw,hourly,now,explain=()=>{}){
+  const reject=reason=>{explain(reason);return null;};
   if(!signal)return null;
   const bars=raw.filter(b=>number(b[6])<now),hours=hourly.filter(b=>number(b[6])<now);
-  if(bars.length<21||hours.length<50)return null;
+  if(bars.length<21||hours.length<50)return reject('Not enough candle history');
   for(let i=0;i<hours.length;i++){
     const b=hours[i];if(number(b[4])<=0||number(b[6])-number(b[0])!==3599999||(i&&number(b[0])-number(hours[i-1][0])!==3600000))return null;
   }
-  if(now-number(hours.at(-1)[6])>3615000)return null;
+  if(now-number(hours.at(-1)[6])>3615000)return reject('Hourly candles are stale');
   const mean=a=>a.reduce((v,b)=>v+number(b[4]),0)/a.length;
   const fast=mean(hours.slice(-20)),slow=mean(hours.slice(-50)),prior=mean(hours.slice(-21,-1)),last=number(hours.at(-1)[4]);
   const buy=signal.side==='BUY';
-  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return null;
+  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return reject('Hourly trend does not confirm breakout');
   const b=bars.at(-1),range=number(b[2])-number(b[3]);if(range<=0)return null;
   const volumeMean=bars.slice(-21,-1).reduce((v,b)=>v+number(b[5]),0)/20;
   if(volumeMean<=0)return null;
   const volumeRatio=number(b[5])/volumeMean,closeStrength=buy?(number(b[4])-number(b[3]))/range:(number(b[2])-number(b[4]))/range;
   const body=Math.abs(number(b[4])-number(b[1]))/range;
-  if(volumeRatio<1.5||closeStrength<.75||body<.5||range>2*signal.atr)return null;
+  if(volumeRatio<1.5)return reject('Volume below 1.5× average');
+  if(closeStrength<.75||body<.5)return reject('Breakout candle lacks confirmation');
+  if(range>2*signal.atr)return reject('Breakout candle exceeds volatility limit');
   const score=1+Number(volumeRatio>=2)+Number(closeStrength>=.9&&body>=.7);
   return {...signal,qualityConfirmed:true,strength:score,leverage:score===3?8:score===2?5:3,stopDistance:1.5*signal.atr,volumeRatio};
 }
@@ -367,15 +370,16 @@ class DemoEngine {
     }
   }
   async scan(){
-    if(!this.auto||this.shouldScan?.()===false)return;
+    if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
     const epoch=this.stopEpoch;this.lastScan=Date.now();
-    for(let i=0;i<12&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
+    for(let i=0;i<Math.min(12,this.symbols.length)&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
       const symbol=this.symbols[this.cursor++%this.symbols.length];if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
       const candidate=breakout(raw,Date.now()+this.api.offset);
-      let signal=null;
-      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset);}
-      this.scanned.unshift({symbol,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      let signal=null,reason='No closed 5m breakout';
+      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset,r=>reason=r);}
+      this.scanChecked=(this.scanChecked||0)+1;
+      this.scanned.unshift({symbol,reason:signal?'Entry checks required':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);}
     }
   }
@@ -389,7 +393,7 @@ class DemoEngine {
       if(this.state.goal)for(const r of this.active())await this.close(r.symbol,'$100 session goal');
       if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol)))this.pause('Unmanaged position detected; auto entries stopped.');
       if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
-      if(this.auto&&Date.now()-this.lastScan>30000)await this.scan();
+      if(this.auto&&Date.now()-this.lastScan>=5000)await this.scan();
       this.block='';
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
@@ -447,8 +451,8 @@ function render(){
   const usdt=e.account?.assets.find(a=>a.asset==='USDT');$('available').textContent=money(Number(usdt?.availableBalance));$('wallet').textContent='USDT wallet: '+money(Number(usdt?.walletBalance));
   $('session').textContent=e.state.startedAt?money(e.sessionNet()):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
   $('sessionNote').textContent=e.state.startedAt?'Since '+new Date(e.state.startedAt).toLocaleString()+(e.state.goal?' · goal reached':''):'Starts when you enable auto';
-  $('scanTitle').textContent='Setups · '+e.symbols.length+' eligible coins';$('setups').replaceChildren();
-  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG · '+s.leverage+'×':s.side==='SELL'?'SHORT · '+s.leverage+'×':'WAIT',new Date(s.at).toLocaleTimeString()]);
+  $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
+  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG · '+s.leverage+'×':s.side==='SELL'?'SHORT · '+s.leverage+'×':'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);
@@ -565,4 +569,5 @@ $('resetDemo').onclick=()=>run(()=>engine.resetFromBinance());
 
 $('positionsTab').onclick=()=>{ $('positions').hidden=false;$('orderPanel').hidden=true;$('positionsTab').classList.add('selected');$('ordersTab').classList.remove('selected');};
 $('ordersTab').onclick=()=>{ $('positions').hidden=true;$('orderPanel').hidden=false;$('ordersTab').classList.add('selected');$('positionsTab').classList.remove('selected');};
+
 </script></body></html>

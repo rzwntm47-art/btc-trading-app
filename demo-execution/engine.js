@@ -66,24 +66,27 @@ function breakout(raw,now){
   return side&&atr>0?{side,close:latest.end,price:latest.c,high,low,atr}:null;
 }
 // Experimental entry filters: score describes rule agreement, not win probability.
-function qualifySetup(signal,raw,hourly,now){
+function qualifySetup(signal,raw,hourly,now,explain=()=>{}){
+  const reject=reason=>{explain(reason);return null;};
   if(!signal)return null;
   const bars=raw.filter(b=>number(b[6])<now),hours=hourly.filter(b=>number(b[6])<now);
-  if(bars.length<21||hours.length<50)return null;
+  if(bars.length<21||hours.length<50)return reject('Not enough candle history');
   for(let i=0;i<hours.length;i++){
     const b=hours[i];if(number(b[4])<=0||number(b[6])-number(b[0])!==3599999||(i&&number(b[0])-number(hours[i-1][0])!==3600000))return null;
   }
-  if(now-number(hours.at(-1)[6])>3615000)return null;
+  if(now-number(hours.at(-1)[6])>3615000)return reject('Hourly candles are stale');
   const mean=a=>a.reduce((v,b)=>v+number(b[4]),0)/a.length;
   const fast=mean(hours.slice(-20)),slow=mean(hours.slice(-50)),prior=mean(hours.slice(-21,-1)),last=number(hours.at(-1)[4]);
   const buy=signal.side==='BUY';
-  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return null;
+  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return reject('Hourly trend does not confirm breakout');
   const b=bars.at(-1),range=number(b[2])-number(b[3]);if(range<=0)return null;
   const volumeMean=bars.slice(-21,-1).reduce((v,b)=>v+number(b[5]),0)/20;
   if(volumeMean<=0)return null;
   const volumeRatio=number(b[5])/volumeMean,closeStrength=buy?(number(b[4])-number(b[3]))/range:(number(b[2])-number(b[4]))/range;
   const body=Math.abs(number(b[4])-number(b[1]))/range;
-  if(volumeRatio<1.5||closeStrength<.75||body<.5||range>2*signal.atr)return null;
+  if(volumeRatio<1.5)return reject('Volume below 1.5× average');
+  if(closeStrength<.75||body<.5)return reject('Breakout candle lacks confirmation');
+  if(range>2*signal.atr)return reject('Breakout candle exceeds volatility limit');
   const score=1+Number(volumeRatio>=2)+Number(closeStrength>=.9&&body>=.7);
   return {...signal,qualityConfirmed:true,strength:score,leverage:score===3?8:score===2?5:3,stopDistance:1.5*signal.atr,volumeRatio};
 }
@@ -350,15 +353,16 @@ class DemoEngine {
     }
   }
   async scan(){
-    if(!this.auto||this.shouldScan?.()===false)return;
+    if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
     const epoch=this.stopEpoch;this.lastScan=Date.now();
-    for(let i=0;i<12&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
+    for(let i=0;i<Math.min(12,this.symbols.length)&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
       const symbol=this.symbols[this.cursor++%this.symbols.length];if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
       const candidate=breakout(raw,Date.now()+this.api.offset);
-      let signal=null;
-      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset);}
-      this.scanned.unshift({symbol,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      let signal=null,reason='No closed 5m breakout';
+      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);reason='Candle history failed validation';signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset,r=>reason=r);}
+      this.scanChecked=(this.scanChecked||0)+1;
+      this.scanned.unshift({symbol,reason:signal?'Entry checks required':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);}
     }
   }
@@ -372,7 +376,7 @@ class DemoEngine {
       if(this.state.goal)for(const r of this.active())await this.close(r.symbol,'$100 session goal');
       if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol)))this.pause('Unmanaged position detected; auto entries stopped.');
       if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
-      if(this.auto&&Date.now()-this.lastScan>30000)await this.scan();
+      if(this.auto&&Date.now()-this.lastScan>=5000)await this.scan();
       this.block='';
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }

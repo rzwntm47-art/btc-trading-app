@@ -48,8 +48,8 @@ function render(){
   const usdt=e.account?.assets.find(a=>a.asset==='USDT');$('available').textContent=money(Number(usdt?.availableBalance));$('wallet').textContent='USDT wallet: '+money(Number(usdt?.walletBalance));
   $('session').textContent=e.state.startedAt?money(e.sessionNet()):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
   $('sessionNote').textContent=e.state.startedAt?'Since '+new Date(e.state.startedAt).toLocaleString()+(e.state.goal?' · goal reached':''):'Starts when you enable auto';
-  $('scanTitle').textContent='Setups · '+e.symbols.length+' eligible coins';$('setups').replaceChildren();
-  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG · '+s.leverage+'×':s.side==='SELL'?'SHORT · '+s.leverage+'×':'WAIT',new Date(s.at).toLocaleTimeString()]);
+  $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
+  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG · '+s.leverage+'×':s.side==='SELL'?'SHORT · '+s.leverage+'×':'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);

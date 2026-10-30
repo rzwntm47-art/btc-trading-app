@@ -7,6 +7,6 @@ const template=fs.readFileSync(path.join(dir,'page.html'),'utf8');
 new Function(engine);new Function(ui);
 for(const id of [...ui.matchAll(/\$\('([^']+)'\)/g)].map(x=>x[1]))if(!template.includes('id="'+id+'"'))throw Error('Missing DOM id '+id);
 if(engine.includes('https://fapi.binance.com')||engine.includes('https://testnet.binancefuture.com'))throw Error('Unexpected exchange endpoint');
-const output=template.replace('/* ENGINE */',engine).replace('/* UI */',ui);
+const output=template.replace('/* ENGINE */',()=>engine).replace('/* UI */',()=>ui);
 fs.writeFileSync(path.join(dir,'demo-connect.html'),output);
 console.log('Built demo-connect.html; '+output.length+' characters; syntax and DOM bindings verified.');
