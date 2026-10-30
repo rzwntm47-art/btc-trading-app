@@ -16,7 +16,7 @@ function render(){
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.busy;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
-  status((e.auto?'AUTO RUNNING':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Converted from Binance Demo asset indices; price timing may differ.';
@@ -25,7 +25,7 @@ function render(){
   $('sessionNote').textContent=e.state.startedAt?'Since '+new Date(e.state.startedAt).toLocaleString()+(e.state.goal?' · goal reached':''):'Starts when you enable auto';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' eligible coins';$('setups').replaceChildren();
   for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG':s.side==='SELL'?'SHORT':'WAIT',new Date(s.at).toLocaleTimeString()]);
-  if(!e.scanned.length)line($('setups'),['Start Auto to scan','—','—']);
+  if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
   for(const p of e.positions.filter(p=>Number(p.positionAmt)!==0)){
     const r=e.owned(p.symbol),action=document.createElement('div'),label=document.createElement('small');
@@ -67,10 +67,13 @@ $('connectform').onsubmit=async event=>{
     const api=new DemoAPI(key,signingKey);api.relayToken=relayToken;
     engine=new DemoEngine(api,state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
     await engine.initialize();engine.save();$('credentials').open=false;
+    if(engine.tradingReady){
+      try{await engine.start();}catch(error){engine.block=error.message;engine.pause(error.message);}
+    }
   }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
-  finally{connectionBusy=false;if(engine)engine.busy=false;render();}
+  finally{connectionBusy=false;if(engine)engine.busy=false;render();if(engine?.auto)engine.tick();}
 };
-$('start').onclick=()=>run(()=>engine.start());
+$('start').onclick=async()=>{await run(()=>engine.start());if(engine?.auto)engine.tick();};
 $('retry').onclick=async()=>{
   if(!engine?.api?.key||engine.busy)return;engine.busy=true;render();status('Retrying saved demo credentials…');
   try{await engine.initialize();engine.save();if(engine.connected)$('credentials').open=false;}
