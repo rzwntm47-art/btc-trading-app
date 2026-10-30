@@ -35,7 +35,7 @@ function fixture(){
     }
     throw Error('Unmocked '+method+' '+path);
   }};
-  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.overrideUntil=0;
+  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.overrideUntil=0;e.experimentUntil=0;
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
   const signal={qualityConfirmed:true,strength:1,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   return {e,api,signal,calls,saved,orders,algos,get position(){return position},set position(p){position=p},set unknownEntry(v){unknownEntry=v},set failProtection(v){failProtection=v},set failClose(v){failClose=v}};
@@ -235,7 +235,7 @@ test('existing position is not converted to Cross or given another entry',async(
 test('scanner rotates bounded batches and explains WAIT without submitting orders',async()=>{
   const calls=[];
   const api={offset:0,call:async(method,path,p)=>{calls.push(p.symbol);assert.equal(path,'/fapi/v1/klines');return [];}};
-  const e=new DemoEngine(api);e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
+  const e=new DemoEngine(api);e.experimentUntil=0;e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
   assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 1m or 2m breakout'));
@@ -303,13 +303,13 @@ test('failed advisory review leaves positions and protection untouched',async()=
 });
 test('scanner wraps to checked markets and keeps one latest row per coin',async()=>{
  const calls=[],e=new DemoEngine({offset:0,call:async(m,p,q)=>{calls.push(q.symbol);return [];}});
- e.auto=true;e.symbols=['AUSDT','BUSDT','CUSDT'];await e.scan();await e.scan();
+ e.experimentUntil=0;e.auto=true;e.symbols=['AUSDT','BUSDT','CUSDT'];await e.scan();await e.scan();
  assert.deepEqual(calls,['AUSDT','BUSDT','CUSDT','AUSDT','BUSDT','CUSDT']);
  assert.equal(e.scanned.length,3);assert.equal(e.scanChecked,6);
 });
 test('recent candidate is rechecked before cursor reaches it without starving the full scan',async()=>{
  const calls=[],e=new DemoEngine({offset:0,call:async(m,p,q)=>{calls.push(q.symbol);return [];}});
- e.auto=true;e.symbols=Array.from({length:40},(_,i)=>'C'+i+'USDT');e.cursor=15;
+ e.experimentUntil=0;e.auto=true;e.symbols=Array.from({length:40},(_,i)=>'C'+i+'USDT');e.cursor=15;
  e.rechecks=new Map([['C0USDT',{seen:Date.now(),checked:Date.now()-31000}]]);
  await e.scan();assert.equal(calls[0],'C0USDT');assert.equal(calls.length,13);assert.equal(e.cursor,27);
 });
@@ -382,7 +382,39 @@ test('50x override expires at its absolute deadline and retains $5 risk sizing',
 });
 test('expiry during leverage setup prevents a new 50x order',async()=>{
  const f=fixture();f.e.overrideUntil=Date.now()+3600000;
- const original=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await original(m,p,q,s);if(p==='/fapi/v1/leverage')f.e.overrideUntil=0;return r;};
+ const original=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await original(m,p,q,s);if(p==='/fapi/v1/leverage')f.e.overrideUntil=0;f.e.experimentUntil=0;return r;};
  await f.e.enter(symbol,f.signal);assert.equal(f.calls.some(c=>c.path==='/fapi/v1/order'&&c.method==='POST'),false);
  assert.match(f.e.entryOutcome,/window expired/);
+});
+test('experiment uses available USDT, 50x, and holds losses without automatic exits until expiry',async()=>{
+ const f=fixture();f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
+ Object.assign(f.signal,{experimental:true,exitPolicy:'manual-profit-60s-loss'});
+ f.e.budgetStatus=()=>({free:0,equity:0,reserved:800});f.e.state.goal=true;
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ assert.ok(r);assert.equal(r.leverage,50);assert.equal(r.exits.length,0);assert.equal(r.protected,false);
+ f.position.unRealizedProfit='-100';f.position.markPrice='98';await f.e.reconcile();
+ assert.equal(f.e.active().length,1);assert.equal(r.exits.length,0);
+ r.experimentUntil=Date.now()-1;await f.e.reconcile();
+ assert.equal(f.e.active().length,0);
+});
+test('experiment does not remove existing position protection',async()=>{
+ const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+ const r=f.e.active()[0];f.e.experimentUntil=Date.now()+3600000;
+ await f.e.reconcile();assert.equal(r.exits.length,1);assert.equal(r.protected,true);
+});
+test('experiment expiry restores an exchange stop on a profitable held position',async()=>{
+ const f=fixture();f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
+ Object.assign(f.signal,{experimental:true,exitPolicy:'manual-profit-60s-loss'});
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ f.position.markPrice='101';f.position.unRealizedProfit='50';r.experimentUntil=Date.now()-1;
+ await f.e.reconcile();assert.equal(r.protected,true);assert.equal(r.exits[0].kind,'sl');
+});
+test('experiment signals follow fresh closed candle direction, not unfinished candles',()=>{
+ const {experimentSignal}=require('./engine.js');
+ const end=Math.floor(Date.now()/60000)*60000-1;
+ const bars=Array.from({length:22},(_,i)=>[end-(21-i)*60000-59999,100,102,98,101,100,end-(21-i)*60000]);
+ assert.equal(experimentSignal(bars,end+1).side,'BUY');
+ bars[21][4]=99;assert.equal(experimentSignal(bars,end+1).side,'SELL');
+ assert.equal(experimentSignal(bars,end+76000),null);
+ bars[21][4]=100;assert.equal(experimentSignal(bars,end+1),null);
 });

@@ -35,14 +35,14 @@ function render(){
   const e=engine,connected=!!e?.connected;
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
-  $('start').disabled=!connected||e.busy||e.auto||e.state.goal;
+  $('start').disabled=!connected||e.busy||e.auto||(e.state.goal&&!e.experimentActive());
   $('resetDemo').disabled=!connected||e.busy;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.busy;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
   status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
-  $('leverageWindow').textContent=Date.now()+e.api.offset<e.overrideUntil?'50× override for new demo entries · expires '+new Date(e.overrideUntil).toLocaleString()+' · then adaptive 3× / 5× / 8×':'50× override expired · new entries use adaptive 3× / 5× / 8×';
-  const capital=e.budgetStatus();$('budgetValue').textContent='Budget equity: $'+money(capital.equity)+' · Margin in use: $'+money(capital.reserved)+' · Room for new margin: $'+money(capital.free);
+  $('leverageWindow').textContent=Date.now()+e.api.offset<e.overrideUntil?'EXPERIMENT: 50× · available USDT budget · no automatic exits on new trades · expires '+new Date(e.overrideUntil).toLocaleString()+' · then adaptive 3× / 5× / 8×':'50× override expired · new entries use adaptive 3× / 5× / 8×';
+  const capital=e.budgetStatus();$('budgetValue').textContent=e.experimentActive()?'Experiment uses available USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · up to $100 margin per entry; normal $1,000 sizing budget resumes after expiry':'Budget equity: $'+money(capital.equity)+' · Margin in use: $'+money(capital.reserved)+' · Room for new margin: $'+money(capital.free);
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
@@ -67,14 +67,15 @@ function render(){
     field(grid,'Initial margin (USDT)',p.positionInitialMargin??'—');
     field(grid,'Entry price',p.entryPrice);field(grid,'Mark price',p.markPrice);field(grid,'Liquidation price',p.liquidationPrice??'—');card.append(grid);
     const exits=e.algos.filter(a=>a.symbol===p.symbol),note=document.createElement('small');note.textContent='TP / SL: '+(exits.map(a=>(a.orderType||a.type||'Conditional')+' '+(a.triggerPrice??a.stopPrice??'—')).join(' · ')||'No open conditional orders in last sync');card.append(note);
-    if(r?.exitPolicy==='manual-profit-60s-loss'){const timer=document.createElement('p');timer.textContent=Number.isFinite(r.lossSince)?'Loss timer: '+Math.max(0,Math.floor((Date.now()+e.api.offset-r.lossSince)/1000))+' / 60 seconds since first observed net loss':'Loss timer: inactive · resets at net break-even or profit';card.append(timer);const review=document.createElement('p');review.textContent=(r.continuation||'Trend review pending for a profitable position')+(r.reviewAt?' · Checked '+new Date(r.reviewAt).toLocaleTimeString():'')+' · Profit floor: '+(Number.isFinite(r.profitFloor)?'$'+r.profitFloor.toFixed(2):'arms at $1 net profit')+' · Manual close available';card.append(review);}
+    if(r&&e.exitsSuspended(r)){const warning=document.createElement('p');warning.textContent='NO AUTOMATIC EXITS during experiment · restore after '+new Date(r.experimentUntil).toLocaleString()+' while app is connected';warning.className='bad';card.append(warning);}
+    if(r?.exitPolicy==='manual-profit-60s-loss'&&!e.exitsSuspended(r)){const timer=document.createElement('p');timer.textContent=Number.isFinite(r.lossSince)?'Loss timer: '+Math.max(0,Math.floor((Date.now()+e.api.offset-r.lossSince)/1000))+' / 60 seconds since first observed net loss':'Loss timer: inactive · resets at net break-even or profit';card.append(timer);const review=document.createElement('p');review.textContent=(r.continuation||'Trend review pending for a profitable position')+(r.reviewAt?' · Checked '+new Date(r.reviewAt).toLocaleTimeString():'')+' · Profit floor: '+(Number.isFinite(r.profitFloor)?'$'+r.profitFloor.toFixed(2):'arms at $1 net profit')+' · Manual close available';card.append(review);}
     const b=document.createElement('button');b.textContent=r?(r.pendingClose?'Close awaiting confirmation':'Close position'):'Manage this position in Binance';b.disabled=e.busy||!r;b.onclick=()=>run(()=>e.close(p.symbol));card.append(b);$('positions').append(card);
   }
   if(!positions.length)$('positions').textContent='No open positions in the last Binance snapshot.';
   $('openOrders').replaceChildren();
   for(const o of [...e.orders,...e.algos])line($('openOrders'),[o.symbol+' / '+o.side,o.orderType||o.type||'Conditional',o.triggerPrice??o.stopPrice??o.price??'—',o.closePosition?'Entire position':o.origQty??o.quantity??'—',o.algoStatus||o.status||'Open']);
   if(!$('openOrders').children.length)line($('openOrders'),['No open orders','','','','']);
-  $('pending').textContent=e.active().filter(r=>!r.protected||r.pendingClose).map(r=>r.symbol+' · '+(r.pendingClose?'close pending':r.entryStatus||'entry unresolved')).join(' | ');
+  $('pending').textContent=e.active().filter(r=>(!r.protected&&!e.exitsSuspended(r))||r.pendingClose).map(r=>r.symbol+' · '+(r.pendingClose?'close pending':r.entryStatus||'entry unresolved')).join(' | ');
   $('trades').replaceChildren();
   for(const r of [...e.state.records].reverse().slice(0,50)){
     const income=e.income.filter(x=>x.symbol===r.symbol&&Number(x.time)>=r.at&&(!r.closedAt||Number(x.time)<=r.closedAt));
