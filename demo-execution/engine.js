@@ -162,6 +162,31 @@ class DemoEngine {
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $500 margin per entry · $5,000 total margin cap');
   }
+  async resetFromBinance(){
+    this.pause('Refreshing Binance before reset.');
+    // Force a complete fresh inventory, never rely on cached empty orders.
+    this.inventoryCache={};
+    await this.refresh();
+    if(this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)
+      throw new DemoError('Reset blocked: close positions and clear pending orders in Binance first.');
+    if(!Number.isFinite(this.balance)||this.balance<=0)
+      throw new DemoError('Reset blocked: fresh combined asset valuation is unavailable.');
+    // A pending entry may have been accepted but not appeared in position reads yet.
+    for(const r of this.active()){
+      const order=await this.queryEntry(r);
+      if(!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(order.status)||r.pendingClose)
+        throw new DemoError('Reset blocked: an order is still unresolved.');
+      if(!r.observedOpen&&order.status==='FILLED')
+        throw new DemoError('Reset blocked: filled entry awaiting reconciliation.');
+    }
+    const previous=this.state;
+    this.state={version:1,records:[],startedAt:0,goal:false,
+      resetAt:Date.now()+this.api.offset,resetBalance:this.balance,
+      archives:[...(previous.archives||[]),{at:Date.now(),records:previous.records,startedAt:previous.startedAt,goal:previous.goal}]};
+    try{this.save();}catch(error){this.state=previous;throw error;}
+    this.income=[];this.lastIncome=0;this.scanned=[];this.cursor=0;this.lastScan=0;this.block='';
+    this.events=[];this.event('Reset complete from Binance. Session cleared; auto stopped. Credentials kept.');
+  }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.state.startedAt=Date.now()+this.api.offset;this.state.goal=false;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
   async queryExit(e){return this.api.call('GET','/fapi/v1/algoOrder',{clientAlgoId:e.id});}
