@@ -51,13 +51,26 @@ function render(){
   for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG':s.side==='SELL'?'SHORT':'WAIT',new Date(s.at).toLocaleTimeString()]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
-  for(const p of e.positions.filter(p=>Number(p.positionAmt)!==0)){
-    const r=e.owned(p.symbol),action=document.createElement('div'),label=document.createElement('small');
-    label.textContent=r?(r.protected?'SL / TP verified':'Protection pending')+(r.exits?.some(x=>x.kind==='floor'&&x.confirmed)?' · $10 floor':''):'Unmanaged · use Binance';action.append(label);
-    if(r){const b=document.createElement('button');b.textContent='Close';b.disabled=e.busy;b.onclick=()=>run(()=>e.close(p.symbol));action.append(b);}
-    line($('positions'),[p.symbol+' '+(Number(p.positionAmt)>0?'LONG':'SHORT'),p.entryPrice+' / '+p.markPrice,money(Number(p.unRealizedProfit)),action]);
+  const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);
+  $('positionsTab').textContent='Positions ('+positions.length+')';
+  $('ordersTab').textContent='Open Orders ('+(e.orders.length+e.algos.length)+')';
+  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+' · Polls every 5s when idle; requests and cooldowns can delay updates.';
+  const field=(parent,label,value,cls='')=>{const d=document.createElement('div'),l=document.createElement('small'),v=document.createElement('b');l.textContent=label;v.textContent=value;v.className=cls;d.append(l,v);parent.append(d);};
+  for(const p of positions){
+    const r=e.owned(p.symbol),card=document.createElement('article');card.className='position-card';
+    const title=document.createElement('h3');title.textContent=(Number(p.positionAmt)>0?'B · ':'S · ')+p.symbol+' Perp';title.className=Number(p.positionAmt)>0?'good':'bad';card.append(title);
+    const grid=document.createElement('div');grid.className='position-grid';
+    field(grid,'PNL (USDT)',money(Number(p.unRealizedProfit)),Number(p.unRealizedProfit)<0?'bad pnl':'good pnl');
+    field(grid,'Size',String(Math.abs(Number(p.positionAmt))));
+    field(grid,'Initial margin (USDT)',p.positionInitialMargin??'—');
+    field(grid,'Entry price',p.entryPrice);field(grid,'Mark price',p.markPrice);field(grid,'Liquidation price',p.liquidationPrice??'—');card.append(grid);
+    const exits=e.algos.filter(a=>a.symbol===p.symbol),note=document.createElement('small');note.textContent='TP / SL: '+(exits.map(a=>(a.orderType||a.type||'Conditional')+' '+(a.triggerPrice??a.stopPrice??'—')).join(' · ')||'No open conditional orders in last sync');card.append(note);
+    const b=document.createElement('button');b.textContent=r?(r.pendingClose?'Close awaiting confirmation':'Close position'):'Manage this position in Binance';b.disabled=e.busy||!r;b.onclick=()=>run(()=>e.close(p.symbol));card.append(b);$('positions').append(card);
   }
-  if(!$('positions').children.length)line($('positions'),['No open demo positions','','','']);
+  if(!positions.length)$('positions').textContent='No open positions in the last Binance snapshot.';
+  $('openOrders').replaceChildren();
+  for(const o of [...e.orders,...e.algos])line($('openOrders'),[o.symbol+' / '+o.side,o.orderType||o.type||'Conditional',o.triggerPrice??o.stopPrice??o.price??'—',o.closePosition?'Entire position':o.origQty??o.quantity??'—',o.algoStatus||o.status||'Open']);
+  if(!$('openOrders').children.length)line($('openOrders'),['No open orders','','','','']);
   $('pending').textContent=e.active().filter(r=>!r.protected||r.pendingClose).map(r=>r.symbol+' · '+(r.pendingClose?'close pending':r.entryStatus||'entry unresolved')).join(' | ');
   $('trades').replaceChildren();
   for(const r of [...e.state.records].reverse().slice(0,50)){
@@ -114,7 +127,7 @@ $('again').onclick=()=>run(()=>engine.again());
 $('refresh').onclick=()=>run(async()=>{if(!engine.tradingReady){await engine.refreshBalance();return;}await engine.refresh();await engine.reconcile();await engine.updateIncome();});
 $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
-  for(const id of ['positions','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
+  for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
 setInterval(()=>{if(engine?.connected){if(!demoVisible()&&engine.auto)engine.pause('Demo view is hidden. New entries stopped; exchange exits remain.');engine.tick();}},5000);
 window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data==='demo-pause'){engine?.pause('Demo view closed. New entries stopped; exchange exits remain.');render();}});
@@ -149,3 +162,6 @@ $('forgetSaved').onclick=()=>{
 };
 
 $('resetDemo').onclick=()=>run(()=>engine.resetFromBinance());
+
+$('positionsTab').onclick=()=>{ $('positions').hidden=false;$('orderPanel').hidden=true;$('positionsTab').classList.add('selected');$('ordersTab').classList.remove('selected');};
+$('ordersTab').onclick=()=>{ $('positions').hidden=true;$('orderPanel').hidden=false;$('ordersTab').classList.add('selected');$('positionsTab').classList.remove('selected');};
