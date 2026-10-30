@@ -365,7 +365,10 @@ class DemoEngine {
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
         if(r.exitPolicy==='manual-profit-60s-loss'){
-          if(net<=-(r.lossLimit??9)||(net<0&&Date.now()+this.api.offset-r.openedAt>=60000)){await this.close(r.symbol,net<=-(r.lossLimit??9)?'$'+(r.lossLimit??9)+' loss threshold':'Losing after 60 seconds');continue;}
+          const observedAt=Date.now()+this.api.offset;
+          if(net<0){if(!Number.isFinite(r.lossSince))r.lossSince=observedAt;}else r.lossSince=null;
+          this.save();
+          if(net<=-(r.lossLimit??9)||(net<0&&observedAt-r.lossSince>=60000)){await this.close(r.symbol,net<=-(r.lossLimit??9)?'$'+(r.lossLimit??9)+' loss threshold':'Estimated net loss persisted for 60 seconds');continue;}
           this.save();continue;
         }
         if(net<=-9||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-9?'$9 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}

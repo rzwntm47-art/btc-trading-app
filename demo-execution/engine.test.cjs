@@ -253,7 +253,8 @@ test('minute policy has only SL, closes losing after 60s and leaves profit for m
   r.openedAt=Date.now()-61000;f.position.unRealizedProfit='50';f.position.markPrice='117';
   await f.e.reconcile();assert.equal(f.e.active().length,1);assert.deepEqual(r.exits.map(x=>x.kind),['sl']);
   f.position.unRealizedProfit='-1';f.position.markPrice='99.7';await f.e.reconcile();
-  assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'Losing after 60 seconds');
+  assert.equal(f.e.active().length,1);r.lossSince=Date.now()-61000;await f.e.reconcile();
+  assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'Estimated net loss persisted for 60 seconds');
 });
 test('minute policy enforces $5 loss before 60 seconds',async()=>{
   const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
@@ -333,4 +334,20 @@ test('qualified entry reports progress through submission',async()=>{
  assert.ok(seen.includes('Checking Binance balance, positions and open orders'));
  assert.ok(seen.includes('Checking commission and position size'));
  assert.ok(seen.includes('Submitting demo order'));
+});
+test('loss timer resets on recovery and restarts on a later loss regardless of trade age',async()=>{
+ const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+ const r=f.e.active()[0];r.openedAt=Date.now()-3600000;
+ r.lossSince=Date.now()-59000;f.position.unRealizedProfit='2';await f.e.reconcile();
+ assert.equal(r.lossSince,null);assert.equal(f.e.active().length,1);
+ f.position.unRealizedProfit='-1';await f.e.reconcile();
+ assert.ok(Date.now()-r.lossSince<1000);assert.equal(f.e.active().length,1);
+ r.lossSince=Date.now()-59000;await f.e.reconcile();assert.equal(f.e.active().length,1);
+ r.lossSince=Date.now()-60001;await f.e.reconcile();assert.equal(f.e.active().length,0);
+});
+test('net break-even resets the loss timer',async()=>{
+ const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+ const r=f.e.active()[0];r.lossSince=Date.now()-61000;
+ f.position.unRealizedProfit=String(r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));
+ await f.e.reconcile();assert.equal(r.lossSince,null);assert.equal(f.e.active().length,1);
 });
