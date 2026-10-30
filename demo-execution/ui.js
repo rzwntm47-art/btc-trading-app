@@ -1,6 +1,10 @@
 'use strict';
 const $=id=>document.getElementById(id);
 let engine=null,releaseLock=null,connectionBusy=false;
+function demoVisible(){
+  if(document.hidden)return false;
+  try{const dialog=window.frameElement?.closest('dialog');return !dialog||dialog.open;}catch{return false;}
+}
 const money=n=>Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
 function line(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');if(v instanceof Node)td.append(v);else td.textContent=String(v??'—');tr.append(td);}parent.append(tr);}
 function status(message){$('status').textContent=message;}
@@ -55,7 +59,7 @@ $('connectform').onsubmit=async event=>{
     // Only a one-way fingerprint and non-secret order journal are persisted.
     const saved=localStorage.getItem(journalKey);const state=saved?JSON.parse(saved):null;
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
-    engine=new DemoEngine(new DemoAPI(key,signingKey),state,persist,render);engine.busy=true;engine.shouldScan=()=>!document.hidden;
+    engine=new DemoEngine(new DemoAPI(key,signingKey),state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
     await engine.initialize();engine.save();$('credentials').open=false;
   }catch(e){if(engine){engine.pause();engine.connected=false;engine.api.clear();}releaseLock?.();releaseLock=null;status(e.message+' No new auto entries enabled.');}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();}
@@ -68,7 +72,7 @@ $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
-setInterval(()=>{if(engine?.connected)engine.tick();},5000);
+setInterval(()=>{if(engine?.connected){if(!demoVisible()&&engine.auto)engine.pause('Demo view is hidden. New entries stopped; exchange exits remain.');engine.tick();}},5000);
 window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data==='demo-pause'){engine?.pause('Demo view closed. New entries stopped; exchange exits remain.');render();}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.connected)engine.tick();});
 window.addEventListener('beforeunload',event=>{if(engine?.busy){event.preventDefault();event.returnValue='';}});
