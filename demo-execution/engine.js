@@ -118,11 +118,15 @@ class DemoEngine {
   async refresh(){
     const account=await this.api.call('GET','/fapi/v3/account');
     const positions=await this.api.call('GET','/fapi/v3/positionRisk');
+    if(!Array.isArray(account.assets)||!Array.isArray(positions))throw new DemoError('Invalid Binance position snapshot');
+    for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);}
+    // Publish exchange positions before potentially slow order inventory reads.
+    this.account=account;this.positions=positions;this.positionAt=Date.now();this.accountAt=this.positionAt;this.notify();
     const orders=await this.readOrderInventory('/fapi/v1/openOrders');
     const algos=await this.readOrderInventory('/fapi/v1/openAlgoOrders');
     if(!Array.isArray(account.assets)||!Array.isArray(positions)||!Array.isArray(orders)||!Array.isArray(algos))throw new DemoError('Invalid Binance account or order response');
     for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);if(number(p.positionAmt)!==0&&p.positionSide!=='BOTH')throw new DemoError('Hedge position detected. Auto entries stopped.');}
-    this.account=account;this.positions=positions;this.orders=orders;this.algos=algos;this.accountAt=Date.now();
+    this.account=account;this.positions=positions;this.orders=orders;this.algos=algos;this.ordersAt=Date.now();
     try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}
     this.notify();
   }
