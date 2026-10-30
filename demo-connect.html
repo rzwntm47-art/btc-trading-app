@@ -2,8 +2,8 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#09121d;color:#edf4fc;font:14px system-ui}main{max-width:1400px;margin:auto;padding:16px}header,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between}h1{font-size:22px;margin:8px 0}h2{font-size:16px;margin:0 0 12px}h3{font-size:14px}a{color:#89caff}p,small{color:#a9bdd0;line-height:1.5}small{display:block}section,details,.metric{background:#112235;border:1px solid #294158;border-radius:10px;padding:14px;margin:10px 0}summary{cursor:pointer}label{display:block;margin:10px 0 6px}input[type=password]{width:100%;padding:10px;background:#09121d;color:white;border:1px solid #426079;border-radius:6px}button{padding:9px 12px;background:#234f6b;color:white;border:1px solid #52748c;border-radius:7px;font:inherit;cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{background:#146747}.danger{background:#793447}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.metric b{font-size:23px;display:block;margin-top:4px}.columns{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:12px}.columns section{min-width:0}.scroll{max-height:400px;overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 5px;border-bottom:1px solid #294158;font-size:12px;overflow-wrap:anywhere}th{color:#a9bdd0;background:#112235;position:sticky;top:0}#status{padding:12px;border:1px solid #426079;border-radius:8px;white-space:pre-wrap}#log{font-size:12px;line-height:1.6}.good{color:#4bd9a4}.bad{color:#ff8396}.authgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.columns{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.metric:last-child{grid-column:1/-1}.authgrid{grid-template-columns:1fr}.scroll{max-height:280px}}[hidden]{display:none!important}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.0</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
-<details id="credentials" open><summary>Demo connection</summary><form id="connectform" autocomplete="off"><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect Demo</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Credentials stay in memory until disconnect, refresh or closing this page. Never paste them in chat. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.1</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<details id="credentials" open><summary>Demo connection</summary><form id="connectform" autocomplete="off"><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Credentials stay in memory until disconnect, refresh or closing this page. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start Demo Auto</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Refresh account</button><button id="again" disabled>Earn $100 again</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
 <small>15× isolated · up to $500 margin / $7,500 exposure per trade · $5,000 total margin cap · $35 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
@@ -42,7 +42,11 @@ class DemoAPI {
       let data;try{data=await r.json();}catch{throw new DemoError('Unreadable Binance response; reconcile order status.',0,method!=='GET');}
       if(!r.ok||Number(data.code)<0){const c=Number(data.code)||r.status;const messages={[-2015]:'Demo API permission or IP restriction rejected. Enable Futures trading on the demo key.',[-1022]:'Demo signature rejected. Check the HMAC secret.',[-1021]:'Timestamp rejected. Reconnect to synchronize time.',[-2019]:'Insufficient demo margin.',[-4067]:'Open orders prevent changing margin mode.',[-4168]:'Isolated margin requires Single-Asset Mode.'};throw new DemoError(messages[c]||'Binance Demo rejected request ('+c+').',c,r.status>=500||[-1006,-1007,-4116].includes(c));}
       return data;
-    }catch(e){if(e instanceof DemoError)throw e;throw new DemoError('Demo network request failed. Check connection; order status may be unknown.',0,method!=='GET');}finally{clearTimeout(timer);}
+    }catch(e){
+      const label=method+' '+path;
+      if(e instanceof DemoError){e.message=label+': '+e.message;throw e;}
+      throw new DemoError(label+': '+(e.name==='AbortError'?'Request timed out.':'The browser could not reach this Binance Demo endpoint (network or CORS block).')+(method==='GET'?' This read request did not submit an order.':' Order status must be reconciled before retrying.'),0,method!=='GET');
+    }finally{clearTimeout(timer);}
   }
   clear(){this.key='';this.signingKey=null;}
 }
@@ -83,6 +87,22 @@ class DemoEngine {
   owned(symbol){return this.active().find(r=>r.symbol===symbol);}
   position(symbol){return this.positions.find(p=>p.symbol===symbol&&number(p.positionAmt)!==0);}
   async initialize(){
+    this.pause();
+    // The previously working account read must not depend on trading-only routes.
+    await this.refreshBalance();this.connected=true;this.notify();
+    try{await this.prepareTrading();await this.reconcile();await this.updateIncome();this.event('Demo connected. Auto entries are stopped until Start Demo Auto.');}
+    catch(e){this.block='Balance connected; trading check failed. '+e.message;this.pause(this.block);}
+  }
+  async refreshBalance(){
+    const account=await this.api.call('GET','/fapi/v3/account');
+    if(!Array.isArray(account.assets)||!Array.isArray(account.positions))throw new DemoError('Invalid Binance account response');
+    this.account=account;this.accountAt=Date.now();
+    if(!this.tradingReady)this.positions=account.positions.map(p=>({...p,markPrice:p.markPrice??'—',entryPrice:p.entryPrice??'—',unRealizedProfit:p.unrealizedProfit??p.unRealizedProfit??'0'}));
+    try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}
+    this.notify();
+  }
+  async prepareTrading(){
+    this.tradingReady=false;
     const mode=await this.api.call('GET','/fapi/v1/positionSide/dual');const multi=await this.api.call('GET','/fapi/v1/multiAssetsMargin');
     if(mode.dualSidePosition!==false)throw new DemoError('Set Binance Demo Futures to One-way Mode before starting. No account mode was changed.');
     if(multi.multiAssetsMargin!==false)throw new DemoError('Set Binance Demo Futures to Single-Asset Mode for isolated trades. No account mode was changed.');
@@ -90,7 +110,7 @@ class DemoEngine {
     if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');
     for(const m of info.symbols)if(m.status==='TRADING'&&m.contractType==='PERPETUAL'&&m.quoteAsset==='USDT'&&m.marginAsset==='USDT'&&m.underlyingType==='COIN'&&/^[A-Z0-9]+USDT$/.test(m.symbol)&&!['USDC','USDT','BUSD','FDUSD','TUSD','DAI','USDP','USDD','USD1','USDE'].includes(m.baseAsset))this.meta.set(m.symbol,m);
     this.symbols=[...this.meta.keys()].sort();if(!this.symbols.length)throw new DemoError('No eligible crypto futures found');
-    this.metaAt=Date.now();this.connected=true;await this.refresh();await this.reconcile();try{await this.updateIncome();}catch(e){this.block=e.message;this.event(e.message);}this.event('Demo connected. Auto entries are stopped until Start Demo Auto.');
+    this.metaAt=Date.now();await this.refresh();this.tradingReady=true;
   }
   async refresh(){
     const account=await this.api.call('GET','/fapi/v3/account');
@@ -118,6 +138,7 @@ class DemoEngine {
   sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0);}
   async start(){
     if(!this.connected)throw new DemoError('Connect demo credentials first');
+    await this.prepareTrading();
     await this.refresh();await this.reconcile();
     if(this.active().some(r=>r.pendingClose||!r.protected))throw new DemoError('Resolve pending or unprotected orders before starting.');
     if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol))||this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))throw new DemoError('Unmanaged positions or orders exist in this demo account. Close/cancel them in Binance before starting this bot.');
@@ -246,6 +267,7 @@ class DemoEngine {
   async tick(){
     if(!this.connected||this.busy)return;this.busy=true;
     try{
+      if(!this.tradingReady){await this.refreshBalance();return;}
       await this.refresh();await this.reconcile();if(Date.now()-this.lastIncome>15000)await this.updateIncome();
       if(this.auto&&Date.now()-this.metaAt>600000){const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');for(const symbol of [...this.meta.keys()]){const m=info.symbols.find(x=>x.symbol===symbol&&x.status==='TRADING');if(m)this.meta.set(symbol,m);else this.meta.delete(symbol);}this.symbols=[...this.meta.keys()].sort();this.metaAt=Date.now();}
       if(this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; closing bot positions.');this.save();}
@@ -272,12 +294,13 @@ function line(parent,values){const tr=document.createElement('tr');for(const v o
 function status(message){$('status').textContent=message;}
 function render(){
   const e=engine,connected=!!e?.connected;
-  $('connect').disabled=connectionBusy||connected;$('disconnect').disabled=!connected||e.busy;
+  $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
+  $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
   $('start').disabled=!connected||e.busy||e.auto||e.state.goal;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.busy;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
-  status((e.auto?'AUTO RUNNING':'AUTO STOPPED')+(e.busy?' · checking orders…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  status((e.auto?'AUTO RUNNING':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   $('balanceNote').textContent='Converted from Binance Demo asset indices; price timing may differ.';
   const usdt=e.account?.assets.find(a=>a.asset==='USDT');$('available').textContent=money(Number(usdt?.availableBalance));$('wallet').textContent='USDT wallet: '+money(Number(usdt?.walletBalance));
@@ -304,7 +327,7 @@ function render(){
   $('assets').replaceChildren();for(const a of e.account?.assets||[])if(Number(a.walletBalance)!==0||Number(a.unrealizedProfit)!==0)line($('assets'),[a.asset,a.walletBalance,a.availableBalance,a.marginBalance]);
   $('log').replaceChildren();for(const v of e.events){const d=document.createElement('div');d.textContent=new Date(v.at).toLocaleTimeString()+' · '+v.text;$('log').append(d);}
 }
-async function run(fn){if(!engine||engine.busy)return;engine.busy=true;render();try{await fn();await engine.refresh();}catch(e){engine.block=e.message;engine.pause(e.message);}finally{engine.busy=false;render();}}
+async function run(fn){if(!engine||engine.busy)return;engine.busy=true;render();try{await fn();if(engine.tradingReady)await engine.refresh();else await engine.refreshBalance();}catch(e){engine.block=e.message;engine.pause(e.message);}finally{engine.busy=false;render();}}
 async function acquireLock(){
   if(!navigator.locks)throw new Error('This browser cannot prevent duplicate trading tabs. Use current Chrome or Edge.');
   await new Promise((resolve,reject)=>{navigator.locks.request('btc-binance-demo-order-writer',{ifAvailable:true},lock=>{if(!lock){reject(new Error('Another tab is connected to Demo. Disconnect that tab first.'));return;}return new Promise(done=>{releaseLock=done;resolve();});}).catch(reject);});
@@ -323,13 +346,19 @@ $('connectform').onsubmit=async event=>{
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
     engine=new DemoEngine(new DemoAPI(key,signingKey),state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
     await engine.initialize();engine.save();$('credentials').open=false;
-  }catch(e){if(engine){engine.pause();engine.connected=false;engine.api.clear();}releaseLock?.();releaseLock=null;status(e.message+' No new auto entries enabled.');}
+  }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();}
 };
 $('start').onclick=()=>run(()=>engine.start());
+$('retry').onclick=async()=>{
+  if(!engine?.api?.key||engine.busy)return;engine.busy=true;render();status('Retrying saved demo credentials…');
+  try{await engine.initialize();engine.save();if(engine.connected)$('credentials').open=false;}
+  catch(e){engine.block=e.message;engine.pause();status(e.message+' Use Retry connection or Disconnect.');}
+  finally{engine.busy=false;render();}
+};
 $('stop').onclick=()=>{engine?.pause('Stopped by user. Existing protective exits remain.');render();};
 $('again').onclick=()=>run(()=>engine.again());
-$('refresh').onclick=()=>run(async()=>{await engine.refresh();await engine.reconcile();await engine.updateIncome();});
+$('refresh').onclick=()=>run(async()=>{if(!engine.tradingReady){await engine.refreshBalance();return;}await engine.refresh();await engine.reconcile();await engine.updateIncome();});
 $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
