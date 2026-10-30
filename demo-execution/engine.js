@@ -65,6 +65,28 @@ function breakout(raw,now){
   const atr=bars.slice(-20).reduce((s,b,i)=>{const last=bars[bars.length-21+i];return s+Math.max(b.h-b.l,Math.abs(b.h-last.c),Math.abs(b.l-last.c));},0)/20;
   return side&&atr>0?{side,close:latest.end,price:latest.c,high,low,atr}:null;
 }
+// Experimental entry filters: score describes rule agreement, not win probability.
+function qualifySetup(signal,raw,hourly,now){
+  if(!signal)return null;
+  const bars=raw.filter(b=>number(b[6])<now),hours=hourly.filter(b=>number(b[6])<now);
+  if(bars.length<21||hours.length<50)return null;
+  for(let i=0;i<hours.length;i++){
+    const b=hours[i];if(number(b[4])<=0||number(b[6])-number(b[0])!==3599999||(i&&number(b[0])-number(hours[i-1][0])!==3600000))return null;
+  }
+  if(now-number(hours.at(-1)[6])>3615000)return null;
+  const mean=a=>a.reduce((v,b)=>v+number(b[4]),0)/a.length;
+  const fast=mean(hours.slice(-20)),slow=mean(hours.slice(-50)),prior=mean(hours.slice(-21,-1)),last=number(hours.at(-1)[4]);
+  const buy=signal.side==='BUY';
+  if(!(buy?last>fast&&fast>slow&&fast>prior:last<fast&&fast<slow&&fast<prior))return null;
+  const b=bars.at(-1),range=number(b[2])-number(b[3]);if(range<=0)return null;
+  const volumeMean=bars.slice(-21,-1).reduce((v,b)=>v+number(b[5]),0)/20;
+  if(volumeMean<=0)return null;
+  const volumeRatio=number(b[5])/volumeMean,closeStrength=buy?(number(b[4])-number(b[3]))/range:(number(b[2])-number(b[4]))/range;
+  const body=Math.abs(number(b[4])-number(b[1]))/range;
+  if(volumeRatio<1.5||closeStrength<.75||body<.5||range>2*signal.atr)return null;
+  const score=1+Number(volumeRatio>=2)+Number(closeStrength>=.9&&body>=.7);
+  return {...signal,qualityConfirmed:true,strength:score,leverage:score===3?8:score===2?5:3,stopDistance:1.5*signal.atr,volumeRatio};
+}
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
   const sign=side==='BUY'?1:-1;
@@ -176,7 +198,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · 15× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · filtered signals · adaptive 3× / 5× / 8× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -226,6 +248,8 @@ class DemoEngine {
   async enter(symbol,signal){
     const epoch=this.stopEpoch;
     if(!this.auto||this.state.goal||this.owned(symbol))return;
+    if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return;
+    if(this.active().length>=3){this.block='Maximum 3 bot positions; waiting for a close';return;}
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<300000)))return;
     await this.refresh();
     if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))return;
@@ -242,15 +266,16 @@ class DemoEngine {
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
-    const budget=Math.min(100,capital.free/(1+30*fee),number(usdt.availableBalance)/(1+30*fee));
+    const selectedLeverage=signal.leverage;
+    const budget=Math.min(100,capital.free/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    const quantity=rounded(Math.min(budget*15/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    const quantity=rounded(Math.min(budget*selectedLeverage/price,9/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||notional*fee*2>=9){this.block=symbol+': quantity/cost filter';return;}
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'ISOLATED'});}catch(e){if(e.code!==-4046)throw e;}
-    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:15});
-    if(number(leverage.leverage)!==15||number(leverage.maxNotionalValue)<notional)throw new DemoError('15× leverage or position size not accepted');
+    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
+    if(number(leverage.leverage)!==selectedLeverage||number(leverage.maxNotionalValue)<notional)throw new DemoError('Selected leverage or position size not accepted');
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return;
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,exits:[],protected:false};
@@ -330,7 +355,10 @@ class DemoEngine {
     for(let i=0;i<12&&this.auto&&epoch===this.stopEpoch&&this.shouldScan?.()!==false;i++){
       const symbol=this.symbols[this.cursor++%this.symbols.length];if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
-      const signal=breakout(raw,Date.now()+this.api.offset);this.scanned.unshift({symbol,side:signal?.side||'WAIT',at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      const candidate=breakout(raw,Date.now()+this.api.offset);
+      let signal=null;
+      if(candidate){const hourly=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1h',limit:60},false);signal=qualifySetup(candidate,raw,hourly,Date.now()+this.api.offset);}
+      this.scanned.unshift({symbol,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?.leverage,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);}
     }
   }
@@ -349,4 +377,4 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,qualifySetup,exitPrice,combinedValue,DEMO_BASE};
