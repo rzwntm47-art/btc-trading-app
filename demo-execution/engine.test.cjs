@@ -145,3 +145,17 @@ test('long and short entries cap exposure at $1500 and protect near $9 net loss'
   assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/leverage').length,1);
  }
 });
+
+test('reset reloads Binance balances, archives journal and clears session without orders',async()=>{
+ const f=fixture();f.e.state.records.push({id:'bd1_old',symbol,side:'BUY',closedAt:Date.now(),exits:[]});
+ f.e.state.startedAt=now;f.e.income=[{income:'-10'}];
+ await f.e.resetFromBinance();
+ assert.equal(f.e.balance,5000);assert.equal(f.e.state.records.length,0);assert.equal(f.e.state.archives[0].records.length,1);
+ assert.equal(f.e.state.startedAt,0);assert.equal(f.e.sessionNet(),0);assert.equal(f.e.auto,false);
+ assert(!f.calls.some(c=>c.method==='POST'||c.method==='DELETE'));
+});
+test('reset refuses open exchange positions and preserves journal',async()=>{
+ const f=fixture();await f.e.enter(symbol,f.signal);const old=f.e.state;
+ await assert.rejects(()=>f.e.resetFromBinance(),/Reset blocked/);
+ assert.equal(f.e.state,old);assert(f.position);assert.equal(f.e.auto,false);
+});
