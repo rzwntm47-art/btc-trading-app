@@ -4,12 +4,12 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.10</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.11</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for isolated trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" disabled>New $100 session</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
-<small>3× isolated · up to $500 margin / $1,500 exposure per trade · $5,000 total margin cap · $9 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
-<div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>USDT account session P&amp;L / $100</small><b id="session">—</b><small id="sessionNote">Realized P&amp;L + fees + funding + open P&amp;L</small></div></div>
+<small>3× isolated · up to $100 margin / $300 exposure per trade · $1,000 USDT budget · $800 total margin cap · $200 reserve · $9 loss threshold · profit floor after $10 · $40 take-profit · $100 session goal. Thresholds include estimated trading fees; fills and funding can change the result.</small>
+<section><h2>$1,000 USDT trading budget · 3× leverage</h2><b id="budgetValue">Awaiting account</b><small>Only this budget is used for new trades. BTC, USDC and extra demo USDT are excluded. Losses reduce the budget; profits do not raise its $1,000 ceiling. Existing positions count toward the cap.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>USDT account session P&amp;L / $100</small><b id="session">—</b><small id="sessionNote">Realized P&amp;L + fees + funding + open P&amp;L</small></div></div>
 <div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
 <details open><summary>Activity &amp; connection</summary><div id="log"></div></details>
@@ -193,7 +193,7 @@ class DemoEngine {
     if(this.state.goal)throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $500 margin per entry · $5,000 total margin cap');
+    this.auto=true;this.block='';this.event('Auto enabled · 3× isolated · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -214,6 +214,7 @@ class DemoEngine {
     }
     const previous=this.state;
     this.state={version:1,records:[],startedAt:0,goal:false,
+      budgetWalletBaseline:previous.budgetWalletBaseline,
       resetAt:Date.now()+this.api.offset,resetBalance:this.balance,
       archives:[...(previous.archives||[]),{at:Date.now(),records:previous.records,startedAt:previous.startedAt,goal:previous.goal}]};
     try{this.save();}catch(error){this.state=previous;throw error;}
@@ -228,6 +229,16 @@ class DemoEngine {
       // A transport error or timeout does NOT mean the order failed.
       try{return await query();}catch(q){if(!e.uncertain&&[-2013,-2011].includes(q.code))throw e;throw new DemoError('Order result unknown. Entries paused; reconciling the saved client ID.',0,true);}
     }
+  }
+  budgetStatus(){
+    const usdt=this.account?.assets.find(a=>a.asset==='USDT');
+    if(!usdt)return {equity:0,reserved:0,free:0};
+    const wallet=number(usdt.walletBalance),base=this.state.budgetWalletBaseline??wallet;
+    const unrealized=number(usdt.unrealizedProfit??0);
+    const equity=Math.max(0,Math.min(1000,1000+wallet-base+unrealized,wallet+unrealized));
+    const reserved=this.positions.reduce((sum,p)=>sum+Math.abs(number(p.positionInitialMargin||0)),0);
+    const free=Math.max(0,Math.min(800,equity-200)-reserved);
+    return {equity,reserved,free};
   }
   async enter(symbol,signal){
     const epoch=this.stopEpoch;
@@ -246,9 +257,10 @@ class DemoEngine {
     const feeInfo=await this.api.call('GET','/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for isolated trades');
-    const reserved=this.positions.reduce((s,p)=>s+Math.abs(number(p.positionInitialMargin||0)),0);
-    const budget=Math.min(500,5000-reserved,number(usdt.availableBalance)/(1+6*fee));
-    if(budget<=0){this.block='Waiting for available USDT margin';return;}
+    if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
+    const capital=this.budgetStatus();
+    const budget=Math.min(100,capital.free/(1+6*fee),number(usdt.availableBalance)/(1+6*fee));
+    if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return;}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
     const quantity=rounded(Math.min(budget*3/price,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
@@ -400,6 +412,7 @@ function render(){
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
   status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  const capital=e.budgetStatus();$('budgetValue').textContent='Budget equity: $'+money(capital.equity)+' · Margin in use: $'+money(capital.reserved)+' · Room for new margin: $'+money(capital.free);
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
