@@ -36,13 +36,14 @@ function render(){
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
   $('start').disabled=!connected||e.busy||e.auto||e.state.goal;
+  $('resetDemo').disabled=!connected||e.busy;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.busy;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
   status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
-  $('balanceNote').textContent='Converted from Binance Demo asset indices; price timing may differ.';
+  $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
   const usdt=e.account?.assets.find(a=>a.asset==='USDT');$('available').textContent=money(Number(usdt?.availableBalance));$('wallet').textContent='USDT wallet: '+money(Number(usdt?.walletBalance));
   $('session').textContent=e.state.startedAt?money(e.sessionNet()):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
   $('sessionNote').textContent=e.state.startedAt?'Since '+new Date(e.state.startedAt).toLocaleString()+(e.state.goal?' · goal reached':''):'Starts when you enable auto';
@@ -146,3 +147,5 @@ $('forgetSaved').onclick=()=>{
  localStorage.removeItem(VAULT_ID);$('key').value='';$('secret').value='';$('relayToken').value='';$('vaultPassword').value='';
  status('Saved credentials deleted from this browser. An existing connection stays active until Disconnect.');
 };
+
+$('resetDemo').onclick=()=>run(()=>engine.resetFromBinance());
