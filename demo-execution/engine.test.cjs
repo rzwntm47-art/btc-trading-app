@@ -418,3 +418,22 @@ test('experiment signals follow fresh closed candle direction, not unfinished ca
  assert.equal(experimentSignal(bars,end+76000),null);
  bars[21][4]=100;assert.equal(experimentSignal(bars,end+1),null);
 });
+test('entry quantity is reduced below reported leverage notional cap',async()=>{
+ const f=fixture();f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
+ Object.assign(f.signal,{experimental:true,exitPolicy:'manual-profit-60s-loss'});
+ const original=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/leverage'?{leverage:q.leverage,maxNotionalValue:'1000'}:original(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ assert.ok(Number(r.quantity)*100<=950);assert.equal(r.leverage,50);assert.equal(f.e.auto,true);
+});
+test('definitive -2027 entry rejection is recorded without stopping or retrying',async()=>{
+ const f=fixture();const original=f.api.call;let submissions=0;
+ f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order'){submissions++;throw new DemoError('Leverage cap',-2027,false);}return original(m,p,q,s);};
+ await f.e.enter(symbol,f.signal);
+ assert.equal(submissions,1);assert.equal(f.e.active().length,0);assert.equal(f.e.state.records[0].rejected,true);assert.equal(f.e.auto,true);
+ assert.match(f.e.entryOutcome,/continuing other coins/);
+});
+test('uncertain -2027 response still stops for reconciliation',async()=>{
+ const f=fixture();const original=f.api.call;let submissions=0;
+ f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order'){submissions++;throw new DemoError('Uncertain response',-2027,true);}return original(m,p,q,s);};
+ await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(submissions,1);assert.equal(f.e.auto,false);
+});
