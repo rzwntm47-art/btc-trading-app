@@ -20,6 +20,7 @@ function fixture(){
     if(path==='/fapi/v1/openOrders')return [];
     if(path==='/fapi/v1/openAlgoOrders')return [...algos.values()].filter(x=>x.algoStatus==='NEW');
     if(path==='/fapi/v1/assetIndex')return [{symbol:'USDTUSD',index:'1',time:Date.now()}];
+    if(path==='/fapi/v1/ticker/bookTicker')return {symbol,bidPrice:'100',askPrice:'100',bidQty:'1000',askQty:'1000',time:Date.now()};
     if(path==='/fapi/v1/premiumIndex')return {markPrice:'100',time:Date.now()};
     if(path==='/fapi/v1/klines')return entryBars(signal.side);
     if(path==='/fapi/v1/commissionRate')return {takerCommissionRate:'.0005'};
@@ -821,7 +822,63 @@ test('public entry-candle read outage skips the entry without stopping the scann
 test('trade report separates gross result and costs without exposing credentials',()=>{
  const f=fixture();f.api.key='NEVER_EXPORT_API_KEY';f.api.relayToken='NEVER_EXPORT_LOCAL_TOKEN';
  f.e.income=[{incomeType:'REALIZED_PNL',income:'10',symbol,asset:'USDT',time:Date.now()},{incomeType:'COMMISSION',income:'-15',symbol,asset:'USDT',time:Date.now()}];
+ f.e.lastIncome=Date.now();f.e.incomeWindowStart=f.e.state.startedAt;f.e.positionAt=Date.now();
  const report=f.e.tradeReport(),serialized=JSON.stringify(report);
  assert.equal(report.totals.realized,10);assert.equal(report.totals.commission,-15);assert.equal(report.totals.net,-5);
  assert.equal(report.strategyValidatedForProfit,false);assert.ok(!serialized.includes('NEVER_EXPORT'));
+});
+
+test('missing income is unavailable, never zero costs or a net session claim',()=>{
+ const f=fixture();f.e.positionAt=Date.now();f.e.positions=[{symbol,unRealizedProfit:'-4.0344'}];
+ const r=f.e.tradeReport();assert.equal(r.snapshotStatus.complete,false);assert.equal(r.snapshotStatus.income,'missing');
+ assert.equal(r.totals,null);assert.equal(r.netSession,null);assert.equal(r.unrealized,-4.0344);
+});
+test('report distinguishes loaded zero income, stale data and a different session window',async()=>{
+ const f=fixture();await f.e.refresh();await f.e.updateIncome();let r=f.e.tradeReport();
+ assert.equal(r.snapshotStatus.complete,true);assert.equal(r.totals.net,0);assert.equal(r.netSession,0);
+ f.e.lastIncome-=31000;r=f.e.tradeReport();assert.equal(r.snapshotStatus.income,'stale');assert.equal(r.netSession,null);
+ f.e.state.startedAt++;r=f.e.tradeReport();assert.equal(r.snapshotStatus.income,'missing');assert.equal(r.totals,null);
+});
+test('bad income refresh preserves the previous validated snapshot atomically',async()=>{
+ const f=fixture();await f.e.updateIncome();const at=f.e.lastIncome,rows=f.e.income;
+ const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/income'?[{asset:'USDT',incomeType:'COMMISSION',income:'bad'}]:base(m,p,q,s);
+ await assert.rejects(()=>f.e.updateIncome());assert.equal(f.e.income,rows);assert.equal(f.e.lastIncome,at);
+});
+test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
+ const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.44');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
+ const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
+});
+for(const side of ['BUY','SELL'])test(side+' quote guard blocks an already-triggered mark stop without stopping scanning',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.side=side;if(side==='SELL')f.signal.low=101;
+ const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/ticker/bookTicker'?{symbol,bidPrice:side==='BUY'?'100.10':'99.89',askPrice:side==='BUY'?'100.11':'99.90',bidQty:'1000',askQty:'1000',time:Date.now()}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);
+ assert.match(f.e.entryOutcome,/already trigger/);assert.ok(!f.calls.some(c=>c.path==='/fapi/v1/order'&&c.method==='POST'));
+});
+test('wide spread plus fees blocks entry even when the mark stop has room',async()=>{
+ const f=fixture();f.e.newRules=true;const base=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/ticker/bookTicker'?{symbol,bidPrice:'99.90',askPrice:'100',bidQty:'1000',askQty:'1000',time:Date.now()}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/spread and estimated fees/);
+});
+for(const problem of ['stale','invalid','unavailable'])test(problem+' bid/ask skips without an entry or stopping the scanner',async()=>{
+ const f=fixture();f.e.newRules=true;const base=f.api.call;
+ f.api.call=async(m,p,q,s)=>{
+  if(p==='/fapi/v1/ticker/bookTicker'){
+   if(problem==='unavailable')throw new DemoError('Quote endpoint unavailable',503);
+   return {symbol,bidPrice:problem==='invalid'?'bad':'100',askPrice:'100',bidQty:'1000',askQty:'1000',time:Date.now()-(problem==='stale'?20000:0)};
+  }return base(m,p,q,s);
+ };
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,true);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/quote check unavailable/);
+});
+test('Stop during final quote request prevents dispatch',async()=>{
+ const f=fixture();f.e.newRules=true;const base=f.api.call;
+ f.api.call=async(m,p,q,s)=>{const result=await base(m,p,q,s);if(p==='/fapi/v1/ticker/bookTicker')f.e.pause();return result;};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/stopped before entry/);
+});
+test('accepted entry carries bid/ask, mark, fee and version evidence with $200 sizing',async()=>{
+ const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ assert.equal(r.entryAppVersion,'1.44');assert.equal(r.estimatedEntryMargin,200);assert.equal(r.leverage,25);
+ assert.equal(r.entryEvidence.estimatedMarkNet,-5);assert.equal(r.entryEvidence.estimatedImmediateExitNet,-5);
+ assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(r.entryEvidence.plannedStopPrice<100);
 });

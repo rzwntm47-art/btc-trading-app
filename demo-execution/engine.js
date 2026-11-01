@@ -1,7 +1,8 @@
 'use strict';
+const APP_VERSION='1.44';
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
 const DEMO_BASE = 'https://demo-fapi.binance.com';
-const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
+const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/ticker/bookTicker','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
 const PRIVATE = {
   GET: new Set(['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/positionSide/dual','/fapi/v1/multiAssetsMargin','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/commissionRate','/fapi/v1/income']),
   POST: new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),
@@ -181,6 +182,20 @@ function combinedValue(assets,indices,now){
   for(const a of assets){const balance=number(a.marginBalance);if(!balance)continue;const r=rates.get(a.asset+'USD');if(!r||!Number.isFinite(+r.index)||+r.index<=0||!Number.isFinite(+r.time)||Math.abs(now-+r.time)>60000)return null;usd+=balance*+r.index;}
   const usdt=rates.get('USDTUSD');return usdt&&+usdt.index>0?usd/+usdt.index:null;
 }
+function entryQuoteCheck(quote,mark,{symbol,side,qty,fee,lossLimit,tick,now}){
+  const bid=number(quote.bidPrice),ask=number(quote.askPrice),markPrice=number(mark.markPrice);
+  const bidQty=number(quote.bidQty),askQty=number(quote.askQty),quoteTime=number(quote.time),markTime=number(mark.time);
+  if(quote.symbol!==symbol||bid<=0||ask<bid||markPrice<=0||bidQty<=0||askQty<=0)throw new DemoError('Invalid entry bid/ask quote');
+  if(Math.abs(now-quoteTime)>15000||Math.abs(now-markTime)>15000)throw new DemoError('Entry bid/ask or mark price is stale');
+  const entry=side==='BUY'?ask:bid,exit=side==='BUY'?bid:ask,sign=side==='BUY'?1:-1;
+  const netAt=p=>(p-entry)*qty*sign-(entry+p)*qty*fee;
+  const stopPrice=number(exitPrice(entry,qty,fee,-lossLimit,side,tick));
+  const evidence={bid,ask,bidQty,askQty,quoteTime,markTime,markPrice,estimatedEntryPrice:entry,estimatedRoundTripFees:(entry+exit)*qty*fee,estimatedImmediateExitNet:netAt(exit),estimatedMarkNet:netAt(markPrice),plannedStopPrice:stopPrice};
+  // Best quotes give an estimate, not a fill guarantee; deeper fills may differ.
+  if(netAt(exit)<=-lossLimit)return {...evidence,reason:'Current spread and estimated fees already reach the $8 loss target'};
+  if(side==='BUY'?markPrice<=stopPrice:markPrice>=stopPrice)return {...evidence,reason:'Current mark price would already trigger the planned $8 stop at the quoted fill'};
+  return evidence;
+}
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
@@ -285,14 +300,14 @@ class DemoEngine {
     this.inventoryCache[path]={rows,at:Date.now()};return rows;
   }
   async updateIncome(){
-    if(!this.state.startedAt){this.income=[];return;}
+    if(!this.state.startedAt){this.income=[];this.lastIncome=0;this.incomeWindowStart=null;this.incomeWindowEnd=null;return;}
     // Pagination and fixed end time avoid silently dropping trades in busy accounts.
     const out=[],endTime=Date.now()+this.api.offset;
     if(endTime-this.state.startedAt>7*86400000)throw new DemoError('Session exceeds 7 days. Review results and start a new session when flat.');
     for(let page=1;page<=20;page++){
       const rows=await this.api.call('GET','/fapi/v1/income',{startTime:this.state.startedAt,endTime,page,limit:1000});
       if(!Array.isArray(rows))throw new DemoError('Invalid income response');out.push(...rows);
-      if(rows.length<1000){this.income=out.filter(x=>x.asset==='USDT'&&['REALIZED_PNL','COMMISSION','FUNDING_FEE'].includes(x.incomeType));for(const x of this.income)number(x.income);this.lastIncome=Date.now();return;}
+      if(rows.length<1000){const complete=out.filter(x=>x.asset==='USDT'&&['REALIZED_PNL','COMMISSION','FUNDING_FEE'].includes(x.incomeType));for(const x of complete)number(x.income);this.income=complete;this.incomeWindowStart=this.state.startedAt;this.incomeWindowEnd=endTime;this.lastIncome=Date.now();return;}
     }
     throw new DemoError('Income history is incomplete. Entries paused.');
   }
@@ -303,15 +318,27 @@ class DemoEngine {
     return {gains,losses,realized,commission,funding,net};
   }
   tradeReport(){
+    const now=Date.now(),incomeReady=!!this.lastIncome&&this.incomeWindowStart===this.state.startedAt;
+    const positionReady=!!this.positionAt;
+    const complete=incomeReady&&positionReady&&now-this.lastIncome<=30000&&now-this.positionAt<=30000;
     return {
-      appVersion:'1.43',generatedAt:new Date().toISOString(),strategyValidatedForProfit:false,
+      appVersion:APP_VERSION,generatedAt:new Date().toISOString(),strategyValidatedForProfit:false,
       windowStart:this.state.startedAt??null,incomeSnapshotAt:this.lastIncome||null,positionSnapshotAt:this.positionAt||null,
+      snapshotStatus:{complete,income:!incomeReady?'missing':now-this.lastIncome>30000?'stale':'loaded',positions:!positionReady?'missing':now-this.positionAt>30000?'stale':'loaded'},
+      incomeWindowEnd:incomeReady?this.incomeWindowEnd:null,
       scope:'Account-wide USDT income; includes manual trades. Bot records are separate. Snapshots may be at different times.',
-      totals:this.incomeBreakdown(),unrealized:this.unrealizedPnl(),openingUnrealized:this.state.dayOpenPnl||0,netSession:this.sessionNet(),
-      incomeRowsOmitted:Math.max(0,this.income.length-200),
-      income:this.income.slice(-200).map(x=>({symbol:x.symbol,time:x.time,type:x.incomeType,income:x.income,asset:x.asset})),
-      botRecords:this.state.records.slice(-50).map(r=>({symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason,entryEvidence:r.entryEvidence}))
+      totals:incomeReady?this.incomeBreakdown():null,unrealized:positionReady?this.unrealizedPnl():null,openingUnrealized:this.state.dayOpenPnl||0,netSession:complete?this.sessionNet():null,
+      incomeRowsOmitted:incomeReady?Math.max(0,this.income.length-200):0,
+      income:incomeReady?this.income.slice(-200).map(x=>({symbol:x.symbol,time:x.time,type:x.incomeType,income:x.income,asset:x.asset})):[],
+      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence}))
     };
+  }
+  async freshTradeReport(){
+    // Called under control(): no overlapping scanner or account writes.
+    await this.refresh();await this.updateIncome();
+    const report=this.tradeReport();
+    if(!report.snapshotStatus.complete)throw new DemoError('Fresh income and position snapshots are required. Report not copied; sync again.');
+    return report;
   }
   unrealizedPnl(){return this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0);}
   sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.unrealizedPnl()-(this.newRules?(this.state.dayOpenPnl||0):0);}
@@ -448,9 +475,9 @@ class DemoEngine {
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     const available=number(usdt.availableBalance),marginRoom=Math.max(0,5000-capital.reserved);
-    const minimumPlan=candidate=>{
-      const quantity=rounded(Math.max(200*candidate/price,minNotional/price,number(lot.minQty),number(normal.minQty)),step,true);
-      const qty=number(quantity),notional=qty*price;
+    const minimumPlan=(candidate,entryPrice=price)=>{
+      const quantity=rounded(Math.max(200*candidate/entryPrice,minNotional/entryPrice,number(lot.minQty),number(normal.minQty)),step,true);
+      const qty=number(quantity),notional=qty*entryPrice;
       return {quantity,qty,notional};
     };
     if(this.newRules&&(available<200||marginRoom<200))return skip('Waiting for at least $200 free margin plus fees; scanning continues');
@@ -520,14 +547,29 @@ class DemoEngine {
         progress('Reduced order size to fit Binance leverage limit');
       }
     }
+    let quoteEvidence;
+    if(this.newRules){
+      progress('Checking current spread, mark price and $8 stop before entry');
+      try{
+        const [quote,currentMark]=await Promise.all([this.api.call('GET','/fapi/v1/ticker/bookTicker',{symbol},false),this.api.call('GET','/fapi/v1/premiumIndex',{symbol},false)]);
+        const quotedPrice=number(signal.side==='BUY'?quote.askPrice:quote.bidPrice);
+        if(quotedPrice<=0)return skip('Invalid entry quote; scanning continues');
+        ({quantity,qty,notional}=minimumPlan(selectedLeverage,quotedPrice));
+        quoteEvidence=entryQuoteCheck(quote,currentMark,{symbol,side:signal.side,qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
+        if(quoteEvidence.reason)return skip(quoteEvidence.reason+'; scanning continues');
+        if(Math.abs(quotedPrice-signal.price)>.5*signal.atr||(signal.side==='BUY'?quotedPrice<=signal.high:quotedPrice>=signal.low))return skip('Executable quote moved too far or breakout reversed; scanning continues');
+        if(qty>number(lot.maxQty)||qty>number(normal.maxQty)||notional>number(leverage.maxNotionalValue))return skip('Fresh quote size exceeds Binance order limits; scanning continues');
+        const margin=notional/selectedLeverage;
+        if(margin>marginRoom+1e-8||margin+quoteEvidence.estimatedRoundTripFees>available+1e-8)return skip('Fresh quote needs more margin plus fees than available; scanning continues');
+      }catch(error){if([-1003,429,418].includes(error.code))throw error;return skip('Entry quote check unavailable; scanning continues: '+error.message);}
+    }
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return skip('Auto stopped before entry dispatch');
-    if(this.newRules&&Math.abs(Date.now()+this.api.offset-number(mark.time))>15000)return skip('Entry quote became stale during leverage checks; scanning continues');
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
-    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?3:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
+    const r={id,entryAppVersion:APP_VERSION,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?3:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     r.estimatedEntryMargin=notional/selectedLeverage;
-    if(this.newRules)r.entryEvidence={oneMinute:momentum,estimatedRoundTripFees:notional*fee*2,plannedStopPrice:exitPrice(price,qty,fee,-lossLimit,signal.side,priceFilter.tickSize),requestedLeverage,selectedLeverage};
+    if(this.newRules)r.entryEvidence={oneMinute:momentum,...quoteEvidence,requestedLeverage,selectedLeverage};
     r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $200 target margin; 25× or lower exchange maximum; $8 stop includes estimated fees; market fill margin may differ';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
@@ -536,7 +578,7 @@ class DemoEngine {
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
         try{if(!this.exitsSuspended(r)){await this.ensureExit(r,filled,r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(!r.closedAt&&r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;}this.save();}
-        catch(e){this.pause('Protection failed immediately after fill.');await this.close(symbol,'Protection failure');throw e;}
+        catch(e){r.protectionError={at:Date.now()+this.api.offset,code:e.code||0,message:e.message};this.save();this.pause('Protection failed immediately after fill. '+e.message);await this.close(symbol,'Protection failure');throw e;}
       }
     }
     catch(e){
@@ -630,6 +672,7 @@ class DemoEngine {
         if(r.peak>10)await this.ensureExit(r,p,'floor',10);
         this.save();
       }catch(e){
+        r.protectionError={at:Date.now()+this.api.offset,code:e.code||0,message:e.message};this.save();
         this.pause('Protection problem on '+r.symbol+'. Attempting reduce-only close.');
         // Never continue opening positions after a failed protective order.
         try{await this.close(r.symbol,'Protection failure');}catch(closeError){throw new DemoError('URGENT: '+r.symbol+' requires review in Binance Demo. '+closeError.message);}
@@ -749,4 +792,4 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,exitPrice,combinedValue,DEMO_BASE};

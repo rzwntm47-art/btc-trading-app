@@ -33,6 +33,7 @@ function render(){
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
   $('start').disabled=!connected||e.controlPending||e.auto||!!e.state.goalStopAt||(!e.newRules&&e.state.goal&&!e.experimentActive());
   $('resetDemo').disabled=!connected||e.controlPending;
+  $('copyTradeReport').disabled=!connected||e.controlPending;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.controlPending;
   $('again').hidden=!e?.state?.goalStopAt;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
@@ -184,7 +185,14 @@ $('ordersTab').onclick=()=>{ $('positions').hidden=true;$('orderPanel').hidden=f
 
 $('copyTradeReport').onclick=async()=>{
   if(!engine?.connected){status('Connect and sync before copying the trade report.');return;}
-  const report=JSON.stringify(engine.tradeReport(),null,2);
+  const target=engine;let snapshot;
+  $('tradeReportText').hidden=true;$('tradeReportText').value='';
+  status('Refreshing Binance income and positions for the report…');
+  try{
+    const ran=await target.control(async()=>{if(engine!==target||!target.connected)throw Error('Connection changed; reconnect first.');snapshot=await target.freshTradeReport();});
+    if(!ran){status('Another action is pending. Copy the report when it finishes.');return;}
+  }catch(error){status('Report not copied: '+error.message);return;}
+  const report=JSON.stringify(snapshot,null,2);
   try{await navigator.clipboard.writeText(report);status('Trade report copied. Includes results and entry evidence; no API credentials.');}
   catch{$('tradeReportText').hidden=false;$('tradeReportText').value=report;$('tradeReportText').focus();$('tradeReportText').select();status('Select and copy the displayed trade report.');}
 };

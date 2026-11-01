@@ -8,7 +8,7 @@ function fixture(){
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
  const context=vm.createContext({DemoEngine,console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
- vm.runInContext(`render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.connected=true;engine.tick=async()=>{};engine.refresh=async()=>{};engine.reconcile=async()=>{};engine.updateIncome=async()=>{};`,context);
+ vm.runInContext(`render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
 }
 test('real Start/Stop handlers: Stop wins while setup is pending',async()=>{
@@ -58,5 +58,21 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.43');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.44');
+});
+test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
+ const {node,context,e}=fixture();let copied;const order=[];
+ context.navigator={clipboard:{writeText:async text=>{copied=JSON.parse(text);order.push('copy');}}};
+ const refresh=e.refresh,update=e.updateIncome;
+ e.refresh=async()=>{order.push('positions');await refresh();};
+ e.updateIncome=async()=>{order.push('income');e.income=[{incomeType:'COMMISSION',income:'-5.38'}];await update();};
+ e.busy=true;const pending=node('copyTradeReport').onclick();assert.equal(order.length,0);assert.equal(e.controlPending,true);
+ e.busy=false;await pending;assert.deepEqual(order,['positions','income','copy']);assert.equal(copied.snapshotStatus.complete,true);assert.equal(copied.totals.net,-5.38);
+});
+test('failed income refresh does not copy false zeros or interrupt Auto',async()=>{
+ const {node,context,e}=fixture();let copied=false;e.auto=true;
+ context.navigator={clipboard:{writeText:async()=>copied=true}};
+ e.updateIncome=async()=>{throw Error('Income endpoint unavailable');};
+ await node('copyTradeReport').onclick();assert.equal(copied,false);assert.match(node('status').textContent,/Report not copied: Income endpoint unavailable/);
+ assert.equal(e.auto,true);assert.equal(e.busy,false);assert.equal(e.controlPending,false);assert.equal(node('tradeReportText').hidden,true);
 });
