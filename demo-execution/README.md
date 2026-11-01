@@ -1,4 +1,4 @@
-# Binance Demo execution module — V1.53
+# Binance Demo execution module — V1.54
 
 This module sends USDⓈ-M orders exclusively to `https://demo-fapi.binance.com`. It has no live endpoint, withdrawal or transfer capability.
 
@@ -6,14 +6,15 @@ Build with `node demo-execution/build.cjs`, then copy `demo-execution/demo-conne
 
 ## Current exit policy
 
-- No bot stop-loss, timed loss exit, recovery extension or profit-pullback floor.
-- Each bot position receives a TAKE_PROFIT_MARKET order targeting $20 estimated net profit after opening and expected closing taker fees. The engine also requests a reduce-only close when its observed net estimate reaches $20. It does not wait for a pullback. Actual fees, funding, price ticks, fills and slippage can change the result.
-- At an observed $100 account-wide net session result, latch new entries stopped and close every bot-managed position, including losers. Manual/unmanaged positions are not adopted or closed. Finish unresolved closes on later passes even if P&L falls below the target. The final booked result is not guaranteed to equal $100.
-- The session target is checked before individual profit exits so an observed qualifying aggregate result is not lost during the conversion from unrealized to realized P&L. Pending or partially filled entry orders must reach a verified terminal status before their positions close; this prevents a remaining entry quantity from refilling after the session stops. Unknown close outcomes are queried without blind order retries.
-- Existing bot positions adopt the policy when the updated engine synchronizes. Confirm a fresh $20 TP before cancelling old journaled stop-loss, TP or profit-floor orders. Keep quantity and leverage unchanged. Repeated synchronization does not replace an already confirmed TP. If exit configuration fails, pause entries and attempt an emergency reduce-only close.
-- The $100 profit target is not a loss limit. Losing positions can remain open, lose shared Cross collateral or be liquidated. The app does not set a maximum loss in this mode.
+- Close a bot-managed position when fresh estimated closing net is strictly positive, including a profit below $1. No $20 cap or pullback wait. Use the executable bid for a long or ask for a short, weighted through up to 20 order-book levels if the best quote cannot fill the whole remaining position. Require valid prices and data no older than five seconds. Recheck position size and profitability immediately before dispatch.
+- The estimate deducts proportional estimated opening and expected closing taker fees for the remaining quantity. It excludes funding and already realized portions; these appear in account-wide session income. It is separate from Binance mark-based unrealized P&L and may differ from the Binance close dialog and actual fills. Positive estimates do not guarantee profitable execution.
+- When estimated net is negative, reduce 25% of the current position once, rounded down to the exchange quantity step. Fees alone may trigger this immediately after entry. Persist the client ID and quantity before the reduce-only market request. Query uncertain responses; never blindly submit another reduction. A terminal partial fill counts as the one reduction. A definite rejection or quantity below exchange limits is reported without repeatedly trying the same trim. The remaining position is not topped up.
+- A 25% reduction realizes part of the loss and incurs commission. It reduces exposure and can release margin; it does not recover losses or cap the loss on the remainder. No stop-loss, loss timer, recovery extension or profit-pullback floor applies.
+- Existing bot positions adopt the policy when the updated engine synchronizes. Cancel only old journaled bot SL/TP/floor orders. Create no standing exchange profit or stop orders under this policy. A failed cancellation blocks migration. A failed closing quote is displayed and retried on a later check; it must not cause an unwanted full loss close.
+- At an observed $100 account-wide net session result, latch new entries stopped and close every bot-managed position, including losers. Manual/unmanaged positions are not adopted or closed. The session target has priority over individual exits. Confirm cancellation of pending entry/reduction remainders before full closes, and finish unresolved closes even if net falls below $100. The final booked result is not guaranteed to equal $100.
+- These automated exits require the execution engine running. The $100 profit target is not a loss limit. Remaining positions can lose shared Cross collateral or be liquidated.
 
-`lossLimit` is null, `takeProfit` is 20, `exitPolicy` is `profit-cap`, and records use rules version 6. `protected` remains false because there is no loss protection; `exitsReady` means the required TP is verified. Historical stop helpers remain for old test fixtures, but production `newRules=true` bypasses those exit branches.
+`lossLimit` and `takeProfit` are null, `exitPolicy` is `positive-estimate`, and records use rules version 7. `lossReduction` preserves the once-only order and result. `protected` remains false because there is no loss protection; `exitsReady` means migration to the app-managed policy completed. Historical stop helpers remain for legacy tests; production `newRules=true` bypasses those branches.
 
 ## Entry behavior
 
@@ -23,7 +24,7 @@ Momentum requires aligned 5/20 means, confirming 5m direction, a directional can
 
 Target $300 margin per new entry, rounded up to the quantity step. Adaptive leverage stays within 1–10× and exchange capacity; no fixed position-count cap, one position per symbol, $5,000 total margin budget, Cross. Different symbols can enter consecutively with serialized writes. The same symbol has a 10-minute cooldown after closing.
 
-The existing $20 one-ATR-and-fees allowance remains an entry sizing check only. It can reduce leverage or skip excessive exposure; it is not a stop-loss or maximum loss. New trades calculate no stop price and are not rejected for stop tick placement. Fresh spread/mark movement is included in the entry exposure estimate. The selected timeframe must clear the existing commission screen; fees cannot already consume the $20 profit target.
+The existing $20 one-ATR-and-fees allowance remains an entry sizing check only. It can reduce leverage or skip excessive exposure; it is not a stop-loss or maximum loss. New trades calculate no stop price and are not rejected for stop tick placement. Fresh spread/mark movement is included in the entry exposure estimate. The selected timeframe must still clear the existing commission screen. The obsolete fixed $20 take-profit fee check is removed; the separate $20 entry sizing allowance remains.
 
 Entries tolerate up to 0.75 ATR drift from the selected close and up to a 0.10 ATR breakout retest, while momentum boundaries and fresh direction remain required. Stale, reversed or unworkable quotes skip the candidate. Temporary candidate-only GET failures and definite price-filter rejections keep scanning; uncertain writes, access errors and rate limits retain their reconciliation/pause behavior.
 
@@ -33,10 +34,10 @@ Net session result includes USDT realized trading P&L, commission, funding and t
 
 Copy scan diagnostics works with zero trades, busy work or disconnected snapshots, without account requests or credentials/balances. Three public scan workers, caching, serialized order writes, responsive Stop controls and exit checks during scanning remain.
 
-Browser mode needs the page running. Accepted exchange TP orders can remain after the page closes; the account-wide $100 close requires a running engine. Pair Mobile/background mode uses laptop files and needs the laptop awake and connector running. Publishing a website does not replace that loaded engine: update its files and restart it. A browser using only the local relay loads the engine from the website. The UI reports the actual engine version and exit policy so an old engine is not presented as running the new rules.
+Browser mode needs the page running for positive-net closes, loss reductions and the account-wide $100 close. There are no standing exchange exits under this policy. Pair Mobile/background mode uses laptop files and needs the laptop awake and connector running. Publishing a website does not replace that loaded engine: update its files and restart it. A browser using only the local relay loads the engine from the website. The UI reports the actual engine version and exit policy so an old engine is not presented as running the new rules.
 
 Start requires One-way and Single-Asset Mode. Account modes are not changed automatically. Credentials remain in memory or the explicitly saved encrypted vault. Use one execution owner per demo account.
 
-Validation: 246 automated checks passed using synthetic credentials and mocked exchange responses. Coverage includes long/short fee-aware TP pricing, no automatic loss/timer exits, migration from old $4/$8/$12/$20 stops, idempotent reconciliation, $100 closure of winners and losers, failed/unknown/partial closes, target priority during ticks, entry guards, controls, diagnostics and engine-version reporting. Build checks syntax and DOM bindings. No account-connected trading or profitability backtest was performed.
+Validation: 278 automated checks passed using synthetic credentials and mocked exchange responses. Coverage includes long/short fee-aware closing quotes, weighted depth, stale/invalid/insufficient quotes, revalidation before dispatch, once-only trims and quantity limits, migration from old stops/TP, persistence across reloads, unknown/rejected/partial orders, manual/session cancellation ordering, $100 closure of winners and losers, entry guards, controls, position-card P&L labels, diagnostics and engine-version reporting. Build checks syntax and DOM bindings. No account-connected trading or profitability backtest was performed.
 
-Official API reference: [USDⓈ-M New Algo Order and close-position behavior](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade).
+Official API reference: [USDⓈ-M orders, reduce-only and order queries](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade).

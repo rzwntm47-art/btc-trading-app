@@ -1,10 +1,10 @@
 'use strict';
-const APP_VERSION='1.53';
+const APP_VERSION='1.54';
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
-const TAKE_PROFIT=20,ENTRY_VOLATILITY_ALLOWANCE=20;
+const ENTRY_VOLATILITY_ALLOWANCE=20;
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
 const DEMO_BASE = 'https://demo-fapi.binance.com';
-const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/ticker/bookTicker','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
+const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/ticker/bookTicker','/fapi/v1/depth','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
 const PRIVATE = {
   GET: new Set(['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/positionSide/dual','/fapi/v1/multiAssetsMargin','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/commissionRate','/fapi/v1/income']),
   POST: new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),
@@ -286,7 +286,7 @@ function adaptiveLeveragePlan({price,atr,fee,lossLimit,side,tick,plan,maxLeverag
 }
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
-    this.entryPolicy={margin:ENTRY_MARGIN,maxLeverage:MAX_ENTRY_LEVERAGE,strategy:'movers-momentum-v2',lossLimit:null,takeProfit:TAKE_PROFIT,profitExit:'fixed',sessionExit:'close-bot-positions',volatilitySizingAllowance:ENTRY_VOLATILITY_ALLOWANCE,priceToleranceAtr:.75,breakoutRetestAtr:.1};
+    this.entryPolicy={margin:ENTRY_MARGIN,maxLeverage:MAX_ENTRY_LEVERAGE,strategy:'movers-momentum-v2',lossLimit:null,takeProfit:null,profitExit:'positive-estimate',lossReduction:.25,sessionExit:'close-bot-positions',volatilitySizingAllowance:ENTRY_VOLATILITY_ALLOWANCE,priceToleranceAtr:.75,breakoutRetestAtr:.1};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -447,7 +447,7 @@ class DemoEngine {
       totals:incomeReady?this.incomeBreakdown():null,unrealized:positionReady?this.unrealizedPnl():null,openingUnrealized:this.state.dayOpenPnl||0,netSession:complete?this.sessionNet():null,
       incomeRowsOmitted:incomeReady?Math.max(0,this.income.length-200):0,
       income:incomeReady?this.income.slice(-200).map(x=>({symbol:x.symbol,time:x.time,type:x.incomeType,income:x.income,asset:x.asset})):[],
-      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence}))
+      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
     };
   }
   async freshTradeReport(){
@@ -491,13 +491,13 @@ class DemoEngine {
     if(epoch!==this.stopEpoch)return;
     if(this.newRules){await this.updateIncome();if(await this.enforceSessionGoal())return;}
     await this.reconcile();
-    if(this.active().some(r=>r.pendingClose||(!(this.newRules?r.exitsReady:r.protected)&&!this.exitsSuspended(r))))throw new DemoError('Resolve pending orders or unverified exits before starting.');
+    if(this.active().some(r=>r.pendingClose||r.lossReduction?.status==='PENDING'||(!(this.newRules?r.exitsReady:r.protected)&&!this.exitsSuspended(r))))throw new DemoError('Resolve pending orders or unverified exits before starting.');
     if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol))||this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))throw new DemoError('Unmanaged positions or orders exist in this demo account. Close/cancel them in Binance before starting this bot.');
     if(!this.newRules&&this.state.goal&&!this.experimentActive())throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · no stop loss · $20 net take-profit per trade · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · no stop loss · close positive estimated net · one 25% reduction when negative · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -510,12 +510,13 @@ class DemoEngine {
       throw new DemoError('Reset blocked: fresh USDT wallet is unavailable.');
     // A pending entry may have been accepted but not appeared in position reads yet.
     for(const r of this.active()){
+      if(r.lossReduction?.status==='PENDING')await this.settleReduction(r);
       let order;
       try{order=await this.queryEntry(r);}catch(e){
         if(e.code===-2013&&!e.uncertain&&(r.observedOpen||r.entryStatus==='FILLED')&&!r.pendingClose&&Date.now()+this.api.offset-r.at>60000){r.closedAt=Date.now()+this.api.offset;continue;}
         throw e;
       }
-      if(!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(order.status)||r.pendingClose)
+      if(!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(order.status)||r.pendingClose||r.lossReduction?.status==='PENDING')
         throw new DemoError('Reset blocked: an order is still unresolved.');
       if(!r.observedOpen&&order.status==='FILLED')
         throw new DemoError('Reset blocked: filled entry awaiting reconciliation.');
@@ -677,7 +678,6 @@ class DemoEngine {
       const margin=notional/selectedLeverage,costs=notional*fee*2;
       if(margin+1e-8<ENTRY_MARGIN||margin>marginRoom+1e-8||margin+costs>available+1e-8)return skip('Not enough room for $300 margin plus fees at the selected leverage; scanning continues');
       if(qty>number(lot.maxQty)||qty>number(normal.maxQty))return skip('$300 order exceeds Binance quantity limits; scanning continues');
-      if(costs>=TAKE_PROFIT)return skip('Estimated trading fees already reach the $20 profit target at the required size; scanning continues');
       progress('Using '+selectedLeverage+'× with $300 estimated margin');
       const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.leverage=selectedLeverage;
     }else{
@@ -717,10 +717,10 @@ class DemoEngine {
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
-    const r={id,entryAppVersion:APP_VERSION,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?6:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,takeProfit:this.newRules?TAKE_PROFIT:null,exitPolicy:this.newRules?'profit-cap':signal.exitPolicy,exits:[],protected:false,exitsReady:false};
+    const r={id,entryAppVersion:APP_VERSION,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?7:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,takeProfit:null,exitPolicy:this.newRules?'positive-estimate':signal.exitPolicy,exits:[],protected:false,exitsReady:false};
     r.estimatedEntryMargin=notional/selectedLeverage;
     if(this.newRules)r.entryEvidence={oneMinute:momentum,candidateChecks,...quoteEvidence,requestedLeverage,selectedLeverage,adaptiveSizing:{...adaptive,leverageCeiling},marketContext:this.marketContext||null,marketSource:signal.marketSource||{type:'full-market'}};
-    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $300 target margin; adaptive leverage up to 10× based on candle agreement, BTC market context, 1m volatility, fees and exchange limits; $20 net profit target includes estimated fees; no stop loss; market fill margin may differ';
+    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $300 target margin; adaptive leverage up to 10× based on candle agreement, BTC market context, 1m volatility, fees and exchange limits; close positive estimated net after fees; one 25% reduction when negative; no stop loss; market fill margin may differ';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -728,7 +728,7 @@ class DemoEngine {
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
         try{
-          if(this.newRules){await this.ensureExit(r,filled,'tp20',TAKE_PROFIT);r.exitsReady=!r.closedAt;r.protected=false;}
+          if(this.newRules){r.exitsReady=true;r.protected=false;}
           else if(!this.exitsSuspended(r)){await this.ensureExit(r,filled,r.rulesVersion===5?'sl20':r.rulesVersion===4?'sl4m':r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(!r.closedAt&&!['manual-profit','manual-profit-60s-loss'].includes(r.exitPolicy))await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;}
           this.save();
         }
@@ -745,7 +745,7 @@ class DemoEngine {
       }
       this.pause(e.message);throw e;
     }
-    await this.refresh();await this.reconcile();this.entryOutcome=r.closedAt?'Entry closed during exit checks':'Entry submitted; status '+r.entryStatus;this.event(symbol+(this.exitsSuspended(r)?' demo entry submitted; automatic exits SUSPENDED until experiment expiry.':' demo entry submitted; confirmed fills and exit orders shown below.'));
+    await this.refresh();await this.reconcile();this.entryOutcome=r.closedAt?'Entry closed during exit checks':'Entry submitted; status '+r.entryStatus;this.event(symbol+(this.exitsSuspended(r)?' demo entry submitted; automatic exits SUSPENDED until experiment expiry.':' demo entry submitted; confirmed fills and automatic exit policy shown below.'));
   }
   async cancelExits(r,keepId=null){
     for(const e of r.exits||[]){if(e.cancelled||e.id===keepId)continue;try{await this.api.call('DELETE','/fapi/v1/algoOrder',{clientAlgoId:e.id});e.cancelled=true;this.save();}catch(err){const found=await this.queryExit(e).catch(q=>{if([-2011,-2013].includes(q.code))return {algoStatus:'NOT_FOUND'};throw q;});if(['CANCELED','CANCELLED','FINISHED','EXPIRED','REJECTED','NOT_FOUND'].includes(found.algoStatus)){e.cancelled=true;this.save();}else throw err;}}
@@ -762,20 +762,107 @@ class DemoEngine {
     if(result.algoStatus!=='NEW')throw new DemoError('Protection was not confirmed NEW');
     e.confirmed=true;e.verifiedAt=Date.now();this.save();
   }
-  async close(symbol,reason='Manual close'){
+  // Estimated net on the remaining quantity, using executable prices, not mark P&L.
+  // Opening fee is allocated proportionally; realized trims and funding remain in session income.
+  async closingEstimate(r,p){
+    const qty=Math.abs(Number(p.positionAmt)),entry=Number(p.entryPrice),fee=Number(r.fee),now=()=>Date.now()+this.api.offset;
+    if(!(qty>0&&entry>0&&Number.isFinite(fee)&&fee>=0)||((Number(p.positionAmt)>0)!==(r.side==='BUY')))throw new DemoError('Invalid position or fee for closing estimate');
+    const quote=await this.api.call('GET','/fapi/v1/ticker/bookTicker',{symbol:r.symbol},false);
+    const bid=Number(quote.bidPrice),ask=Number(quote.askPrice),time=Number(quote.time);
+    if(quote.symbol!==r.symbol||!(bid>0&&ask>=bid)||!Number.isFinite(time)||Math.abs(now()-time)>5000)throw new DemoError('Closing quote is invalid or stale');
+    let price=r.side==='BUY'?bid:ask,source='best bid/ask';
+    if(!(Number(r.side==='BUY'?quote.bidQty:quote.askQty)>=qty)){
+      const depth=await this.api.call('GET','/fapi/v1/depth',{symbol:r.symbol,limit:20},false),stamp=Number(depth.T??depth.E);
+      if(!Number.isFinite(stamp)||Math.abs(now()-stamp)>5000)throw new DemoError('Closing depth is stale');
+      const levels=r.side==='BUY'?depth.bids:depth.asks;if(!Array.isArray(levels))throw new DemoError('Closing depth unavailable');
+      let left=qty,notional=0,previous=r.side==='BUY'?Infinity:0;
+      for(const level of levels){const px=Number(level[0]),size=Number(level[1]);
+        if(!(px>0&&size>0)||(r.side==='BUY'?px>previous:px<previous))throw new DemoError('Invalid closing depth');
+        const used=Math.min(left,size);notional+=used*px;left-=used;previous=px;if(left<=qty*1e-12)break;
+      }
+      if(left>qty*1e-12)throw new DemoError('Insufficient visible depth to estimate the entire close');
+      price=notional/qty;source='20-level depth';
+    }
+    const fees=qty*(entry+price)*fee,net=(price-entry)*qty*(r.side==='BUY'?1:-1)-fees;
+    if(!Number.isFinite(net))throw new DemoError('Closing estimate unavailable');
+    r.closingEstimate={net,fees,price,quantity:qty,source,at:now()};r.netEstimate=net;r.estimateError=null;r.peak=Math.max(r.peak??-Infinity,net);this.save();return net;
+  }
+  async settleReduction(r,order=null,cancelPending=false){
+    const reduction=r.lossReduction;if(reduction?.status!=='PENDING')return;
+    order??=await this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:reduction.id});
+    if(cancelPending&&['NEW','PARTIALLY_FILLED'].includes(order.status)){
+      await this.api.call('DELETE','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:reduction.id});
+      order=await this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:reduction.id});
+    }
+    if(!['FILLED','CANCELED','EXPIRED','EXPIRED_IN_MATCH','REJECTED'].includes(order.status))throw new DemoError('25% reduction awaiting confirmation',0,true);
+    const executed=Number(order.executedQty??0);
+    if(!Number.isFinite(executed)||executed<0||(order.status==='FILLED'&&executed===0)||executed>Number(reduction.quantity)+1e-8)throw new DemoError('Invalid reduction fill quantity',0,true);
+    reduction.status=executed>0?'DONE':order.status;reduction.exchangeStatus=order.status;reduction.executedQty=executed;reduction.finishedAt=Date.now()+this.api.offset;this.save();
+    await this.refresh();const p=this.position(r.symbol);r.filledQty=p?Math.abs(Number(p.positionAmt)):0;
+    r.netEstimate=null;r.closingEstimate=null;this.save();
+    this.event(r.symbol+' one-time loss reduction: '+executed+' filled of '+reduction.quantity+' requested; remaining exposure updated.');
+  }
+  async reduceLosingPosition(r){
+    if(r.lossReduction){await this.settleReduction(r);return;}
+    const list=await this.api.call('GET','/fapi/v3/positionRisk',{symbol:r.symbol});
+    if(!Array.isArray(list))throw new DemoError('Invalid position response');
+    const p=list.find(x=>x.symbol===r.symbol&&x.positionSide==='BOTH'&&Number(x.positionAmt)!==0);if(!p)return;
+    if((Number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot');
+    if(!((await this.closingEstimate(r,p))<0))return;
+    const filters=this.meta.get(r.symbol)?.filters||[],market=filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=filters.find(f=>f.filterType==='LOT_SIZE');
+    if(!market||!normal)throw new DemoError('Quantity limits unavailable for 25% reduction');
+    const step=Number(market.stepSize)>0?market.stepSize:normal.stepSize,qty=Math.abs(Number(p.positionAmt));
+    if(!(Number(step)>0))throw new DemoError('Invalid reduction quantity step');
+    const quantity=rounded(qty*.25,step),amount=Number(quantity);
+    const normalUnits=amount/Number(normal.stepSize);
+    if(!(amount>0&&amount<=qty*.25+1e-10&&amount>=Math.max(Number(market.minQty),Number(normal.minQty))&&amount<=Math.min(Number(market.maxQty),Number(normal.maxQty)))||!Number.isFinite(normalUnits)||Math.abs(normalUnits-Math.round(normalUnits))>1e-7){
+      r.lossReduction={status:'SKIPPED',at:Date.now()+this.api.offset,reason:'25% is outside Binance quantity limits; no larger reduction sent'};this.save();this.event(r.symbol+' '+r.lossReduction.reason);return;
+    }
+    r.lossReduction={id:'bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,22)+'_r',status:'PENDING',quantity,positionQty:qty,netBefore:r.netEstimate,at:Date.now()+this.api.offset};this.save();
+    let order;
+    try{order=await this.sendOnce('/fapi/v1/order',{symbol:r.symbol,side:r.side==='BUY'?'SELL':'BUY',positionSide:'BOTH',type:'MARKET',quantity,reduceOnly:'true',newClientOrderId:r.lossReduction.id,newOrderRespType:'RESULT'},()=>this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.lossReduction.id}));}
+    catch(error){
+      if(error.uncertain)throw error;
+      r.lossReduction.status='REJECTED';r.lossReduction.reason=error.message;r.lossReduction.finishedAt=Date.now()+this.api.offset;this.save();
+      this.event(r.symbol+' 25% reduction rejected; not repeated: '+error.message);if(ACCOUNT_BLOCKS.has(error.code)||[418,429].includes(error.code))throw error;return;
+    }
+    await this.settleReduction(r,order);
+  }
+  async reconcileCurrentExits(r,p){
+    // Retire only this bot's journaled old orders before using the new policy.
+    await this.cancelExits(r);
+    r.rulesVersion=7;r.lossLimit=null;r.takeProfit=null;r.exitPolicy='positive-estimate';r.recoveryExtended=false;
+    r.recoveryNote='No stop loss';r.profitFloor=null;r.experimentUntil=null;r.lossSince=null;r.protected=false;r.exitsReady=true;
+    r.sizingNote='Recorded entry margin ≈ $'+Number(r.estimatedEntryMargin||0).toFixed(2)+' · '+r.leverage+'× · close positive estimated net; reduce a losing position 25% once; no stop loss';this.save();
+    if(r.lossReduction?.status==='PENDING'){await this.settleReduction(r);return;}
+    try{
+      const net=await this.closingEstimate(r,p);
+      if(net>0)await this.close(r.symbol,'Positive estimated closing P&L',{positiveNet:true});
+      else if(net<0&&!r.lossReduction)await this.reduceLosingPosition(r);
+    }catch(error){
+      r.estimateError=error.message;r.netEstimate=null;r.closingEstimate=null;this.save();
+      if(error.uncertain||r.pendingClose||r.lossReduction?.status==='PENDING'||ACCOUNT_BLOCKS.has(error.code)||[418,429].includes(error.code))throw error;
+      // A failed read must never turn a profit-only rule into a loss-making emergency close.
+    }
+  }
+  async close(symbol,reason='Manual close',options={}){
     const r=this.owned(symbol);if(!r)throw new DemoError('This position is not owned by this bot. Manage it in Binance Demo.');
+    if(r.lossReduction?.status==='PENDING')await this.settleReduction(r,null,true);
     if(r.pendingClose){const order=await this.api.call('GET','/fapi/v1/order',{symbol,origClientOrderId:r.pendingClose});if(!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(order.status))throw new DemoError('Close order still pending');r.pendingClose=null;this.save();await this.refresh();}
     const list=await this.api.call('GET','/fapi/v3/positionRisk',{symbol});if(!Array.isArray(list))throw new DemoError('Invalid position response');
     const p=list.find(x=>x.symbol===symbol&&x.positionSide==='BOTH'&&number(x.positionAmt)!==0);
     if(!p){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();return;}
     if((number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot. Inspect Binance.');
+    if((options.positiveNet||reason==='Positive estimated closing P&L')&&!((await this.closingEstimate(r,p))>0))return false;
     r.pendingClose='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,22)+'_c';r.closeReason=reason;this.save();
-    const order=await this.sendOnce('/fapi/v1/order',{symbol,side:number(p.positionAmt)>0?'SELL':'BUY',positionSide:'BOTH',type:'MARKET',quantity:String(Math.abs(number(p.positionAmt))),reduceOnly:'true',newClientOrderId:r.pendingClose,newOrderRespType:'RESULT'},()=>this.api.call('GET','/fapi/v1/order',{symbol,origClientOrderId:r.pendingClose}));
+    let order;try{order=await this.sendOnce('/fapi/v1/order',{symbol,side:number(p.positionAmt)>0?'SELL':'BUY',positionSide:'BOTH',type:'MARKET',quantity:String(Math.abs(number(p.positionAmt))),reduceOnly:'true',newClientOrderId:r.pendingClose,newOrderRespType:'RESULT'},()=>this.api.call('GET','/fapi/v1/order',{symbol,origClientOrderId:r.pendingClose}));}
+    catch(error){if(!error.uncertain){r.pendingClose=null;this.save();}throw error;}
     if(order.status==='FILLED'){r.pendingClose=null;this.save();}else throw new DemoError('Close order awaiting final status');
     await this.refresh();if(!this.position(symbol)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();this.event(symbol+' closed · '+reason);}
   }
   async reconcile(){
     for(const r of this.active()){
+      if(r.lossReduction?.status==='PENDING')await this.settleReduction(r);
       let order;
       try{order=this.newRules&&r.observedOpen&&r.entryStatus==='FILLED'&&this.position(r.symbol)?{status:'FILLED',orderId:r.orderId}:await this.queryEntry(r);}catch(e){
         // A fresh position can prove that an ambiguous entry filled even when
@@ -797,24 +884,8 @@ class DemoEngine {
       r.openedAt=r.openedAt||Number(order.updateTime)||r.at;r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       if(this.exitsSuspended(r)){r.netEstimate=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.protected=false;this.save();continue;}
+      if(this.newRules){await this.reconcileCurrentExits(r,p);continue;}
       try{
-        if(this.newRules){
-          // A verified TP is installed before cancelling journaled exits from older rules.
-          await this.ensureExit(r,p,'tp20',TAKE_PROFIT);if(r.closedAt||r.pendingClose)continue;
-          const profitExit=r.exits.find(e=>e.kind==='tp20'&&!e.cancelled);
-          if(r.rulesVersion!==6||r.lossLimit!==null||r.takeProfit!==TAKE_PROFIT||r.exitPolicy!=='profit-cap'||r.exits.some(e=>e.id!==profitExit.id&&!e.cancelled)){
-            await this.cancelExits(r,profitExit.id);
-            r.rulesVersion=6;r.lossLimit=null;r.takeProfit=TAKE_PROFIT;r.exitPolicy='profit-cap';
-            r.recoveryExtended=false;r.recoveryNote='No stop loss';r.profitFloor=null;r.experimentUntil=null;r.lossSince=null;
-            // Old sizing notes described a stop that no longer exists.
-            r.sizingNote='Recorded entry margin ≈ $'+Number(r.estimatedEntryMargin||0).toFixed(2)+' · '+r.leverage+'× · $20 net take-profit; no stop loss';
-          }
-          r.protected=false;r.exitsReady=true;r.profitFloor=null;r.lossSince=null;
-          const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));
-          r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);this.save();
-          if(net>=TAKE_PROFIT)await this.close(r.symbol,'$20 net profit target');
-          continue;
-        }
         await this.ensureExit(r,p,r.rulesVersion===5?'sl20':r.rulesVersion===4?'sl4m':r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
         if(!['manual-profit','manual-profit-60s-loss'].includes(r.exitPolicy))await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
@@ -1024,7 +1095,7 @@ class DemoEngine {
       if(!this.newRules&&!this.experimentActive()&&this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; new entries paused. Manual-profit positions remain open.');this.save();}
       if(!this.newRules&&!this.experimentActive()&&this.state.goal)for(const r of this.active().filter(r=>r.exitPolicy!=='manual-profit-60s-loss'))await this.close(r.symbol,'$100 session goal');
       if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol)))this.pause('Unmanaged position detected; auto entries stopped.');
-      if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
+      if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId||r.lossReduction?.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
       if(this.auto&&Date.now()-this.lastScan>=1000)await this.scan();
       await this.scanRiskCheck();await this.reviewContinuation();
       this.block='';
