@@ -351,25 +351,26 @@ test('net break-even resets the loss timer',async()=>{
  f.position.unRealizedProfit=String(r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));
  await f.e.reconcile();assert.equal(r.lossSince,null);assert.equal(f.e.active().length,1);
 });
-test('profit ladder arms at $1 and doubles at each milestone',()=>{
+test('profit ladder arms strictly above $4 and doubles',()=>{
  const {profitFloor}=require('./engine.js');
- for(const [peak,floor] of [[.5,null],[.99,null],[1,.5],[1.99,.5],[2,1],[3,1],[4,2],[7.99,2],[8,4],[10.5,4],[16,8],[32,16]])
- assert.equal(profitFloor(peak),floor);
+ for(const [peak,floor] of [[.5,null],[1,null],[2,null],[3,null],[4,null],[4.01,4],[5,4],[8,4],[8.01,8],[16,8],[16.01,16],[32,16],[32.01,32]])assert.equal(profitFloor(peak),floor);
 });
-test('BUY and SELL profit floors rise, never fall, and close on pullback',async()=>{
+test('BUY and SELL remove old small floors, allow small profits, and close on doubled pullback',async()=>{
  for(const side of ['BUY','SELL']){
   const f=fixture();Object.assign(f.signal,{side,exitPolicy:'manual-profit-60s-loss',low:101,high:99});
   await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
   const setNet=n=>{f.position.unRealizedProfit=String(n+r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));};
-  setNet(1.1);await f.e.reconcile();assert.equal(r.profitFloor,.5);
-  setNet(.75);await f.e.reconcile();assert.equal(f.e.active().length,1);assert.equal(r.profitFloor,.5);
-  setNet(2.1);await f.e.reconcile();assert.equal(r.profitFloor,1);
-  setNet(3.1);await f.e.reconcile();assert.equal(r.profitFloor,1);
-  setNet(4.1);await f.e.reconcile();assert.equal(r.profitFloor,2);
-  setNet(2.5);await f.e.reconcile();assert.equal(r.profitFloor,2);assert.equal(f.e.active().length,1);
-  setNet(1.99);await f.e.reconcile();assert.equal(f.e.active().length,0);
-  assert.equal(r.closeReason,'Profit pullback to $2.00 floor');
+  r.peak=2;r.profitFloor=1;
+  for(const n of [.5,1,2,3,4]){setNet(n);await f.e.reconcile();assert.equal(r.profitFloor,null);assert.equal(f.e.active().length,1);}
+  for(const [n,floor] of [[5,4],[4.5,4],[9,8],[8.5,8],[17,16],[16.5,16]]){setNet(n);await f.e.reconcile();assert.equal(r.profitFloor,floor);assert.equal(f.e.active().length,1);}
+  setNet(15.99);await f.e.reconcile();assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'Profit pullback to $16.00 floor');
  }
+});
+test('five dollar peak closes on return to four dollars',async()=>{
+ const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ const fees=r.fee*r.filledQty*(r.entry+Number(f.position.markPrice));
+ f.position.unRealizedProfit=String(5+fees);await f.e.reconcile();assert.equal(r.profitFloor,4);
+ f.position.unRealizedProfit=String(4+fees);await f.e.reconcile();assert.equal(f.e.active().length,0);
 });
 test('50x override expires at its absolute deadline and retains $5 risk sizing',async()=>{
  const f=fixture();f.e.overrideUntil=Date.now()+3600000;f.signal.exitPolicy='manual-profit-60s-loss';
@@ -534,4 +535,11 @@ test('authorization rejection remains actionable rather than silently skipped',a
  const f=fixture(),original=f.api.call;
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/commissionRate')throw new DemoError('Key rejected',-2015);return original(m,p,q,s);};
  await assert.rejects(()=>f.e.enter(symbol,f.signal),/Key rejected/);
+});
+test('current demo rules ignore old loss timer and still close at $4',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ const fees=r.fee*r.filledQty*(r.entry+Number(f.position.markPrice));
+ r.lossSince=Date.now()-3600000;f.position.unRealizedProfit=String(-2+fees);
+ await f.e.reconcile();assert.equal(f.e.active().length,1);assert.equal(r.lossSince,null);
+ f.position.unRealizedProfit=String(-4.01+fees);await f.e.reconcile();assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$4 loss threshold');
 });

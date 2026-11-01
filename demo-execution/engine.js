@@ -129,7 +129,7 @@ function experimentSignal(raw,now){
   if(atr<=0)return null;
   return {side:price>open?'BUY':'SELL',price,close:number(b[6]),high:number(b[2]),low:number(b[3]),atr,stopDistance:1.5*atr,qualityConfirmed:true,experimental:true,leverage:3,intervalMs:60000,exitPolicy:'manual-profit-60s-loss'};
 }
-function profitFloor(peak){if(!Number.isFinite(peak)||peak<1)return null;let floor=.5;while(peak>=floor*4)floor*=2;return floor;}
+function profitFloor(peak){if(!Number.isFinite(peak)||peak<=4)return null;let floor=4;while(peak>floor*2)floor*=2;return floor;}
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
   const sign=side==='BUY'?1:-1;
@@ -469,13 +469,15 @@ class DemoEngine {
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
         if(r.exitPolicy==='manual-profit-60s-loss'){
           const raised=profitFloor(r.peak);
-          if(raised!==null)r.profitFloor=Math.max(r.profitFloor??0,raised);
+          // Recompute from the retained peak, replacing saved floors from older rules.
+          r.profitFloor=raised;
           this.save();
           if(Number.isFinite(r.profitFloor)&&net<=r.profitFloor){await this.close(r.symbol,'Profit pullback to $'+r.profitFloor.toFixed(2)+' floor');continue;}
           const observedAt=Date.now()+this.api.offset;
-          if(net<0){if(!Number.isFinite(r.lossSince))r.lossSince=observedAt;}else r.lossSince=null;
+          if(this.newRules)r.lossSince=null;
+          else if(net<0){if(!Number.isFinite(r.lossSince))r.lossSince=observedAt;}else r.lossSince=null;
           this.save();
-          if(net<=-(r.lossLimit??9)||(net<0&&observedAt-r.lossSince>=60000)){await this.close(r.symbol,net<=-(r.lossLimit??9)?'$'+(r.lossLimit??9)+' loss threshold':'Estimated net loss persisted for 60 seconds');continue;}
+          if(net<=-(r.lossLimit??9)||(!this.newRules&&net<0&&observedAt-r.lossSince>=60000)){await this.close(r.symbol,net<=-(r.lossLimit??9)?'$'+(r.lossLimit??9)+' loss threshold':'Estimated net loss persisted for 60 seconds');continue;}
           this.save();continue;
         }
         if(net<=-9||net>=40||(r.peak>10&&net<=10)){await this.close(r.symbol,net<=-9?'$9 loss threshold':net>=40?'$40 profit threshold':'$10 profit floor');continue;}
