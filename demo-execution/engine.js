@@ -7,7 +7,7 @@ const PRIVATE = {
   POST: new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),
   DELETE: new Set(['/fapi/v1/algoOrder','/fapi/v1/order'])
 };
-const ENTRY_REJECTIONS=new Set([-2010,-2019,-2020,-2025,-2026,-2027,-2028,-1111,-1121,-4004,-4005,-4014,-4023,-4028,-4067,-4068,-4164]);
+const ENTRY_REJECTIONS=new Set([-2010,-2019,-2020,-2025,-2026,-2027,-2028,-1111,-1121,-4004,-4005,-4014,-4023,-4028,-4067,-4068,-4164,-4202,-4203,-4205,-4206,-4208,-4209,-4403]);
 class DemoError extends Error { constructor(message, code=0, uncertain=false){super(message);this.code=code;this.uncertain=uncertain;} }
 class DemoAPI {
   constructor(key, signingKey, fetcher=(url,options)=>fetch(url,options), crypt=crypto){this.key=key;this.signingKey=signingKey;this.fetcher=fetcher;this.crypt=crypt;this.offset=0;this.synced=0;this.blockUntil=0;}
@@ -317,7 +317,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1–5m/10m/15m/20m/30m/60m · $100 minimum margin · adaptive leverage up to 50× · $8 planned loss · available USDT · net session $100 close-and-stop target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1–5m/10m/15m/20m/30m/60m · $100 margin · 50× or Binance maximum below 50× · $8 planned loss · available USDT · net session $100 close-and-stop target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -417,39 +417,62 @@ class DemoEngine {
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     const available=number(usdt.availableBalance),marginRoom=Math.max(0,5000-capital.reserved);
-    // Preserve the $100 margin floor by selecting leverage, never by shrinking the order.
-    // Round UP to the exchange lot step; skip if that exceeds any existing risk/cost limit.
-    const minimumPlan=(candidate,cap=Infinity)=>{
+    const minimumPlan=candidate=>{
       const quantity=rounded(Math.max(100*candidate/price,minNotional/price,number(lot.minQty),number(normal.minQty)),step,true);
-      const qty=number(quantity),notional=qty*price,margin=notional/candidate;
-      const costs=notional*fee*2;
-      if(margin+1e-8<100||margin>marginRoom+1e-8||margin+costs>available+1e-8||
-        qty>number(lot.maxQty)||qty>number(normal.maxQty)||notional>cap||
-        qty*(signal.stopDistance+fee*(2*price+signal.stopDistance))>lossLimit+1e-8||costs>1+1e-8)return null;
+      const qty=number(quantity),notional=qty*price;
       return {quantity,qty,notional};
     };
-    const candidates=this.newRules?[50,25,20,15,10,8,5,4,3,2,1].filter(n=>minimumPlan(n)):[preferredLeverage];
-    if(!candidates.length)return skip(available<100||marginRoom<100?'Waiting for at least $100 free margin plus fees; scanning continues':'$100 minimum margin cannot fit the current volatility, $8 stop, fee or Binance quantity limits; scanning continues');
-    progress('Configuring Cross margin and leverage');
+    if(this.newRules&&(available<100||marginRoom<100))return skip('Waiting for at least $100 free margin plus fees; scanning continues');
+    progress('Configuring Cross margin and maximum allowed leverage up to 50×');
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
     let leverage,selectedLeverage,minimumSize;
-    for(const candidate of candidates){
-      if(!this.auto||epoch!==this.stopEpoch)return skip('Auto stopped during leverage checks');
-      try{
-        leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:candidate});
-        if(number(leverage.leverage)!==candidate)throw new DemoError('Selected leverage not accepted');
-        if(this.newRules){
-          minimumSize=minimumPlan(candidate,number(leverage.maxNotionalValue)*.95);
-          if(!minimumSize)continue;
+    if(this.newRules){
+      // Only exchange leverage/capacity limits can lower leverage. Fees and
+      // volatility never silently replace a permitted 50x with a smaller value.
+      const tryLeverage=async candidate=>{
+        if(!this.auto||epoch!==this.stopEpoch)return false;
+        try{
+          const response=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:candidate});
+          if(number(response.leverage)!==candidate)throw new DemoError('Selected leverage not accepted');
+          const size=minimumPlan(candidate);
+          if(size.notional>number(response.maxNotionalValue))return false;
+          leverage=response;selectedLeverage=candidate;minimumSize=size;return true;
+        }catch(e){
+          if(e.uncertain||![-4028,-4202,-4203,-4205,-4206,-4208,-4209,-4403].includes(e.code))throw e;
+          return false;
         }
-        selectedLeverage=candidate;break;
-      }catch(e){if(e.uncertain||e.code!==-4028)throw e;}
+      };
+      if(!await tryLeverage(50)){
+        // Binance accepts integer leverage below its ceiling. Find the exact
+        // highest accepted value, including values absent from preset lists.
+        let low=1,high=49;
+        while(low<=high&&this.auto&&epoch===this.stopEpoch){
+          const candidate=Math.floor((low+high)/2);
+          if(await tryLeverage(candidate))low=candidate+1;else high=candidate-1;
+        }
+        // A successful capacity-ineligible probe can change the exchange setting.
+        if(selectedLeverage&&this.auto&&epoch===this.stopEpoch){
+          const confirmed=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
+          if(number(confirmed.leverage)!==selectedLeverage||minimumSize.notional>number(confirmed.maxNotionalValue))return skip('Binance leverage capacity changed; scanning continues');
+          leverage=confirmed;
+        }
+      }
+    }else{
+      leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:preferredLeverage});
+      if(number(leverage.leverage)!==preferredLeverage)throw new DemoError('Selected leverage not accepted');
+      selectedLeverage=preferredLeverage;
     }
-    if(!selectedLeverage)return skip('No supported leverage fits '+(this.newRules?'$100 minimum margin and Binance limits':'Binance limits')+'; scanning continues');
+    if(!selectedLeverage)return skip('No supported leverage permits $100 margin; scanning continues');
     let quantity,qty,notional;
     if(this.newRules){
       ({quantity,qty,notional}=minimumSize);
-      progress('Using '+selectedLeverage+'× with at least $100 estimated margin');
+      const margin=notional/selectedLeverage,costs=notional*fee*2;
+      if(margin+1e-8<100||margin>marginRoom+1e-8||margin+costs>available+1e-8)return skip('Not enough room for $100 margin plus fees at the maximum allowed leverage; scanning continues');
+      if(qty>number(lot.maxQty)||qty>number(normal.maxQty))return skip('$100 order exceeds Binance quantity limits; scanning continues');
+      if(costs>=lossLimit)return skip('Estimated trading fees already reach the $8 loss target at the required size; scanning continues');
+      const stop=number(exitPrice(price,qty,fee,-lossLimit,signal.side,priceFilter.tickSize));
+      if(signal.side==='BUY'?stop>=price:stop<=price)return skip('The $8 stop cannot fit Binance price ticks at this size; scanning continues');
+      progress('Using Binance maximum '+selectedLeverage+'× (capped at 50×) with $100 estimated margin');
       const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.leverage=selectedLeverage;
     }else{
       const budget=Math.min(100,(experimental?available:capital.free)/(1+2*selectedLeverage*fee),available/(1+2*selectedLeverage*fee));
@@ -471,7 +494,7 @@ class DemoEngine {
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?3:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     r.estimatedEntryMargin=notional/selectedLeverage;
-    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $100 minimum estimated margin; leverage selected within volatility, $8 planned stop, $1 commission budget and Binance limits; market fill margin may differ';
+    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $100 target margin; 50× or maximum Binance allows below 50×; $8 stop including estimated fees; market fill margin may differ';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -502,7 +525,8 @@ class DemoEngine {
     if(e){if(this.newRules&&e.confirmed&&Date.now()-(e.verifiedAt||0)<15000)return;const q=await this.queryExit(e);if(q.algoStatus==='NEW'){e.confirmed=true;e.verifiedAt=Date.now();return;}throw new DemoError(r.symbol+' protective '+kind+' is '+q.algoStatus+'; checking position.');}
     const triggerPrice=exitPrice(number(p.entryPrice),Math.abs(number(p.positionAmt)),r.fee,target,r.side,r.tick);
     const mark=number(p.markPrice);if((kind==='tp')?(r.side==='BUY'?mark>=+triggerPrice:mark<=+triggerPrice):(r.side==='BUY'?mark<=+triggerPrice:mark>=+triggerPrice)){await this.close(r.symbol,kind+' threshold reached');return;}
-    e={id:r.id+'_'+kind,kind,triggerPrice,confirmed:false};r.exits.push(e);this.save();
+    const prior=r.exits.filter(x=>x.kind===kind).length;
+    e={id:r.id+'_'+kind+(prior?'_'+prior:''),kind,triggerPrice,confirmed:false};r.exits.push(e);this.save();
     const result=await this.sendOnce('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:r.symbol,side:r.side==='BUY'?'SELL':'BUY',positionSide:'BOTH',type:kind==='tp'?'TAKE_PROFIT_MARKET':'STOP_MARKET',closePosition:'true',triggerPrice,workingType:'MARK_PRICE',priceProtect:'false',clientAlgoId:e.id},()=>this.queryExit(e));
     if(result.algoStatus!=='NEW')throw new DemoError('Protection was not confirmed NEW');
     e.confirmed=true;e.verifiedAt=Date.now();this.save();
@@ -518,32 +542,6 @@ class DemoEngine {
     const order=await this.sendOnce('/fapi/v1/order',{symbol,side:number(p.positionAmt)>0?'SELL':'BUY',positionSide:'BOTH',type:'MARKET',quantity:String(Math.abs(number(p.positionAmt))),reduceOnly:'true',newClientOrderId:r.pendingClose,newOrderRespType:'RESULT'},()=>this.api.call('GET','/fapi/v1/order',{symbol,origClientOrderId:r.pendingClose}));
     if(order.status==='FILLED'){r.pendingClose=null;this.save();}else throw new DemoError('Close order awaiting final status');
     await this.refresh();if(!this.position(symbol)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();this.event(symbol+' closed · '+reason);}
-  }
-  async maybeExtendRecovery(r,p,net){
-    const now=Date.now()+this.api.offset,previous=r.recoveryObservation;
-    r.recoveryObservation={net,at:now};
-    if(!this.newRules||r.recoveryExtended||r.lossLimit!==8||net<=-8||net> -6||!previous||now-previous.at>30000||net<=previous.net||now-(r.recoveryCheckedAt||0)<30000)return;
-    r.recoveryCheckedAt=now;
-    let fresh;
-    try{
-      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'1m',limit:30},false);
-      const trend=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'5m',limit:30},false);
-      if(!recoverySignal(raw,trend,r.side,Date.now()+this.api.offset)){r.recoveryNote='Recovery check not confirmed; $8 stop retained';return;}
-      const list=await this.api.call('GET','/fapi/v3/positionRisk',{symbol:r.symbol});
-      if(!Array.isArray(list))throw new DemoError('Invalid recovery position read');
-      fresh=list.find(x=>x.symbol===r.symbol&&x.positionSide==='BOTH'&&number(x.positionAmt)!==0);
-      if(!fresh){r.recoveryNote='Position no longer open; no extension';return;}
-      const qty=Math.abs(number(fresh.positionAmt)),freshNet=number(fresh.unRealizedProfit)-r.fee*qty*(number(fresh.entryPrice)+number(fresh.markPrice));
-      Object.assign(p,fresh);
-      if(Date.now()+this.api.offset-now>15000||qty!==r.filledQty||(number(fresh.positionAmt)>0)!==(r.side==='BUY')||number(fresh.entryPrice)!==r.entry||freshNet<=-8||freshNet> -6||freshNet<net){r.recoveryNote='Recovery changed during check; $8 stop retained';return;}
-    }catch(error){r.recoveryNote='Recovery data unavailable; $8 stop retained: '+error.message;return;}
-    // Persist the one-time decision. On reload, reconcile installs/verifies sl12
-    // before cancelling sl8, including an interrupted replacement.
-    r.recoveryExtended=true;r.lossLimit=12;r.recoveryNote='One-time recovery extension: improving loss + closed 1m candle + 5m trend';this.save();
-    await this.ensureExit(r,p,'sl12',-12);if(r.closedAt||r.pendingClose)return;
-    const stop=r.exits.find(e=>e.kind==='sl12'&&!e.cancelled&&e.confirmed);
-    if(!stop)throw new DemoError('Recovery stop not confirmed');
-    await this.cancelExits(r,stop.id);this.save();this.event(r.symbol+' recovery check passed: planned stop extended once to $12. Recovery is not guaranteed.');
   }
   async reconcile(){
     for(const r of this.active()){
@@ -569,15 +567,14 @@ class DemoEngine {
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       if(this.exitsSuspended(r)){r.netEstimate=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.protected=false;this.save();continue;}
       try{
-        if(this.newRules&&r.rulesVersion!==3){
+        if(this.newRules&&(r.rulesVersion!==3||r.lossLimit!==8||r.recoveryExtended||r.exits.some(e=>e.kind==='sl12'&&!e.cancelled))){
           // Confirm the tighter exchange stop before removing any old exits.
           await this.ensureExit(r,p,'sl8',-8);if(r.closedAt||r.pendingClose)continue;
           const stop=r.exits.find(e=>e.kind==='sl8'&&!e.cancelled);
           await this.cancelExits(r,stop.id);
-          r.rulesVersion=3;r.lossLimit=8;r.exitPolicy='manual-profit-60s-loss';r.experimentUntil=null;r.lossSince=null;this.save();
+          r.rulesVersion=3;r.lossLimit=8;r.recoveryExtended=false;r.recoveryNote='Fixed $8 loss target; no recovery extension';r.exitPolicy='manual-profit-60s-loss';r.experimentUntil=null;r.lossSince=null;this.save();
         }
-        await this.ensureExit(r,p,r.recoveryExtended?'sl12':r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
-        if(r.recoveryExtended){const stop=r.exits.find(e=>e.kind==='sl12'&&!e.cancelled&&e.confirmed);if(!stop)throw new DemoError('Recovery stop missing');await this.cancelExits(r,stop.id);}
+        await this.ensureExit(r,p,r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
         if(r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
         let net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
@@ -587,7 +584,6 @@ class DemoEngine {
           r.profitFloor=raised;
           this.save();
           if(Number.isFinite(r.profitFloor)&&net<=r.profitFloor){await this.close(r.symbol,'Profit pullback to $'+r.profitFloor.toFixed(2)+' floor');continue;}
-          await this.maybeExtendRecovery(r,p,net);if(r.closedAt||r.pendingClose)continue;
           net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;
           const observedAt=Date.now()+this.api.offset;
           if(this.newRules)r.lossSince=null;
