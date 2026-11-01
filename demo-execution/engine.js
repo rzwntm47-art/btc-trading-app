@@ -256,6 +256,12 @@ class DemoEngine {
     }
     throw new DemoError('Income history is incomplete. Entries paused.');
   }
+  incomeBreakdown(){
+    let gains=0,losses=0,commission=0,funding=0;
+    for(const x of this.income){const v=number(x.income);if(x.incomeType==='REALIZED_PNL'){if(v>0)gains+=v;else losses+=v;}else if(x.incomeType==='COMMISSION')commission+=v;else if(x.incomeType==='FUNDING_FEE')funding+=v;}
+    const realized=gains+losses,net=realized+commission+funding;
+    return {gains,losses,realized,commission,funding,net};
+  }
   sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0)-(this.newRules?(this.state.dayOpenPnl||0):0);}
   async start(){
     const epoch=this.stopEpoch;
@@ -270,7 +276,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m · requested 50× leverage · $4 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m · requested 50× leverage · $8 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -341,7 +347,7 @@ class DemoEngine {
     if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return skip('Signal validation failed');
     const experimental=this.experimentActive()&&signal.experimental===true;
     if(signal.experimental&&!experimental)return skip('Experiment expired; waiting for a normal signal');
-    const lossLimit=this.newRules?4:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
+    const lossLimit=this.newRules?8:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<60000)))return skip('Already traded this candle or 60s re-entry cooldown');
     progress('Checking Binance balance, positions and open orders');
     await this.refresh();
@@ -380,7 +386,7 @@ class DemoEngine {
     const budget=Math.min(100,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:(this.newRules?4:lossLimit)/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
     const cap=number(leverage.maxNotionalValue)*.95;
@@ -394,14 +400,14 @@ class DemoEngine {
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
-    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?2:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
+    const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?3:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
       // Install protection directly from a confirmed fill before slower balance reads.
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
-        try{if(!this.exitsSuspended(r)){await this.ensureExit(r,filled,r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(!r.closedAt&&r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;}this.save();}
+        try{if(!this.exitsSuspended(r)){await this.ensureExit(r,filled,r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(!r.closedAt&&r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;}this.save();}
         catch(e){this.pause('Protection failed immediately after fill.');await this.close(symbol,'Protection failure');throw e;}
       }
     }
@@ -466,14 +472,14 @@ class DemoEngine {
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       if(this.exitsSuspended(r)){r.netEstimate=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.protected=false;this.save();continue;}
       try{
-        if(this.newRules&&r.rulesVersion!==2){
+        if(this.newRules&&r.rulesVersion!==3){
           // Confirm the tighter exchange stop before removing any old exits.
-          await this.ensureExit(r,p,'sl4',-4);if(r.closedAt||r.pendingClose)continue;
-          const stop=r.exits.find(e=>e.kind==='sl4'&&!e.cancelled);
+          await this.ensureExit(r,p,'sl8',-8);if(r.closedAt||r.pendingClose)continue;
+          const stop=r.exits.find(e=>e.kind==='sl8'&&!e.cancelled);
           await this.cancelExits(r,stop.id);
-          r.rulesVersion=2;r.lossLimit=4;r.exitPolicy='manual-profit-60s-loss';r.experimentUntil=null;r.lossSince=null;r.peak=null;r.profitFloor=null;this.save();
+          r.rulesVersion=3;r.lossLimit=8;r.exitPolicy='manual-profit-60s-loss';r.experimentUntil=null;r.lossSince=null;this.save();
         }
-        await this.ensureExit(r,p,r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
+        await this.ensureExit(r,p,r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
         if(r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
         const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
