@@ -1,0 +1,5 @@
+.local/
+node_modules/
+.openai/
+preview/
+.btc-demo-laptop/

@@ -1,27 +1,49 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://demo-fapi.binance.com http://127.0.0.1:10000; base-uri 'none'; form-action 'none'; img-src 'self'"><title>Binance Demo Auto Trader</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://demo-fapi.binance.com http://127.0.0.1:10000; base-uri 'none'; form-action 'none'; img-src 'self' data:"><title>Binance Demo Auto Trader</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#09121d;color:#edf4fc;font:14px system-ui}main{max-width:1400px;margin:auto;padding:16px}header,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between}h1{font-size:22px;margin:8px 0}h2{font-size:16px;margin:0 0 12px}h3{font-size:14px}a{color:#89caff}p,small{color:#a9bdd0;line-height:1.5}small{display:block}section,details,.metric{background:#112235;border:1px solid #294158;border-radius:10px;padding:14px;margin:10px 0}summary{cursor:pointer}label{display:block;margin:10px 0 6px}input[type=password]{width:100%;padding:10px;background:#09121d;color:white;border:1px solid #426079;border-radius:6px}button{padding:9px 12px;background:#234f6b;color:white;border:1px solid #52748c;border-radius:7px;font:inherit;cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{background:#146747}.danger{background:#793447}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.metric b{font-size:23px;display:block;margin-top:4px}.columns{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:12px}.columns section{min-width:0}.scroll{max-height:400px;overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 5px;border-bottom:1px solid #294158;font-size:12px;overflow-wrap:anywhere}th{color:#a9bdd0;background:#112235;position:sticky;top:0}#status{padding:12px;border:1px solid #426079;border-radius:8px;white-space:pre-wrap}#log{font-size:12px;line-height:1.6}.good{color:#4bd9a4}.bad{color:#ff8396}.authgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.columns{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.metric:last-child{grid-column:1/-1}.authgrid{grid-template-columns:1fr}.scroll{max-height:280px}}[hidden]{display:none!important}
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.45</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.46</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for USDT cross-margin trading.</small></details>
-<div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="copyTradeReport">Copy trade report</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" hidden disabled>New $100 session</button></div>
+<div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="pairMobile" type="button">Pair Mobile</button><button id="copyTradeReport">Copy trade report</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" hidden disabled>New $100 session</button></div>
+
+<section id="pairPanel" hidden aria-labelledby="pairHeading">
+<div class="actions"><h2 id="pairHeading">Pair Mobile</h2><button id="closePair" type="button">Close</button></div>
+<p>Your laptop runs one Demo bot. Your phone controls that same bot. API keys stay on the laptop.</p>
+<details><summary>First-time laptop setup — required</summary>
+<ol>
+<li>Stop Auto, wait for pending actions to finish, then stop the old connector window.</li>
+<li><a href="https://github.com/rzwntm47-art/btc-trading-app/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer">Download the updated laptop files</a>, extract the ZIP, open <b>render-backend</b>, and double-click <b>START-LAPTOP.cmd</b>. Keep its window open. Paste its local token below.</li>
+<li>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener noreferrer">Tailscale</a> on laptop and phone, sign in to the same private network, and keep it connected. No Run command is needed on mobile.</li>
+<li>Run <b>ENABLE-MOBILE.cmd</b> on the laptop (right-click → Run as administrator if permission is required). Follow its HTTPS approval link if shown. Copy the private HTTPS address it prints into the field below. This shares only the connector with devices on your private Tailscale network.</li>
+</ol><p>Keep the laptop awake and online. Closing the laptop connector or restarting Windows stops the bot. After restarting, reconnect on the laptop and pair again. No paid server is used.</p>
+</details>
+<label for="pairToken">Local token from START-LAPTOP.cmd (leave blank if this dashboard already has it)</label><input id="pairToken" type="password" autocomplete="off">
+<label for="pairPassword">Saved-key password (to move an existing browser connection)</label><input id="pairPassword" type="password" autocomplete="off" placeholder="Your save / unlock password">
+<small>If keys were not saved, enter them in Connect Binance Demo above. Do not click its Connect button; use the button below.</small>
+<label><input id="backgroundConsent" type="checkbox"> Use my Binance Demo key for the laptop background bot. Move existing bot tracking and stop browser automation.</label>
+<div class="actions"><button id="connectBackground" type="button">Connect laptop / reconnect controls</button></div>
+<p id="pairStatus" role="status" aria-live="polite">Complete the laptop setup, then connect. New entries remain stopped until Start / Resume Demo.</p>
+<label for="mobileOrigin">Private HTTPS laptop address from ENABLE-MOBILE.cmd</label><input id="mobileOrigin" type="url" placeholder="https://your-laptop.your-network.ts.net" style="width:100%;padding:12px;background:#181a20;color:white;border:1px solid #52748c;border-radius:6px">
+<div class="actions"><button id="makeQr" type="button" class="primary">Generate mobile QR</button><button id="revokePhones" type="button">Revoke all phones</button></div>
+<div id="pairQr" hidden><img id="pairQrImage" alt="One-time mobile pairing QR code" style="display:block;width:min(300px,100%);height:auto;background:white;margin:16px 0"><p id="pairQrNote"></p><a id="pairLink" target="_blank" rel="noopener noreferrer">Open mobile controller</a></div>
+</section><p id="backgroundNote" hidden role="status"></p>
 <textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
 <p id="leverageWindow">$200 margin · adaptive leverage up to 50× · Cross · 1–5m / 10m / 15m / 20m / 30m / 60m entries</p><small>Up to $5,000 demo USDT margin budget · $200 target margin per new trade; $8 planned stop-loss · No timed loss exit; $8 stop only; no recovery extension · profit floors activate above $4 → $8 → $16 → $32 → $37 → $42… · $100 net session target: close bot positions and stop.</small>
 <section><h2>Available USDT · margin allocation</h2><b id="budgetValue">Awaiting account</b><small>Uses USDT collateral only; no BTC or USDC conversions. Cross positions share available USDT. Stops target $8 including estimated fees; actual losses can be larger due to gaps or execution delays.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>Binance unrealized P&amp;L · USDT positions</small><b id="unrealized">—</b><small id="unrealizedNote">Open positions only · before commissions and funding</small></div></div>
 <section><h2>Net trading result · $100 target</h2><b id="session">—</b><small id="sessionNote">Awaiting trading window</small><p id="pnlEquation"></p><small>Compare the unrealized box above with Binance unrealized P&amp;L. This net result includes booked trading results and costs; it is a different measure.</small></section><section><h2>Why is my USDT wallet changing?</h2><p id="incomeAudit">Awaiting Binance income history</p><p id="incomeDiagnosis"></p><small>Account-wide USDT realized P&amp;L, commission and funding since the displayed trading-day/reset start. Includes manual trades; excludes transfers, asset resets and other income types. Open profit is not booked profit. This is not a full wallet reconciliation. Share this panel to diagnose losses; never share API keys.</small></section><div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><small id="moversNote">Futures gainers / losers priority</small><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
-<p><small>Switching tabs or viewing the paper simulator does not stop Demo Auto. Keep this app tab open and the computer awake. Chrome may delay or suspend background work; closing this tab or shutting down cannot automatically close positions. Accepted Binance protective stops remain active.</small></p><details open><summary>Activity &amp; connection</summary><div id="log"></div></details>
+<p id="browserRequirement"><small>Browser mode: switching tabs or viewing the paper simulator does not stop Demo Auto. Keep this app tab open and the computer awake. Chrome may delay or suspend background work; closing this tab or shutting down cannot automatically close positions. Accepted Binance protective stops remain active.</small></p><details open><summary>Activity &amp; connection</summary><div id="log"></div></details>
 <details><summary>How this demo works</summary>
 <p>The $100 goal over 2–3 hours is aspirational. No deadline forces entries, and profitability has not been established by backtesting or live validation.</p><p>Prioritizes the top 10 positive and top 10 negative 24-hour percentage movers among eligible trading USDT-margined perpetuals, refreshed at most once per minute. Ranked gainers require BUY confirmation and ranked losers require SELL confirmation, including when reached by the full-market scan. An opposite signal is skipped while other timeframes are checked. Eight rotating mover slots per scan are followed by recent-candidate rechecks and four full-market cursor slots, so all coins continue to be checked. Rankings come from Futures demo market data and may differ from Binance Spot or another selected list period. Ranking is not a profitability signal. Each coin is evaluated on closed 1-minute candles, then complete 2-minute, 3-minute, 4-minute and 5-minute candles, followed by 10-, 15-, 20-, 30- and 60-minute candles if earlier timeframes do not qualify. Longer candles use complete UTC-aligned groups of 5-minute candles; the existing 5-minute trend confirmation remains. Selective entries require a confirming 5-minute trend, volume at least 1.5× its recent average, body at least 50% of candle range, and close strength at least 75%. Additionally, volume must reach 2× average or the candle must have at least 90% close strength and 70% body. A two-ATR movement must exceed three times estimated round-trip commission per unit; this is a cost screen, not a price forecast. BUY and SELL are supported. New entries target $200 margin before trading fees. Before each entry, fresh closed 1m candles must still confirm the trade direction, with a directional body, close location and 5/20-period mean alignment. This measures observed momentum; it does not predict the next 30 seconds. Leverage is selected from 1× to 50× using current 1-minute average true range, your commission rate and lot/tick sizes. The initial sizing check requires room for one recent 1-minute ATR plus estimated round-trip fees inside the $8 stop. This is an unvalidated sizing rule, not a forecast. Binance leverage and capacity limits can reduce the choice further. Recent 1m movement must also clear the existing commission screen. Immediately before dispatch, fresh best bid/ask and mark prices are checked. Entries are skipped if the quoted spread plus estimated fees already reaches the $8 loss target, or the current mark would trigger the planned stop. These quotes are estimates: market depth, fills and later prices can differ. No order is forced if those constraints cannot fit. With $200 margin, higher leverage increases position value and estimated fees. 50× is a ceiling, not a target for every entry. Entry checks have not been shown to make this strategy profitable. Existing positions retain their leverage. No trade is guaranteed profitable and these rules have not been validated by profitability backtesting.</p>
 <p>Uses available USDT within a $5,000 total margin budget, a $200 target margin per entry. Quantity rounds up to Binance’s lot step; leverage adapts to recent volatility and fees, then respects Binance leverage or capacity limits. If available margin including fees or total margin room is insufficient, no smaller order is sent. Market fill prices and partial fills can change actual entry margin; the bot does not automatically top up a fill. Existing positions are not resized. Estimated round-trip commission is shown with each position. If fees already reach the $8 loss target, no new entry is sent; actual fees may differ. The $8 planned stop remains. Market orders may incur spread and slippage. Orders respect Binance quantity, notional and leverage limits. No fixed position-count cap; one per symbol, within available collateral and the total margin budget. At least 60 seconds between filled entries and 10 minutes before re-entering a closed symbol. Cross margin shares collateral.</p>
 <p>Existing bot-owned positions adopt the new exit rules on reconciliation. A replacement $8 exchange stop is confirmed before old exits are cancelled. If the loss threshold is already breached, a reduce-only close is attempted. Existing positions keep their leverage. There is no timed loss exit. Positions close when estimated net loss reaches $8; actual execution can differ because of fees, polling delays and slippage.</p>
-<p>No recovery extension: all bot positions use an $8 planned net loss stop. On connection, any saved $12 stop is replaced by a confirmed $8 stop before the old stop is cancelled. If the tighter threshold is already reached, a reduce-only close is attempted. Profit rules are unchanged.</p><p>Profit can keep growing. No profit floor applies until observed net profit exceeds $4. Above $4 activates a $4 floor; above $8 activates $8; above $16 activates $16; above $32 activates $32, then floors increase by $5 ($37, $42, $47…). Exactly reaching a new milestone does not activate it until profit exceeds it. A pullback to or below the floor triggers a market close. The floor never decreases. Manual close remains available. Profit floors require this page open and connected; the exchange stop remains active after page closure. Polling, outages, fees, funding and slippage can change realized results.</p>
+<p>No recovery extension: all bot positions use an $8 planned net loss stop. On connection, any saved $12 stop is replaced by a confirmed $8 stop before the old stop is cancelled. If the tighter threshold is already reached, a reduce-only close is attempted. Profit rules are unchanged.</p><p>Profit can keep growing. No profit floor applies until observed net profit exceeds $4. Above $4 activates a $4 floor; above $8 activates $8; above $16 activates $16; above $32 activates $32, then floors increase by $5 ($37, $42, $47…). Exactly reaching a new milestone does not activate it until profit exceeds it. A pullback to or below the floor triggers a market close. The floor never decreases. Manual close remains available. Profit floors require the browser page open in browser mode, or the laptop connector running in background mode; the exchange stop remains active after page closure. Polling, outages, fees, funding and slippage can change realized results.</p>
 <p>At an observed $100 net session result, the bot closes its own positions and stops new entries. Final realized profit may be below $100 because of closing fees, slippage or delays. The target stop stays locked across reloads and midnight until you explicitly select New $100 session while flat. Manual positions are not closed. Unless the target stop is locked, the Dubai trading day resets at midnight. Daily P&amp;L includes USDT realized trading P&amp;L, commissions, funding and the change in open P&amp;L from the day’s first account snapshot. Unobserved midnight changes can affect attribution. Credentials and trade history are retained. No live trading, withdrawals or asset conversions.</p></details>
 </main><script>
 'use strict';
-const APP_VERSION='1.45';
+const APP_VERSION='1.46';
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
 const DEMO_BASE = 'https://demo-fapi.binance.com';
 const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/ticker/bookTicker','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
@@ -839,6 +861,7 @@ class DemoEngine {
 }
 if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
 
+
 </script><script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -938,7 +961,7 @@ function render(){
 async function run(fn,kind='action'){
  const target=engine;if(!target)return;
  try{await target.control(async()=>{if(engine===target)await fn();},kind);}
- catch(error){target.block=error.message;target.pause(error.message);}
+ catch(error){if(target.remote){target.block='Action not confirmed: '+error.message;status(target.block);return;}target.block=error.message;target.pause(error.message);}
  finally{render();}
 }
 async function acquireLock(){
@@ -959,6 +982,7 @@ $('connectform').onsubmit=async event=>{
   $('relayToken').value='';
   $('key').value='';$('secret').value='';connectionBusy=true;render();status('Connecting to Binance Demo…');
   try{
+    if(relayToken)await ensureNoBackground(relayToken);
     await acquireLock();
     const signingKey=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key));
@@ -986,13 +1010,14 @@ $('stop').onclick=()=>{engine?.pause('Stopped by user. Existing protective exits
 $('again').onclick=()=>run(()=>engine.again());
 $('refresh').onclick=()=>run(async()=>{if(!engine.tradingReady){await engine.refreshBalance();return;}await engine.refresh();await engine.reconcile();await engine.updateIncome();});
 $('disconnect').onclick=()=>{
+  if(engine?.remote){disconnectBackground();return;}
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet','unrealized','pnlEquation','incomeAudit','incomeDiagnosis','sessionNote','unrealizedNote'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
-setInterval(()=>{if(engine?.connected)engine.tick();},5000);
+setInterval(()=>{if(engine?.connected&&!engine.remote)engine.tick();},5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.connected)engine.tick();});
-window.addEventListener('beforeunload',event=>{if(engine?.busy){event.preventDefault();event.returnValue='';}});
-window.addEventListener('pagehide',()=>{engine?.pause();engine?.api.clear();releaseLock?.();});
+window.addEventListener('beforeunload',event=>{if(engine?.busy&&!engine.remote){event.preventDefault();event.returnValue='';}});
+window.addEventListener('pagehide',()=>{if(!engine?.remote){engine?.pause();engine?.api.clear();releaseLock?.();}});
 render();
 
 const paperLink=document.querySelector('a[href="./"]')||document.querySelector('a[href="index.html"]');
@@ -1039,4 +1064,151 @@ $('copyTradeReport').onclick=async()=>{
   catch{$('tradeReportText').hidden=false;$('tradeReportText').value=report;$('tradeReportText').focus();$('tradeReportText').select();status('Select and copy the displayed trade report.');}
 };
 
+
+</script><script>
+'use strict';
+// Remote views receive snapshots and explicit commands only. They never execute DemoAPI calls.
+const onPhoneController=location.pathname==='/mobile';
+let remoteTransport=null,remotePollBusy=false,pairExpiryTimer;
+function pairMessage(text){$('pairStatus').textContent=text;}
+async function remoteRequest(transport,path,data){
+  const headers={},options={method:data===undefined?'GET':'POST',headers,cache:'no-store',credentials:transport.mobile?'same-origin':'omit',redirect:'error',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(15000)};
+  if(transport.token)headers.Authorization='Bearer '+transport.token;
+  if(data!==undefined){headers['Content-Type']='application/json';options.body=JSON.stringify({...data,...(transport.mobile?{csrf:transport.csrf}:{})});}
+  let response;try{response=await fetch(transport.base+transport.prefix+path,options);}catch{throw Error(transport.mobile?'Cannot reach your laptop. Check that it is awake, the connector is open, and Tailscale is connected on both devices.':'Cannot reach the laptop connector. Run START-LAPTOP.cmd, allow local-network access if your browser asks, then try again.');}
+  let result;try{result=await response.json();}catch{throw Error('Update the laptop connector using the download in Pair Mobile.');}
+  if(!response.ok)throw Error(response.status===404?'This is the old connector. Download the update and run START-LAPTOP.cmd.':result.error||'Request failed ('+response.status+').');
+  if(result.csrf)transport.csrf=result.csrf;
+  return result;
+}
+class RemoteDemo extends DemoEngine{
+  constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.transport=transport;}
+  apply(snapshot){
+    if(snapshot.engine)Object.assign(this,snapshot.engine);else{this.connected=false;this.auto=false;this.busy=false;this.controlPending=false;}
+    this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.transport.generation=snapshot.generation;
+    render();$('credentials').hidden=true;$('backgroundNote').hidden=false;$('browserRequirement').hidden=true;
+    if(onPhoneController){$('resetDemo').hidden=true;$('pairMobile').hidden=true;}
+    if(!this.connected)status(snapshot.connecting?'Laptop is connecting to Binance Demo. Please wait…':snapshot.error||'Laptop bot is disconnected. Reconnect on the laptop.');
+    else status('LAPTOP BACKGROUND BOT · '+$('status').textContent);
+    $('backgroundNote').textContent='Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
+    if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.connecting?'Connecting in the background…':this.connected?'Laptop connected · '+snapshot.pairedDevices+' paired phone(s). Generate a QR below.':snapshot.error||'Reconnect Binance on the laptop.');}
+  }
+  async command(action,extra={}){
+    const id=crypto.randomUUID();
+    let entry=await remoteRequest(this.transport,'/command',{id,action,...extra});
+    const until=Date.now()+180000;
+    while(entry.status==='pending'&&Date.now()<until){await new Promise(r=>setTimeout(r,750));entry=await remoteRequest(this.transport,'/command?id='+encodeURIComponent(id));}
+    if(entry.status==='pending')throw Error('Action is still running on the laptop. Sync before trying another command.');
+    if(entry.status==='error')throw Error(entry.error);
+    await pollRemote();return entry.report;
+  }
+  async control(fn){if(this.localControl)return false;this.localControl=true;try{await fn();return true;}finally{this.localControl=false;}}
+  start(){return this.command('start');}
+  pause(){this.command('stop').catch(error=>status('Stop was not confirmed: '+error.message));}
+  refresh(){return this.command('refresh');}
+  refreshBalance(){return this.refresh();}
+  initialize(){return this.refresh();}
+  reconcile(){return Promise.resolve();}
+  updateIncome(){return Promise.resolve();}
+  close(symbol){return this.command('close',{symbol});}
+  again(){return this.command('again');}
+  resetFromBinance(){return this.command('reset');}
+  freshTradeReport(){return this.command('report');}
+  tick(){return pollRemote();}
+}
+async function pollRemote(){
+  if(!remoteTransport||remotePollBusy)return;remotePollBusy=true;
+  try{
+    const snapshot=await remoteRequest(remoteTransport,'/status');
+    if(!engine?.remote)engine=new RemoteDemo(remoteTransport);
+    engine.apply(snapshot);
+  }catch(error){
+    if(engine?.remote){engine.connected=false;engine.auto=false;render();}
+    status('LAPTOP CONNECTION LOST · '+error.message+' The laptop may still be trading; no stop is confirmed.');pairMessage(error.message);
+  }finally{remotePollBusy=false;}
+}
+async function attachBackground(transport,snapshot){
+  remoteTransport=transport;engine=new RemoteDemo(transport);engine.apply(snapshot);
+  $('key').value='';$('secret').value='';$('relayToken').value='';$('pairToken').value='';$('pairPassword').value='';
+  releaseLock?.();releaseLock=null;
+}
+async function disconnectBackground(){
+  if(!engine?.remote)return;
+  try{await engine.command('disconnect');remoteTransport=null;engine=null;$('credentials').hidden=false;$('credentials').open=true;$('backgroundNote').hidden=true;status('Laptop background bot disconnected. Accepted exchange protective exits remain.');render();}
+  catch(error){status('Disconnect not confirmed: '+error.message);}
+}
+async function ensureNoBackground(token){
+  const transport={base:'http://127.0.0.1:10000',prefix:'/host',token};
+  const response=await fetch(transport.base+'/host/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(4000),cache:'no-store',credentials:'omit'});
+  if(response.status===404)return; // Existing V1 relay remains supported for browser mode.
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||'Cannot check laptop background bot.');
+  if(data.connecting||data.engine)throw Error('The laptop background bot already owns trading. Click Pair Mobile → Connect laptop / reconnect controls.');
+}
+$('pairMobile').onclick=()=>{$('pairPanel').hidden=!$('pairPanel').hidden;if(!$('pairPanel').hidden)$('pairPanel').scrollIntoView({behavior:'smooth',block:'start'});};
+$('closePair').onclick=()=>{$('pairPanel').hidden=true;};
+$('connectBackground').onclick=async()=>{
+  if(connectionBusy)return;
+  $('connectBackground').disabled=true;pairMessage('Checking laptop connector…');
+  try{
+    let saved=null;const password=$('pairPassword').value;
+    if(password)saved=await readCredentials(password);
+    const token=$('pairToken').value.trim()||remoteTransport?.token||engine?.api?.relayToken||$('relayToken').value.trim()||saved?.relayToken;
+    if(!token||token.length<32)throw Error('Paste the local token printed by START-LAPTOP.cmd.');
+    const transport={base:'http://127.0.0.1:10000',prefix:'/host',token};
+    const initial=await remoteRequest(transport,'/status');
+    if(initial.version!==2)throw Error('Update the laptop connector first.');
+    if(initial.engine||initial.connecting){
+      if(engine&&!engine.remote){engine.pause();const old=engine;const stopped=await old.control(async()=>{old.connected=false;old.api.clear();});if(!stopped)throw Error('Wait for the current dashboard action to finish.');}
+      await attachBackground(transport,initial);return;
+    }
+    const key=saved?.key||$('key').value.trim(),secret=saved?.secret||$('secret').value.trim();
+    if(!key||!secret)throw Error('Enter your saved-key password above, or enter your Demo API key and HMAC secret in Connect Binance Demo first.');
+    if(!$('backgroundConsent').checked)throw Error('Tick the Binance Demo confirmation above before moving trading to the laptop.');
+    let state;
+    if(engine&&!engine.remote){
+      if(engine.api.key!==key)throw Error('The unlocked key is different from the active account. Use the same account for transfer.');
+      const old=engine;old.pause('Moving control to the laptop background bot.');
+      const stopped=await old.control(async()=>{old.save();state=JSON.parse(JSON.stringify(old.state));old.connected=false;old.api.clear();});
+      if(!stopped)throw Error('Wait for the current dashboard action to finish.');
+    }else{
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key));
+      const journalKey='btc_demo_orders_v1_'+Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
+      const raw=localStorage.getItem(journalKey);state=raw?JSON.parse(raw):null;
+    }
+    releaseLock?.();releaseLock=null;engine=null;render();
+    // Once submitted, never resume the browser bot automatically, even on a lost response.
+    remoteTransport=transport;
+    const snapshot=await remoteRequest(transport,'/connect',{requestId:crypto.randomUUID(),key,secret,state,demoOnly:true});
+    await attachBackground(transport,snapshot);pairMessage('Connecting. Automatic entries stay stopped until you press Start / Resume Demo.');
+  }catch(error){pairMessage(error.message);}
+  finally{$('pairPassword').value='';$('connectBackground').disabled=false;}
+};
+$('makeQr').onclick=async()=>{
+  $('makeQr').disabled=true;$('pairQr').hidden=true;clearTimeout(pairExpiryTimer);
+  try{
+    if(!remoteTransport||remoteTransport.mobile||!engine?.remote||!engine.connected)throw Error('Connect the laptop background bot first using the button above.');
+    const result=await remoteRequest(remoteTransport,'/pair',{origin:$('mobileOrigin').value.trim()});
+    $('pairQrImage').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(result.svg);
+    $('pairLink').href=result.url;$('pairLink').textContent='Open mobile controller';$('pairQr').hidden=false;
+    $('pairQrNote').textContent='Scan with your phone camera. Open the link in Safari or Chrome with Tailscale on. Expires in 2 minutes and works once. Add the controller to your home screen after pairing.';
+    pairExpiryTimer=setTimeout(()=>{$('pairQr').hidden=true;$('pairQrImage').removeAttribute('src');$('pairLink').removeAttribute('href');pairMessage('QR expired. Generate a new one.');},Math.max(0,result.expires-Date.now()));
+  }catch(error){pairMessage(error.message);}
+  finally{$('makeQr').disabled=false;}
+};
+$('revokePhones').onclick=async()=>{
+  try{if(!remoteTransport||remoteTransport.mobile)throw Error('Connect the laptop controls first.');await remoteRequest(remoteTransport,'/revoke',{});$('pairQr').hidden=true;clearTimeout(pairExpiryTimer);await pollRemote();pairMessage('All phone access revoked. Laptop trading state is unchanged.');}
+  catch(error){pairMessage(error.message);}
+};
+setInterval(()=>{if(remoteTransport)pollRemote();},3000);
+if(onPhoneController){
+  $('credentials').hidden=true;$('pairMobile').hidden=true;$('pairPanel').hidden=true;$('resetDemo').hidden=true;
+  const paper=document.querySelector('a[href="./"]');if(paper)paper.hidden=true;
+  $('backgroundNote').hidden=false;$('backgroundNote').textContent='Connecting to your laptop…';
+  const code=new URLSearchParams(location.hash.slice(1)).get('pair');history.replaceState(null,'','/mobile');
+  remoteTransport={base:'',prefix:'/mobile',mobile:true};
+  (async()=>{try{if(code)await remoteRequest(remoteTransport,'/pair',{code});await pollRemote();}catch(error){status(error.message);}})();
+}
+
 </script></body></html>
+

@@ -5,11 +5,12 @@ const BASE='https://demo-fapi.binance.com';
 const ORIGIN='https://rzwntm47-art.github.io';
 const routes={GET:new Set(['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/positionSide/dual','/fapi/v1/multiAssetsMargin','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/commissionRate','/fapi/v1/income']),POST:new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),DELETE:new Set(['/fapi/v1/algoOrder','/fapi/v1/order'])};
 function equal(a,b){const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y)}
-function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now}={}){
+function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now,extension,relayLocked=()=>false}={}){
  let active=0,windowAt=now(),count=0,cooldown=0,probeAt=-Infinity,probe=null;
  return http.createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
   const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data))};
+  if(extension&&await extension(req,res,send))return;
   const origin=req.headers.origin;
   if(origin&&origin!==ORIGIN)return send(403,{error:'Origin not allowed'});
   if(origin){res.setHeader('Access-Control-Allow-Origin',ORIGIN);res.setHeader('Vary','Origin');}
@@ -23,6 +24,7 @@ function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now}
   if(req.method!=='POST'||req.url!=='/relay')return send(404,{error:'Not found'});
   if(!token||token.length<32)return send(503,{error:'Set a random RELAY_TOKEN of at least 32 characters in Render.'});
   if(!equal(req.headers.authorization,'Bearer '+token))return send(401,{error:'Backend access token rejected'});
+  if(relayLocked())return send(409,{error:'Laptop background bot owns this connection. Open Pair Mobile to control it.'});
   if(now()<cooldown)return send(429,{error:'Binance cooldown; no request forwarded'});
   if(now()-windowAt>=60000){windowAt=now();count=0;}
   if(++count>180||active>=4)return send(429,{error:'Backend rate limit; no request forwarded'});
@@ -50,3 +52,4 @@ function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now}
 }
 if(require.main===module)createServer().listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('Binance Demo backend listening'));
 module.exports={createServer};
+

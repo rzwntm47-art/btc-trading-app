@@ -1,0 +1,19 @@
+# Pair Mobile (V1.46)
+
+This mode runs the existing Binance Demo engine on your Windows laptop. The phone only sends controls and reads status. No live-trading endpoint is supported.
+
+1. In your old dashboard, Stop Auto and wait for pending work to finish. Stop the old local connector window. Do not delete browser data: it contains the existing order journal and encrypted credentials.
+2. Download and extract the complete repository ZIP. Inside `render-backend`, double-click `START-LAPTOP.cmd`. Node.js 22 or later must be installed. Keep that window open. Copy its local token only to your laptop dashboard.
+3. Install Tailscale on the laptop and phone, sign in to the same private network and connect both. On the laptop run `ENABLE-MOBILE.cmd`. If Windows denies permission, right-click it and choose Run as administrator. If Tailscale prints an HTTPS approval link, follow it and rerun the script if needed. The script refuses to replace another existing HTTPS service or use public Funnel sharing.
+4. Open the trading dashboard, refresh to V1.46, and click **Pair Mobile** beside **Sync Binance**. Paste the connector token. Enter your saved-key password, or fill the Demo key/secret fields in the existing connection form. Tick the Demo confirmation in Pair Mobile and click **Connect laptop / reconnect controls**.
+5. This pauses browser automation, waits for pending work, and imports the matching account's browser order journal if there is no laptop journal yet. Existing laptop journals take precedence. Binance account and order checks run before Start becomes available. **New entries do not start automatically.**
+6. Paste the private HTTPS address printed by `ENABLE-MOBILE.cmd`, then **Generate mobile QR**. Scan with your phone's camera and open the link in Safari/Chrome while Tailscale is connected. The link opens the same app's remote controller. Save that controller to your home screen for subsequent use; the old GitHub home-screen icon still points to browser mode.
+7. Start / Resume Demo, Stop Auto, Sync Binance, New $100 session, Copy trade report and bot-owned position Close work through the laptop. Reset and disconnect remain laptop-only. Closing a phone or laptop browser does not stop this background mode. Keep the laptop awake, online, and its connector window open.
+
+The QR expires after two minutes and can be used once. It contains a random pairing code and private address, never a Binance key or the laptop token. Phone access uses a Secure, HttpOnly, SameSite cookie; **Revoke all phones** invalidates it immediately without changing the trading state. Closing the connector or restarting Windows clears API credentials and phone sessions. Reconnect and pair again after a restart. A lost phone connection does not confirm a stop: the bot may still run on the laptop. Commands show pending/completed status and deduplicate repeated request IDs; do not resubmit a close if its outcome is unknown.
+
+The connector binds to `127.0.0.1:10000`. Tailscale Serve provides private HTTPS; do not open that port on your router. Binance calls continue from the laptop's ordinary connection; this feature does not bypass exchange regional restrictions. An account snapshot is not proof that every order endpoint is permitted. No orders or user credentials are used in the automated tests.
+
+The connector stores its local token and non-secret order journals under the current Windows user's `.btc-demo-laptop` directory. Binance secrets stay in process memory; the existing browser credential vault remains encrypted. Never commit or share that directory.
+
+Validation: run `node --test render-backend/*.test.cjs demo-execution/*.test.cjs` from the repository root. Build the standalone app with `node demo-execution/build.cjs`, then copy its generated `demo-connect.html` to the repository root.

@@ -1,1 +1,1 @@
-{"name":"btc-demo-backend","version":"1.0.0","private":true,"engines":{"node":">=22"},"scripts":{"start":"node server.cjs","test":"node --test server.test.cjs"}}
+{"name":"btc-demo-backend","version":"2.0.0","private":true,"engines":{"node":">=22"},"scripts":{"start":"node server.cjs","desktop":"node desktop.cjs","test":"node --test *.test.cjs"}}

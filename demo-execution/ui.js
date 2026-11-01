@@ -96,7 +96,7 @@ function render(){
 async function run(fn,kind='action'){
  const target=engine;if(!target)return;
  try{await target.control(async()=>{if(engine===target)await fn();},kind);}
- catch(error){target.block=error.message;target.pause(error.message);}
+ catch(error){if(target.remote){target.block='Action not confirmed: '+error.message;status(target.block);return;}target.block=error.message;target.pause(error.message);}
  finally{render();}
 }
 async function acquireLock(){
@@ -117,6 +117,7 @@ $('connectform').onsubmit=async event=>{
   $('relayToken').value='';
   $('key').value='';$('secret').value='';connectionBusy=true;render();status('Connecting to Binance Demo…');
   try{
+    if(relayToken)await ensureNoBackground(relayToken);
     await acquireLock();
     const signingKey=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key));
@@ -144,13 +145,14 @@ $('stop').onclick=()=>{engine?.pause('Stopped by user. Existing protective exits
 $('again').onclick=()=>run(()=>engine.again());
 $('refresh').onclick=()=>run(async()=>{if(!engine.tradingReady){await engine.refreshBalance();return;}await engine.refresh();await engine.reconcile();await engine.updateIncome();});
 $('disconnect').onclick=()=>{
+  if(engine?.remote){disconnectBackground();return;}
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet','unrealized','pnlEquation','incomeAudit','incomeDiagnosis','sessionNote','unrealizedNote'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
-setInterval(()=>{if(engine?.connected)engine.tick();},5000);
+setInterval(()=>{if(engine?.connected&&!engine.remote)engine.tick();},5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.connected)engine.tick();});
-window.addEventListener('beforeunload',event=>{if(engine?.busy){event.preventDefault();event.returnValue='';}});
-window.addEventListener('pagehide',()=>{engine?.pause();engine?.api.clear();releaseLock?.();});
+window.addEventListener('beforeunload',event=>{if(engine?.busy&&!engine.remote){event.preventDefault();event.returnValue='';}});
+window.addEventListener('pagehide',()=>{if(!engine?.remote){engine?.pause();engine?.api.clear();releaseLock?.();}});
 render();
 
 const paperLink=document.querySelector('a[href="./"]')||document.querySelector('a[href="index.html"]');
@@ -196,3 +198,4 @@ $('copyTradeReport').onclick=async()=>{
   try{await navigator.clipboard.writeText(report);status('Trade report copied. Includes results and entry evidence; no API credentials.');}
   catch{$('tradeReportText').hidden=false;$('tradeReportText').value=report;$('tradeReportText').focus();$('tradeReportText').select();status('Select and copy the displayed trade report.');}
 };
+
