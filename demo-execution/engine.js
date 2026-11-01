@@ -382,16 +382,20 @@ class DemoEngine {
       }catch(e){if(e.uncertain||e.code!==-4028)throw e;}
     }
     if(!selectedLeverage)return skip('Binance rejected all supported leverage candidates; continuing other coins');
-    if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; resizing entry for $4 planned risk');
-    const budget=Math.min(100,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
+    if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; sizing margin below $100');
+    const targetMargin=this.newRules?100*selectedLeverage/50:100;
+    const budget=Math.min(targetMargin,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
+    if(this.newRules&&selectedLeverage===50&&budget<100)return skip('Need $100 margin plus estimated fees for 50× entry');
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:(this.newRules?4:lossLimit)/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    let quantity=rounded(Math.min(budget*selectedLeverage/price,(experimental||this.newRules)?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    if(this.newRules&&selectedLeverage===50){quantity=rounded(100*50/price,step,true);qty=number(quantity);notional=qty*price;if(qty>Math.min(number(lot.maxQty),number(normal.maxQty))||notional/50+notional*fee*2>number(usdt.availableBalance))return skip('Binance size/balance limits cannot support $100 margin at 50×');}
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
     const cap=number(leverage.maxNotionalValue)*.95;
     if(cap<=0)return skip('No position capacity at selected leverage');
     if(notional>cap){
+      if(this.newRules&&selectedLeverage===50)return skip('Binance leverage cap cannot support $100 margin at 50×');
       quantity=rounded(Math.min(qty,cap/price),step);qty=number(quantity);notional=qty*price;
       if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional)return skip('Leverage position cap is below the minimum order size');
       progress('Reduced order size to fit Binance leverage limit');
