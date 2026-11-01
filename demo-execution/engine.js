@@ -196,7 +196,7 @@ class DemoEngine {
     const account=await this.api.call('GET','/fapi/v3/account');
     if(!Array.isArray(account.assets)||!Array.isArray(account.positions))throw new DemoError('Invalid Binance account response');
     this.account=account;this.accountAt=Date.now();
-    if(!this.tradingReady)this.positions=account.positions.map(p=>({...p,markPrice:p.markPrice??'—',entryPrice:p.entryPrice??'—',unRealizedProfit:p.unrealizedProfit??p.unRealizedProfit??'0'}));
+    if(!this.tradingReady){this.positions=account.positions.map(p=>({...p,markPrice:p.markPrice??'—',entryPrice:p.entryPrice??'—',unRealizedProfit:p.unrealizedProfit??p.unRealizedProfit??'0'}));this.positionAt=this.accountAt;}
     try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}
     this.notify();
   }
@@ -277,7 +277,8 @@ class DemoEngine {
     const realized=gains+losses,net=realized+commission+funding;
     return {gains,losses,realized,commission,funding,net};
   }
-  sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0)-(this.newRules?(this.state.dayOpenPnl||0):0);}
+  unrealizedPnl(){return this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0);}
+  sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.unrealizedPnl()-(this.newRules?(this.state.dayOpenPnl||0):0);}
   async start(){
     const epoch=this.stopEpoch;
     if(!this.connected)throw new DemoError('Connect demo credentials first');

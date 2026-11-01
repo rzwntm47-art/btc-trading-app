@@ -47,9 +47,13 @@ function render(){
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
   const usdt=e.account?.assets.find(a=>a.asset==='USDT');$('available').textContent=money(Number(usdt?.availableBalance));$('wallet').textContent='USDT wallet: '+money(Number(usdt?.walletBalance));
-  $('session').textContent=e.state.startedAt?money(e.sessionNet()):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
-  $('sessionNote').textContent=e.state.startedAt?'Dubai trading day since '+new Date(e.state.startedAt).toLocaleString()+(e.sessionNet()>=100?' · $100 target reached; trading continues':''):'Starts when you enable auto';
+  const openPnl=e.unrealizedPnl(),snapshotReady=!!e.positionAt;
+  $('unrealized').textContent=snapshotReady?money(openPnl):'Awaiting Binance';$('unrealized').className=openPnl<0?'bad':'good';
+  $('unrealizedNote').textContent='Open USDT positions only · no fees/history deducted · '+(snapshotReady?'Binance snapshot '+new Date(e.positionAt).toLocaleTimeString()+'; polling can lag the Binance screen':'Awaiting position snapshot');
+  $('session').textContent=e.state.startedAt?(e.lastIncome?money(e.sessionNet()):'Syncing income…'):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
+  $('sessionNote').textContent=e.state.startedAt?'Window since '+new Date(e.state.startedAt).toLocaleString()+' · Income snapshot '+(e.lastIncome?new Date(e.lastIncome).toLocaleTimeString():'pending')+(e.sessionNet()>=100?' · $100 target reached; trading continues':''):'Starts when you enable auto';
   const audit=e.incomeBreakdown();
+  $('pnlEquation').textContent=e.lastIncome?'Net = booked trading result ('+money(audit.net)+') + unrealized ('+money(openPnl)+') − opening unrealized baseline ('+money(e.newRules?(e.state.dayOpenPnl||0):0)+') = '+money(e.sessionNet()):'Waiting for income history; no net result is claimed yet.';
   $('incomeAudit').textContent=e.lastIncome?'Realized gains: $'+money(audit.gains)+' · Realized losses: $'+money(audit.losses)+' · Commissions: $'+money(audit.commission)+' · Funding: $'+money(audit.funding)+' · Net booked trading result: $'+money(audit.net)+' · Updated '+new Date(e.lastIncome).toLocaleTimeString():'Awaiting Binance income history';
   $('incomeDiagnosis').textContent=!e.lastIncome?'Connect and sync to load actual results.':audit.net<0?(audit.realized<0?'Realized losses exceed realized gains. ':'Realized trading P&L is positive, but costs exceed it. ')+(audit.commission<0?'Commission reduces the wallet result. ':'')+'Review these actual results before changing the strategy.':'Booked trading result is nonnegative for this window. A wallet drop may involve an earlier period, a reset, transfers, or other income types excluded here.';
 
@@ -141,7 +145,7 @@ $('again').onclick=()=>run(()=>engine.again());
 $('refresh').onclick=()=>run(async()=>{if(!engine.tradingReady){await engine.refreshBalance();return;}await engine.refresh();await engine.reconcile();await engine.updateIncome();});
 $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
-  for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
+  for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet','unrealized','pnlEquation','incomeAudit','incomeDiagnosis','sessionNote','unrealizedNote'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
 setInterval(()=>{if(engine?.connected){if(!demoVisible()&&engine.auto)engine.pause('Demo view is hidden. New entries stopped; exchange exits remain.');engine.tick();}},5000);
 window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data==='demo-pause'){engine?.pause('Demo view closed. New entries stopped; exchange exits remain.');render();}});

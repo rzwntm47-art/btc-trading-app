@@ -636,3 +636,14 @@ test('recovery extension survives reload without adding position or leverage',as
  assert.equal(e.active()[0].lossLimit,12);assert.equal(e.active()[0].quantity,qty);
  assert.ok(!f.calls.slice(before).some(c=>c.method==='POST'));
 });
+test('Binance unrealized +10 remains +10 while booked costs and losses make net -30',()=>{
+ const f=fixture();f.e.newRules=true;f.e.positions=[{symbol:'BTCUSDT',unRealizedProfit:'15'},{symbol:'ETHUSDT',unRealizedProfit:'-5'},{symbol:'BTCUSDC',unRealizedProfit:'99'}];
+ f.e.income=[{incomeType:'REALIZED_PNL',income:'-35'},{incomeType:'COMMISSION',income:'-4'},{incomeType:'FUNDING_FEE',income:'-1'}];
+ assert.equal(f.e.unrealizedPnl(),10);assert.equal(f.e.sessionNet(),-30);assert.equal(f.e.incomeBreakdown().net,-40);
+ f.e.state.dayOpenPnl=3;assert.equal(f.e.unrealizedPnl(),10);assert.equal(f.e.sessionNet(),-33);
+});
+test('reset baseline starts from reset time and does not change signed unrealized PnL',async()=>{
+ const f=fixture();f.e.newRules=true;await f.e.resetFromBinance();const reset=f.e.state.resetAt;f.e.syncDaily();
+ assert.equal(f.e.state.startedAt,reset);assert.equal(f.e.unrealizedPnl(),0);assert.equal(f.e.sessionNet(),0);
+ f.e.positions=[{symbol,unRealizedProfit:'-10.25'}];assert.equal(f.e.unrealizedPnl(),-10.25);
+});
