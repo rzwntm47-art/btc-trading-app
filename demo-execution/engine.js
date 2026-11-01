@@ -7,6 +7,7 @@ const PRIVATE = {
   POST: new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),
   DELETE: new Set(['/fapi/v1/algoOrder','/fapi/v1/order'])
 };
+const ENTRY_REJECTIONS=new Set([-2010,-2019,-2020,-2025,-2026,-2027,-2028,-1111,-1121,-4004,-4005,-4014,-4023,-4028,-4067,-4068,-4164]);
 class DemoError extends Error { constructor(message, code=0, uncertain=false){super(message);this.code=code;this.uncertain=uncertain;} }
 class DemoAPI {
   constructor(key, signingKey, fetcher=(url,options)=>fetch(url,options), crypt=crypto){this.key=key;this.signingKey=signingKey;this.fetcher=fetcher;this.crypt=crypt;this.offset=0;this.synced=0;this.blockUntil=0;}
@@ -148,7 +149,7 @@ class DemoEngine {
   }
   experimentActive(){return !this.newRules&&Date.now()+this.api.offset<this.experimentUntil;}
   exitsSuspended(r){return !this.newRules&&Number.isFinite(r.experimentUntil)&&Date.now()+this.api.offset<r.experimentUntil;}
-  entryLeverage(signal,now=Date.now()+this.api.offset){return !this.newRules&&now<this.overrideUntil?50:signal.leverage;}
+  entryLeverage(signal,now=Date.now()+this.api.offset){return this.newRules||now<this.overrideUntil?50:signal.leverage;}
   syncDaily(){
     if(!this.newRules)return;
     const now=Date.now()+this.api.offset,day=Math.floor((now+14400000)/86400000)*86400000-14400000;
@@ -269,7 +270,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m · adaptive leverage · $4 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m · requested 50× leverage · $4 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -321,6 +322,17 @@ class DemoEngine {
     return {equity,reserved,free};
   }
   async enter(symbol,signal){
+    const recordsBefore=this.state.records.length;
+    try{return await this.enterChecked(symbol,signal);}catch(e){
+      // Only skip pre-entry failures when no journaled/observed position can be at risk.
+      if(this.state.records.length===recordsBefore&&!this.owned(symbol)&&!this.position(symbol)&&((!e.uncertain&&ENTRY_REJECTIONS.has(e.code))||e.code===-1000)){
+        this.entryOutcome=symbol+' skipped ('+e.code+'): '+e.message+' Scanning continues.';
+        this.event(this.entryOutcome);return false;
+      }
+      throw e;
+    }
+  }
+  async enterChecked(symbol,signal){
     const progress=reason=>{this.entryOutcome=reason;const row=this.scanned.find(s=>s.symbol===symbol);if(row){row.reason=reason;this.notify();}};
     const skip=reason=>{progress(reason);return false;};
     this.entryOutcome='Checking entry';
@@ -386,7 +398,7 @@ class DemoEngine {
     catch(e){
       if(!e.uncertain&&!r.entryStatus){
         r.rejected=true;this.save();
-        if([-2027,-2019,-2020,-4004,-4005,-4164].includes(e.code)){
+        if(ENTRY_REJECTIONS.has(e.code)){
           this.event(symbol+' entry rejected ('+e.code+'); scanning continues.');
           return skip('Binance rejected entry ('+e.code+'); continuing other coins');
         }

@@ -441,7 +441,7 @@ test('fresh rules disable experiment and use available USDT with $4 risk',async(
  const f=fixture();f.e.newRules=true;f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
  f.e.state.goal=true;f.e.budgetStatus=()=>({free:0,reserved:800,equity:0});
  f.signal.exitPolicy='manual-profit-60s-loss';
- assert.equal(f.e.experimentActive(),false);assert.equal(f.e.entryLeverage(f.signal),3);
+ assert.equal(f.e.experimentActive(),false);assert.equal(f.e.entryLeverage(f.signal),50);
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  assert.equal(r.rulesVersion,2);assert.equal(r.lossLimit,4);assert.equal(r.exits[0].kind,'sl4');
  assert.ok(r.filledQty*(f.signal.stopDistance+r.fee*(200+f.signal.stopDistance))<=4);
@@ -518,4 +518,20 @@ test('insufficient-margin definite entry rejection keeps scanning enabled',async
  const f=fixture(),original=f.api.call;
  f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order')throw new DemoError('Margin',-2019);return original(m,p,q,s);};
  await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,true);assert.equal(f.e.active().length,0);
+});
+test('50x new entry retains $4 stop and risk-based sizing',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ assert.equal(r.leverage,50);assert.equal(r.lossLimit,4);assert.equal(r.protected,true);
+ assert.ok(Number(r.quantity)*(f.signal.stopDistance+r.fee*(200+f.signal.stopDistance))<=4);
+});
+for(const [path,code] of [['/fapi/v1/marginType',-4067],['/fapi/v1/leverage',-4028],['/fapi/v1/commissionRate',-1000],['/fapi/v1/order',-2010],['/fapi/v1/order',-1111]])test('recoverable rejection '+path+' '+code+' preserves auto',async()=>{
+ const f=fixture(),original=f.api.call;f.e.newRules=true;
+ f.api.call=async(m,p,q,s)=>{if(p===path&&(path!=='/fapi/v1/order'||m==='POST'))throw new DemoError('Test rejection',code);return original(m,p,q,s);};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,true);assert.equal(f.e.active().length,0);
+});
+test('authorization rejection remains actionable rather than silently skipped',async()=>{
+ const f=fixture(),original=f.api.call;
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/commissionRate')throw new DemoError('Key rejected',-2015);return original(m,p,q,s);};
+ await assert.rejects(()=>f.e.enter(symbol,f.signal),/Key rejected/);
 });
