@@ -857,7 +857,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.49');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.50');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -889,7 +889,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.49');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.50');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(r.entryEvidence.plannedStopPrice<100);
 });
@@ -1018,9 +1018,10 @@ test('a manual command queued during entry checks prevents new order dispatch',a
  f.api.call=async(...args)=>{const result=await base(...args);if(args[1]==='/fapi/v1/ticker/bookTicker')f.e.controlPending=true;return result;};
  await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/Manual action queued/);
 });
-test('a signal that expires during leverage checks is not submitted',async()=>{
+test('a signal that expires during leverage checks is not submitted',async t=>{
+ let clock=Date.now();t.mock.method(Date,'now',()=>clock);
  const f=fixture();f.e.newRules=true;const base=f.api.call;
- f.api.call=async(...args)=>{const result=await base(...args);if(args[1]==='/fapi/v1/leverage')f.signal.close=Date.now()-400000;return result;};
+ f.api.call=async(...args)=>{const result=await base(...args);if(args[1]==='/fapi/v1/leverage')clock+=400000;return result;};
  await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/became stale/);assert.equal(f.e.auto,true);
 });
 
@@ -1080,4 +1081,57 @@ for(const side of ['BUY','SELL'])test('scanner reaches a momentum-only '+side+' 
  const original=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?continuationBars(side,q.interval==='5m'?300000:60000):original(m,p,q,s);
  await f.e.scan();const r=f.e.active()[0];assert.ok(r);assert.equal(r.side,side);assert.equal(r.signal.setupType,'momentum');assert.equal(r.estimatedEntryMargin,300);assert.ok(r.protected);
  assert.equal(f.e.scanned[0].phase,'Order submitted');assert.match(f.e.scanned[0].source,side==='BUY'?/Gainer/:/Loser/);
+});
+
+test('longer-timeframe candidate is considered when first setup cannot clear commission',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.intervalMs=60000;f.signal.atr=.1;
+ f.signal.alternatives=[{...f.signal,intervalMs:300000,atr:2,close:Math.floor(Date.now()/300000)*300000-1}];
+ await f.e.enter(symbol,f.signal);const record=f.e.active()[0];assert.ok(record,'A fee-viable 5m candidate was discarded after the 1m setup failed');
+ assert.equal(record.signal.intervalMs,300000);assert.ok(record.protected);assert.equal(record.estimatedEntryMargin,300);
+ assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/order'&&c.method==='POST'&&!c.p.reduceOnly).length,1);
+});
+test('5m fee-viable setup does not require its confirming 1m candle to pay the whole trade cost',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.intervalMs=300000;const original=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars('BUY',Date.now(),.1):original(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const record=f.e.active()[0];assert.ok(record,'Directional 1m confirmation was incorrectly treated as the 5m profit horizon');assert.ok(record.protected);assert.equal(record.lossLimit,8);
+});
+
+test('scanner retains qualifying later timeframes instead of ending after the first setup',async()=>{
+ const f=fixture();f.e.newRules=true;
+ f.api.call=async(m,p,q)=>scanBars('BUY',q.interval==='1m'?60000:300000,q.interval==='1m'?150:300);
+ const result=await f.e.scanCandidate(symbol,{side:'BUY',change:10},f.e.stopEpoch,new AbortController());
+ assert.ok(result.signal);assert.equal(result.checks.length,10);assert.ok(result.signal.alternatives.length>0);
+ assert.ok(result.signal.alternatives.some(s=>s.intervalMs>60000));assert.ok(result.signal.alternatives.every(s=>s.side==='BUY'));
+});
+test('timeframe fallback never accepts stale, opposite, already-traded or fee-ineligible alternatives',()=>{
+ const {selectEntryCandidate}=require('./engine.js'),f=fixture(),now=Date.now();
+ const primary={...f.signal,intervalMs:60000,atr:.01};
+ const variants=[{...f.signal,side:'SELL',intervalMs:300000},{...f.signal,intervalMs:300000,close:now-400000},{...f.signal,intervalMs:300000,close:now-10000}];
+ const selected=selectEntryCandidate({...primary,alternatives:variants},{price:100,fee:.0005,now,traded:s=>s.close===now-10000});
+ assert.equal(selected.signal,null);assert.equal(selected.checks.length,4);
+ assert.match(selected.checks[0].reason,/commission/);assert.match(selected.checks[1].reason,/opposite/);assert.match(selected.checks[2].reason,/stale/);assert.match(selected.checks[3].reason,/Already traded/);
+});
+test('1m entries still must clear their own fresh volatility and commission screen',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.intervalMs=60000;const base=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars('BUY',Date.now(),.1):base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/Recent 1m movement/);assert.equal(f.e.auto,true);
+});
+test('diagnostics explain zero entries without account reads or secret data',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.tradingReady=true;f.e.symbols=[symbol];f.e.moversCheckedAt=Date.now();f.e.api.key='PRIVATE_KEY';f.e.api.relayToken='PRIVATE_TOKEN';
+ f.e.scanCandidate=async()=>({symbol,signal:null,reason:'No aligned candle momentum',intervalMs:60000,checks:[{minutes:1,reason:'No aligned candle momentum'}]});
+ f.e.api.call=async()=>{throw Error('Diagnostics must not call Binance');};await f.e.scan();
+ const d=f.e.scanDiagnostics(),text=JSON.stringify(d);assert.equal(d.scanAudit.checked,1);assert.equal(d.scanAudit.qualified,0);assert.equal(d.scanAudit.submitted,0);assert.match(d.status,/0 confirmed order submissions/);
+ assert.match(text,/No aligned candle momentum/);assert.ok(!text.includes('PRIVATE_KEY'));assert.ok(!text.includes('PRIVATE_TOKEN'));assert.equal(f.e.state.records.length,0);
+ f.e.connected=false;assert.match(f.e.scanDiagnostics().status,/Disconnected/);
+ f.e.connected=true;f.e.auto=false;assert.match(f.e.scanDiagnostics().status,/Auto is stopped/);
+ f.e.auto=true;f.e.state.goalStopAt=Date.now();assert.match(f.e.scanDiagnostics().status,/session stop is locked/);
+});
+test('diagnostics distinguish unresolved entry errors from skipped or accepted entries',()=>{
+ const f=fixture();f.e.tradingReady=true;f.e.symbols=[symbol];
+ f.e.recordScanResult({symbol,side:'BUY',phase:'Entry error',reason:'Unknown order status'});
+ const d=f.e.scanDiagnostics();assert.equal(d.scanAudit.entryErrors,1);assert.equal(d.scanAudit.submitted,0);assert.equal(d.scanAudit.skipped,0);assert.match(d.status,/Unknown order status/);
+});
+test('diagnostics flag a scan with no completed checks for over 90 seconds',()=>{
+ const f=fixture();f.e.tradingReady=true;f.e.symbols=[symbol];f.e.scanStats={startedAt:Date.now()-120000};
+ assert.match(f.e.scanDiagnostics().status,/No completed coin check/);
 });

@@ -1,8 +1,18 @@
-# Binance Demo execution module — V1.49
+# Binance Demo execution module — V1.50
 
 This module sends USDⓈ-M orders exclusively to `https://demo-fapi.binance.com`. It has no live endpoint, withdrawal or transfer capability.
 
 Build with `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.html` to the repository root. Run `node --test demo-execution/*.test.cjs render-backend/*.test.cjs` for engine, controls, mobile and backend checks.
+
+## V1.50 entry-path repair
+
+Previously the scanner returned its first qualifying setup; entry-price or commission rejection then hid later qualifying timeframes. It now retains every qualifying same-direction timeframe from the shared candle responses and selects the first fresh, untraded candidate that passes price and commission checks before submission. This is candidate selection, never a retry of an exchange order.
+
+A 5m or longer setup uses its own observed ATR for the fee screen. It still requires fresh 1m directional confirmation and uses fresh 1m volatility for the $8 loss sizing check, but it no longer requires a single 1m move to clear the longer-horizon commission screen. One-minute setups retain that additional fresh 1m cost check.
+
+Both entry-blocking cases were reproduced as failing V1.49 regression tests and pass after the repair. Live account behavior and profitability have not been verified.
+
+Entry status and Copy scan diagnostics work with zero trades. Diagnostic copying is snapshot-only, does not wait for the engine queue or call signed account endpoints, and remains available when disconnected. It includes engine version, Auto/readiness state, check/setup/accepted-entry/error counts, per-timeframe reasons and request elapsed times. It excludes credentials and account balances. Trade result export retains its separate fresh-account requirement. Older laptop engines are identified explicitly; updating the web page does not replace a running laptop engine.
 
 ## Current entry rules
 
@@ -30,6 +40,6 @@ Browser mode needs the page running. Pair Mobile/background mode executes the en
 
 Start requires One-way and Single-Asset Mode. Account-wide modes are not changed automatically. API credentials remain in memory or the explicitly saved encrypted browser vault. The local order journal contains no secret. Use one execution owner for a demo account.
 
-Validation: 204 automated checks passed with synthetic credentials and mocked exchange responses, including momentum-only BUY/SELL fills, reversal rejection, leverage/capacity fallback, stops, profit-floor boundaries and mobile-version reporting. Build checks JavaScript syntax and DOM bindings. No account-connected trading or profitability backtest was performed. This is an unvalidated demo strategy; faster or more frequent entries do not establish a profitable edge.
+Validation: 214 automated checks passed with synthetic credentials and mocked exchange responses, including momentum-only BUY/SELL fills, reversal rejection, leverage/capacity fallback, stops, profit-floor boundaries and mobile-version reporting. Build checks JavaScript syntax and DOM bindings. No account-connected trading or profitability backtest was performed. This is an unvalidated demo strategy; faster or more frequent entries do not establish a profitable edge.
 
 Fee reference: [Binance Futures commission calculation](https://www.binance.com/en-AE/support/faq/detail/98488a516eb84e3eb34605683dffd554) uses notional value times the fee rate. The app reads the account's actual commission rate for each proposed entry.

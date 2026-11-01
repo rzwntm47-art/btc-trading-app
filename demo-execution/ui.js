@@ -39,6 +39,7 @@ function render(){
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.controlPending;
   $('again').hidden=!e?.state?.goalStopAt;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
+  $('entryStatus').textContent=e?(e.remote&&e.appVersion!==APP_VERSION?'Laptop engine '+(e.appVersion?'V'+e.appVersion:'version unknown')+' has not loaded the V'+APP_VERSION+' entry fix. Update/restart the laptop engine. ':'')+e.scanDiagnostics().status:'Disconnected: connect Binance Demo, then Start / Resume Demo.';
   if(!connected)return;
   status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   const policy=e.entryPolicy;
@@ -205,3 +206,12 @@ $('copyTradeReport').onclick=async()=>{
   catch{$('tradeReportText').hidden=false;$('tradeReportText').value=report;$('tradeReportText').focus();$('tradeReportText').select();status('Select and copy the displayed trade report.');}
 };
 
+
+// Snapshot-only diagnostics remain available when no entry exists or account reads fail.
+$('copyScanDiagnostics').onclick=async()=>{
+  const snapshot=engine?engine.scanDiagnostics():{reportType:'scan-diagnostics',appVersion:APP_VERSION,generatedAt:new Date().toISOString(),status:'No engine connected in this page.',connected:false,auto:false,recentChecks:[],localSnapshotOnly:true};
+  snapshot.pageVersion=APP_VERSION;
+  const text=JSON.stringify(snapshot,null,2);$('scanDiagnosticsText').hidden=true;
+  try{await navigator.clipboard.writeText(text);$('entryStatus').textContent='Scan diagnostics copied — no trades or account refresh required.';}
+  catch{$('scanDiagnosticsText').value=text;$('scanDiagnosticsText').hidden=false;$('scanDiagnosticsText').focus();$('scanDiagnosticsText').select();$('entryStatus').textContent='Select and copy the scan diagnostics shown below. No trades are required.';}
+};
