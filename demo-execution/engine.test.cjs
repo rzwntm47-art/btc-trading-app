@@ -35,7 +35,7 @@ function fixture(){
     }
     throw Error('Unmocked '+method+' '+path);
   }};
-  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.overrideUntil=0;e.experimentUntil=0;
+  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.newRules=false;e.overrideUntil=0;e.experimentUntil=0;
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
   const signal={qualityConfirmed:true,strength:1,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   return {e,api,signal,calls,saved,orders,algos,get position(){return position},set position(p){position=p},set unknownEntry(v){unknownEntry=v},set failProtection(v){failProtection=v},set failClose(v){failClose=v}};
@@ -238,7 +238,7 @@ test('scanner rotates bounded batches and explains WAIT without submitting order
   const e=new DemoEngine(api);e.experimentUntil=0;e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
-  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No closed 1m or 2m breakout'));
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1m / 2m / 3m setup'));
   e.auto=false;await e.scan();assert.equal(calls.length,24);
 });
 test('scanner handles an empty universe without requests',async()=>{
@@ -436,4 +436,41 @@ test('uncertain -2027 response still stops for reconciliation',async()=>{
  const f=fixture();const original=f.api.call;let submissions=0;
  f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order'){submissions++;throw new DemoError('Uncertain response',-2027,true);}return original(m,p,q,s);};
  await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(submissions,1);assert.equal(f.e.auto,false);
+});
+test('fresh rules disable experiment and use available USDT with $4 risk',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
+ f.e.state.goal=true;f.e.budgetStatus=()=>({free:0,reserved:800,equity:0});
+ f.signal.exitPolicy='manual-profit-60s-loss';
+ assert.equal(f.e.experimentActive(),false);assert.equal(f.e.entryLeverage(f.signal),3);
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ assert.equal(r.rulesVersion,2);assert.equal(r.lossLimit,4);assert.equal(r.exits[0].kind,'sl4');
+ assert.ok(r.filledQty*(f.signal.stopDistance+r.fee*(200+f.signal.stopDistance))<=4);
+ f.position.unRealizedProfit='-4';await f.e.reconcile();assert.equal(f.e.active().length,0);
+});
+test('existing bot exits migrate only after replacement $4 stop is accepted',async()=>{
+ const f=fixture();f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+ const r=f.e.active()[0],oldId=r.exits[0].id;f.e.newRules=true;
+ const offset=f.calls.length;await f.e.reconcile();const calls=f.calls.slice(offset);
+ const added=calls.findIndex(c=>c.method==='POST'&&c.path==='/fapi/v1/algoOrder'&&c.p.clientAlgoId.endsWith('_sl4'));
+ const removed=calls.findIndex(c=>c.method==='DELETE'&&c.p.clientAlgoId===oldId);
+ assert.ok(added>=0&&removed>added);assert.equal(r.rulesVersion,2);assert.equal(r.lossLimit,4);assert.equal(r.protected,true);
+});
+test('fresh daily target rolls at Dubai midnight without deleting positions',()=>{
+ const f=fixture();f.e.newRules=true;const records=f.e.state.records;
+ f.e.syncDaily();const day=f.e.state.dayStart;
+ assert.equal((day+14400000)%86400000,0);f.e.state.goal=true;
+ f.api.offset+=86400000;f.e.syncDaily();
+ assert.equal(f.e.state.dayStart,day+86400000);assert.equal(f.e.state.goal,false);assert.equal(f.e.state.records,records);
+});
+test('3m aggregation requires complete aligned closed candles',()=>{
+ const {aggregateMinutes}=require('./engine.js');const t=Math.floor(Date.now()/180000)*180000-1800000;
+ const raw=Array.from({length:90},(_,i)=>[t+i*60000,100,102,99,101,10,t+(i+1)*60000-1]);
+ const result=aggregateMinutes(raw,t+5400000,3);
+ assert.equal(result.length,30);assert.equal(result[0][5],30);assert.equal(result[0][6]-result[0][0],179999);
+ assert.equal(aggregateMinutes(raw,t+179999,3).length,0);
+});
+test('fresh daily P&L offsets carried open P&L and retains realized income',()=>{
+ const f=fixture();f.e.newRules=true;f.e.state.dayOpenPnl=10;
+ f.e.income=[{income:'3'}];f.e.positions=[{symbol,unRealizedProfit:'12'}];
+ assert.equal(f.e.sessionNet(),5);
 });
