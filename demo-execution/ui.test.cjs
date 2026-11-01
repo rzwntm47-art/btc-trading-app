@@ -46,3 +46,17 @@ test('shell navigation does not send a visibility pause to the mounted demo',()=
  const ui=fs.readFileSync(__dirname+'/ui.js','utf8');
  assert.ok(!ui.includes('shouldScan=demoVisible'));
 });
+
+test('Copy trade report uses connected snapshots and excludes API credentials',async()=>{
+ const {node,context,e}=fixture();let copied='';
+ context.navigator={clipboard:{writeText:async text=>copied=text}};e.api.key='private-key';
+ e.income=[{incomeType:'REALIZED_PNL',income:'-50'},{incomeType:'COMMISSION',income:'-5.38'}];
+ await node('copyTradeReport').onclick();const report=JSON.parse(copied);
+ assert.equal(report.totals.net,-55.38);assert.ok(!copied.includes('private-key'));
+ assert.match(node('status').textContent,/copied/);
+});
+test('Copy trade report provides selectable text when clipboard access fails',async()=>{
+ const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
+ node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.43');
+});

@@ -4,6 +4,13 @@ const {webcrypto}=require('node:crypto');
 const {DemoAPI,DemoEngine,DemoError,rounded,breakout,qualifySetup,exitPrice,combinedValue}=require('./engine.js');
 const now=Date.now();
 const symbol='BTCUSDT';
+function entryBars(side='BUY',at=Date.now()){
+ const end=Math.floor(at/60000)*60000,sign=side==='BUY'?1:-1;
+ return Array.from({length:30},(_,i)=>{
+  const close=100+(i-29)*.15*sign,open=close-.3*sign;
+  return [end-(30-i)*60000,open,Math.max(open,close)+.05,Math.min(open,close)-.05,close,20,end-(29-i)*60000-1];
+ });
+}
 function fixture(){
   let position=null,orders=new Map(),algos=new Map(),calls=[],unknownEntry=false,failProtection=false,failClose=false;
   const api={offset:0,call:async(method,path,p={},signed=true)=>{
@@ -14,6 +21,7 @@ function fixture(){
     if(path==='/fapi/v1/openAlgoOrders')return [...algos.values()].filter(x=>x.algoStatus==='NEW');
     if(path==='/fapi/v1/assetIndex')return [{symbol:'USDTUSD',index:'1',time:Date.now()}];
     if(path==='/fapi/v1/premiumIndex')return {markPrice:'100',time:Date.now()};
+    if(path==='/fapi/v1/klines')return entryBars(signal.side);
     if(path==='/fapi/v1/commissionRate')return {takerCommissionRate:'.0005'};
     if(path==='/fapi/v1/marginType')return {code:200};
     if(path==='/fapi/v1/leverage')return {leverage:p.leverage,maxNotionalValue:'1000000'};
@@ -438,14 +446,14 @@ test('uncertain -2027 response still stops for reconciliation',async()=>{
  f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order'){submissions++;throw new DemoError('Uncertain response',-2027,true);}return original(m,p,q,s);};
  await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(submissions,1);assert.equal(f.e.auto,false);
 });
-test('fresh rules disable experiment and use $100 margin at 50x and an $8 stop',async()=>{
+test('fresh rules disable experiment and use $200 margin at 25x and an $8 stop',async()=>{
  const f=fixture();f.e.newRules=true;f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
  f.e.state.goal=true;f.e.budgetStatus=()=>({free:0,reserved:800,equity:0});
  f.signal.exitPolicy='manual-profit-60s-loss';
- assert.equal(f.e.experimentActive(),false);assert.equal(f.e.entryLeverage(f.signal),50);
+ assert.equal(f.e.experimentActive(),false);assert.equal(f.e.entryLeverage(f.signal),25);
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  assert.equal(r.rulesVersion,3);assert.equal(r.lossLimit,8);assert.equal(r.exits[0].kind,'sl8');
- assert.equal(r.filledQty*100/50,100);
+ assert.equal(r.filledQty*100/25,200);
  f.position.unRealizedProfit='-8';await f.e.reconcile();assert.equal(f.e.active().length,0);
 });
 test('existing bot exits migrate only after replacement $8 stop is accepted',async()=>{
@@ -520,11 +528,11 @@ test('insufficient-margin definite entry rejection keeps scanning enabled',async
  f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order')throw new DemoError('Margin',-2019);return original(m,p,q,s);};
  await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,true);assert.equal(f.e.active().length,0);
 });
-test('$100 margin always uses permitted 50x while retaining the $8 stop',async()=>{
+test('$200 margin uses permitted 25x while retaining the $8 stop',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.leverage,50);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
- assert.equal(Number(r.quantity)*100/r.leverage,100);assert.equal(r.estimatedEntryMargin,100);
+ assert.equal(r.leverage,25);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
+ assert.equal(Number(r.quantity)*100/r.leverage,200);assert.equal(r.estimatedEntryMargin,200);
 });
 for(const [path,code] of [['/fapi/v1/marginType',-4067],['/fapi/v1/leverage',-4028],['/fapi/v1/commissionRate',-1000],['/fapi/v1/order',-2010],['/fapi/v1/order',-1111]])test('recoverable rejection '+path+' '+code+' preserves auto',async()=>{
  const f=fixture(),original=f.api.call;f.e.newRules=true;
@@ -543,12 +551,12 @@ test('current demo rules ignore old loss timer and still close at $8',async()=>{
  await f.e.reconcile();assert.equal(f.e.active().length,1);assert.equal(r.lossSince,null);
  f.position.unRealizedProfit=String(-8.01+fees);await f.e.reconcile();assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$8 loss threshold');
 });
-test('50x rejection falls back to 20x without shrinking margin below $100',async()=>{
+test('25x rejection falls back to 20x without shrinking margin below $200',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';const original=f.api.call,attempts=[];f.signal.stopDistance=.1;
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/commissionRate')return {takerCommissionRate:'.00005'};if(p==='/fapi/v1/leverage'){attempts.push(q.leverage);if(q.leverage>20)throw new DemoError('Unsupported leverage',-4028);}return original(m,p,q,s);};
- await f.e.enter(symbol,f.signal);assert.equal(attempts[0],50);assert.equal(attempts.at(-1),20);assert.ok(attempts.length<=8);const r=f.e.active()[0];assert.equal(r.leverage,20);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
+ await f.e.enter(symbol,f.signal);assert.equal(attempts[0],25);assert.equal(attempts.at(-1),20);assert.ok(attempts.length<=8);const r=f.e.active()[0];assert.equal(r.leverage,20);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
  assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly).length,1);
- assert.equal(Number(r.quantity)*100/20,100);
+ assert.equal(Number(r.quantity)*100/20,200);
 });
 test('profit floors advance in five-dollar steps after 32',()=>{
  const {profitFloor}=require('./engine.js');
@@ -564,17 +572,17 @@ test('existing $4 stop migrates to $8 without resetting profit peak or increasin
  r.peak=5;r.profitFloor=4;const fees=r.fee*r.filledQty*(r.entry+Number(f.position.markPrice));f.position.unRealizedProfit=String(4.5+fees);
  await f.e.reconcile();assert.equal(r.lossLimit,8);assert.equal(r.quantity,qty);assert.equal(r.peak,5);assert.equal(r.profitFloor,4);assert.ok(r.exits.some(e=>e.kind==='sl4'&&e.cancelled));assert.ok(r.exits.some(e=>e.kind==='sl8'&&e.confirmed&&!e.cancelled));
 });
-test('below $100 available margin never submits a smaller trade and keeps scanning',async()=>{
+test('below $200 available margin never submits a smaller trade and keeps scanning',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call;
- f.api.call=async(m,p,q,s)=>{const result=await original(m,p,q,s);if(p==='/fapi/v3/account')result.assets[0].availableBalance='90';return result;};
- await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/at least \$100/);assert.equal(f.e.auto,true);assert.ok(!f.calls.some(c=>c.method==='POST'));
+ f.api.call=async(m,p,q,s)=>{const result=await original(m,p,q,s);if(p==='/fapi/v3/account')result.assets[0].availableBalance='190';return result;};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/at least \$200/);assert.equal(f.e.auto,true);assert.ok(!f.calls.some(c=>c.method==='POST'));
 });
-test('fees that already exceed $8 skip instead of reducing allowed 50x or weakening the stop',async()=>{
+test('fees that already exceed $8 skip instead of reducing allowed 25x or weakening the stop',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call;
  f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.001'}:original(m,p,q,s);
  await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);
  assert.match(f.e.entryOutcome,/fees already reach the \$8/);
- assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[50]);
+ assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[25]);
 });
 test('five-minute fallback has enough complete candles and ignores partial groups',()=>{
  const {aggregateMinutes}=require('./engine.js'),t=Math.floor(Date.now()/300000)*300000-9000000;
@@ -677,11 +685,11 @@ test('re-entry cooldown remains but three active positions do not block another 
  f.e.reconcile=async()=>{};f.e.state.records=Array.from({length:3},(_,i)=>({id:'bd1_'+i,symbol:'COIN'+i+'USDT',side:'BUY',at:Date.now()-600000,entryStatus:'FILLED'}));
  await f.e.enter(symbol,f.signal);assert.ok(f.calls.some(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly));
 });
-test('entry spacing remains while $100 at 50x may exceed the former $1 commission budget',async()=>{
+test('entry spacing remains while $200 at 25x may exceed the former $1 commission budget',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';
  f.e.state.records=[{id:'bd1_recent',symbol:'OTHERUSDT',side:'BUY',at:Date.now()-10000,entryStatus:'FILLED'}];
  await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/60 seconds/);f.e.state.records=[];
- await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.equal(Number(r.quantity)*100*r.fee*2,5);assert.equal(r.lossLimit,8);assert.equal(r.leverage,50);
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.equal(Number(r.quantity)*100*r.fee*2,5);assert.equal(r.lossLimit,8);assert.equal(r.leverage,25);
 });
 test('longer timeframes aggregate complete aligned 5m groups through 60m',()=>{
  const {aggregateFiveMinuteBars}=require('./engine.js'),t=Math.floor(Date.now()/3600000)*3600000-25*3600000;
@@ -730,52 +738,52 @@ test('loser priority does not execute a BUY signal',async()=>{
  await f.e.scan();assert.equal(entries,0);assert.match(f.e.scanned[0].reason,/SELL confirmation/);
 });
 
-test('50x uses $100 with a lower account fee rate too',async()=>{
+test('25x uses $200 with a lower account fee rate too',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.stopDistance=.1;const original=f.api.call;
  f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.00005'}:original(m,p,q,s);
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.leverage,50);assert.equal(r.estimatedEntryMargin,100);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
+ assert.equal(r.leverage,25);assert.equal(r.estimatedEntryMargin,200);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
 });
-test('lot rounding never rounds new BUY or SELL margin below $100',async()=>{
+test('lot rounding never rounds new BUY or SELL margin below $200',async()=>{
  for(const side of ['BUY','SELL']){
   const f=fixture();f.e.newRules=true;f.signal.side=side;if(side==='SELL')f.signal.low=101;
   for(const filter of f.e.meta.get(symbol).filters)if(['MARKET_LOT_SIZE','LOT_SIZE'].includes(filter.filterType))filter.stepSize='.03';
   await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
-  assert.equal(r.leverage,50);assert.equal(r.quantity,'50.01');assert.ok(Math.abs(r.estimatedEntryMargin-100.02)<1e-8);
+  assert.equal(r.leverage,25);assert.equal(r.quantity,'50.01');assert.ok(Math.abs(r.estimatedEntryMargin-200.04)<1e-8);
   assert.equal(r.protected,true);assert.equal(r.lossLimit,8);
  }
 });
-test('$100 margin also needs fee room; no undersized order when the remaining margin budget is too small',async()=>{
+test('$200 margin also needs fee room; no undersized order when the remaining margin budget is too small',async()=>{
  for(const cause of ['fees','budget']){
   const f=fixture();f.e.newRules=true;const original=f.api.call;
-  if(cause==='budget')f.e.budgetStatus=()=>({reserved:4901});
-  else f.api.call=async(m,p,q,s)=>{const result=await original(m,p,q,s);if(p==='/fapi/v3/account')result.assets[0].availableBalance='100';return result;};
+  if(cause==='budget')f.e.budgetStatus=()=>({reserved:4801});
+  else f.api.call=async(m,p,q,s)=>{const result=await original(m,p,q,s);if(p==='/fapi/v3/account')result.assets[0].availableBalance='200';return result;};
   await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);
   assert.ok(!f.calls.some(c=>c.method==='POST'&&c.path==='/fapi/v1/order'));
  }
 });
-test('Binance notional cap can lower leverage but never cut margin below $100',async()=>{
+test('Binance notional cap can lower leverage but never cut margin below $200',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call;
- f.api.call=async(m,p,q,s)=>p==='/fapi/v1/leverage'?{leverage:q.leverage,maxNotionalValue:'150'}:original(m,p,q,s);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/leverage'?{leverage:q.leverage,maxNotionalValue:'250'}:original(m,p,q,s);
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.leverage,1);assert.equal(r.estimatedEntryMargin,100);assert.equal(r.protected,true);
+ assert.equal(r.leverage,1);assert.equal(r.estimatedEntryMargin,200);assert.equal(r.protected,true);
 });
-test('volatility affects signal quality but never lowers accepted leverage or $100 margin',async()=>{
+test('volatility affects signal quality but never lowers accepted leverage or $200 margin',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.stopDistance=20;
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.leverage,50);assert.equal(r.estimatedEntryMargin,100);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
+ assert.equal(r.leverage,25);assert.equal(r.estimatedEntryMargin,200);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
 });
 
-for(const maximum of [1,2,10,17,20,35,49,50])test('exchange maximum '+maximum+'x is used exactly with $100 margin',async()=>{
+for(const maximum of [1,2,10,17,20,25,35,49,50])test('exchange maximum '+maximum+'x is capped at 25x with $200 margin',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call,attempts=[];
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverage'){attempts.push(q.leverage);if(q.leverage>maximum)throw new DemoError('Maximum exceeded',-4209);}return original(m,p,q,s);};
- await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.equal(r.leverage,maximum);assert.equal(r.estimatedEntryMargin,100);assert.equal(r.lossLimit,8);
- assert.equal(attempts[0],50);assert.equal(attempts.at(-1),maximum);assert.ok(attempts.length<=8);
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.equal(r.leverage,Math.min(25,maximum));assert.equal(r.estimatedEntryMargin,200);assert.equal(r.lossLimit,8);
+ assert.equal(attempts[0],25);assert.equal(attempts.at(-1),Math.min(25,maximum));assert.ok(attempts.length<=8);
  assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly).length,1);
 });
 test('Stop during maximum-leverage fallback prevents entries',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call;
- f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverage'&&q.leverage===50)throw new DemoError('Maximum exceeded',-4209);const out=await original(m,p,q,s);if(p==='/fapi/v1/leverage')f.e.pause();return out;};
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverage'&&q.leverage===25)throw new DemoError('Maximum exceeded',-4209);const out=await original(m,p,q,s);if(p==='/fapi/v1/leverage')f.e.pause();return out;};
  await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,false);assert.equal(f.e.active().length,0);
 });
 test('uncertain leverage response never triggers fallback or an entry',async()=>{
@@ -786,4 +794,34 @@ test('uncertain leverage response never triggers fallback or an entry',async()=>
 test('fee-aware $8 stop cannot be placed at the entry tick',async()=>{
  const f=fixture();f.e.newRules=true;f.e.meta.get(symbol).filters.find(x=>x.filterType==='PRICE_FILTER').tickSize='1';
  await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/cannot fit Binance price ticks/);assert.equal(f.e.auto,true);
+});
+
+test('entry-time 1m momentum supports both sides and rejects reversal, stale and malformed candles',()=>{
+ const {entryMomentum}=require('./engine.js');
+ for(const side of ['BUY','SELL']){
+  const at=Date.now(),bars=entryBars(side,at),result=entryMomentum(bars,side,at);
+  assert.ok(result.atr>0);assert.equal(result.reason,undefined);
+  assert.match(entryMomentum(bars,side==='BUY'?'SELL':'BUY',at).reason,/no longer confirms/);
+  assert.match(entryMomentum(bars,side,at+180000).reason,/stale/);
+  const bad=structuredClone(bars);bad[12][0]+=1;assert.throws(()=>entryMomentum(bad,side,at));
+ }
+});
+test('a previously qualified long does not enter after fresh 1m momentum turns down',async()=>{
+ const f=fixture();f.e.newRules=true;const original=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars('SELL'):original(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);
+ assert.match(f.e.entryOutcome,/no longer confirms BUY/);
+ assert.ok(!f.calls.some(c=>c.method==='POST'));
+});
+test('public entry-candle read outage skips the entry without stopping the scanner',async()=>{
+ const f=fixture();f.e.newRules=true;const original=f.api.call;
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')throw new DemoError('Offline',503);return original(m,p,q,s);};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/check unavailable/);
+});
+test('trade report separates gross result and costs without exposing credentials',()=>{
+ const f=fixture();f.api.key='NEVER_EXPORT_API_KEY';f.api.relayToken='NEVER_EXPORT_LOCAL_TOKEN';
+ f.e.income=[{incomeType:'REALIZED_PNL',income:'10',symbol,asset:'USDT',time:Date.now()},{incomeType:'COMMISSION',income:'-15',symbol,asset:'USDT',time:Date.now()}];
+ const report=f.e.tradeReport(),serialized=JSON.stringify(report);
+ assert.equal(report.totals.realized,10);assert.equal(report.totals.commission,-15);assert.equal(report.totals.net,-5);
+ assert.equal(report.strategyValidatedForProfit,false);assert.ok(!serialized.includes('NEVER_EXPORT'));
 });
