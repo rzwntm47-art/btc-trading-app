@@ -35,9 +35,10 @@ function render(){
   const e=engine,connected=!!e?.connected;
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
-  $('start').disabled=!connected||e.controlPending||e.auto||(!e.newRules&&e.state.goal&&!e.experimentActive());
+  $('start').disabled=!connected||e.controlPending||e.auto||!!e.state.goalStopAt||(!e.newRules&&e.state.goal&&!e.experimentActive());
   $('resetDemo').disabled=!connected||e.controlPending;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.controlPending;
+  $('again').hidden=!e?.state?.goalStopAt;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
   status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
@@ -51,7 +52,7 @@ function render(){
   $('unrealized').textContent=snapshotReady?money(openPnl):'Awaiting Binance';$('unrealized').className=openPnl<0?'bad':'good';
   $('unrealizedNote').textContent='Open USDT positions only · no fees/history deducted · '+(snapshotReady?'Binance snapshot '+new Date(e.positionAt).toLocaleTimeString()+'; polling can lag the Binance screen':'Awaiting position snapshot');
   $('session').textContent=e.state.startedAt?(e.lastIncome?money(e.sessionNet()):'Syncing income…'):'Not started';$('session').className=e.sessionNet()<0?'bad':'good';
-  $('sessionNote').textContent=e.state.startedAt?'Window since '+new Date(e.state.startedAt).toLocaleString()+' · Income snapshot '+(e.lastIncome?new Date(e.lastIncome).toLocaleTimeString():'pending')+(e.sessionNet()>=100?' · $100 target reached; trading continues':''):'Starts when you enable auto';
+  $('sessionNote').textContent=e.state.startedAt?'Window since '+new Date(e.state.startedAt).toLocaleString()+' · Income snapshot '+(e.lastIncome?new Date(e.lastIncome).toLocaleTimeString():'pending')+(e.sessionNet()>=100?' · $100 target reached; closing bot positions and stopping':''):'Starts when you enable auto';
   const audit=e.incomeBreakdown();
   $('pnlEquation').textContent=e.lastIncome?'Net = booked trading result ('+money(audit.net)+') + unrealized ('+money(openPnl)+') − opening unrealized baseline ('+money(e.newRules?(e.state.dayOpenPnl||0):0)+') = '+money(e.sessionNet()):'Waiting for income history; no net result is claimed yet.';
   $('incomeAudit').textContent=e.lastIncome?'Realized gains: $'+money(audit.gains)+' · Realized losses: $'+money(audit.losses)+' · Commissions: $'+money(audit.commission)+' · Funding: $'+money(audit.funding)+' · Net booked trading result: $'+money(audit.net)+' · Updated '+new Date(e.lastIncome).toLocaleTimeString():'Awaiting Binance income history';

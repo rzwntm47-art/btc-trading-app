@@ -647,3 +647,22 @@ test('reset baseline starts from reset time and does not change signed unrealize
  assert.equal(f.e.state.startedAt,reset);assert.equal(f.e.unrealizedPnl(),0);assert.equal(f.e.sessionNet(),0);
  f.e.positions=[{symbol,unRealizedProfit:'-10.25'}];assert.equal(f.e.unrealizedPnl(),-10.25);
 });
+test('$100 net goal includes booked fees and funding, then closes and latches across midnight',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ f.e.income=[{income:'-5'},{income:'-1'}];f.e.lastIncome=Date.now();f.position.unRealizedProfit='105.99';await f.e.refresh();
+ assert.equal(await f.e.enforceSessionGoal(),false);assert.equal(f.e.active().length,1);
+ f.position.unRealizedProfit='106';await f.e.refresh();assert.equal(await f.e.enforceSessionGoal(),true);
+ assert.equal(f.e.auto,false);assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$100 net session target');assert.equal(f.e.state.goalNet,100);
+ const stamp=f.e.state.goalStopAt;f.api.offset+=86400000;f.e.syncDaily();assert.equal(f.e.state.goalStopAt,stamp);
+ f.e.income=[];assert.equal(await f.e.enforceSessionGoal(),true);assert.equal(f.e.auto,false);
+});
+test('goal shutdown attempts every bot position even when one close fails',async()=>{
+ const e=new DemoEngine({offset:0},{version:1,records:[{id:'bd1_a',symbol:'AAAUSDT',side:'BUY'},{id:'bd1_b',symbol:'BBBUSDT',side:'SELL'}],startedAt:Date.now()-1000},()=>{});
+ e.auto=true;e.lastIncome=Date.now();e.income=[{income:'100'}];e.positions=[{symbol:'AAAUSDT',positionAmt:'1',unRealizedProfit:'0'},{symbol:'BBBUSDT',positionAmt:'-1',unRealizedProfit:'0'},{symbol:'MANUALUSDT',positionAmt:'1',unRealizedProfit:'0'}];
+ const attempts=[];e.close=async s=>{attempts.push(s);if(s==='AAAUSDT')throw new DemoError('Uncertain close',0,true);};
+ await assert.rejects(()=>e.enforceSessionGoal(),/AAAUSDT/);assert.deepEqual(attempts,['AAAUSDT','BBBUSDT']);assert.equal(e.auto,false);assert.ok(e.state.goalStopAt);
+});
+test('explicit new session clears target lock and starts a fresh PnL window when flat',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.state.goalStopAt=Date.now()-1000;f.e.state.goal=true;f.e.state.dayOpenPnl=50;f.e.income=[{income:'100'}];let restarted=false;
+ f.e.start=async()=>{restarted=true;};await f.e.again();assert.equal(restarted,true);assert.equal(f.e.state.goalStopAt,undefined);assert.equal(f.e.state.goal,false);assert.equal(f.e.sessionNet(),0);assert.equal(f.e.state.resetAt,f.e.state.startedAt);
+});
