@@ -37,7 +37,7 @@ function fixture(){
   }};
   let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.newRules=false;e.overrideUntil=0;e.experimentUntil=0;
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
-  const signal={qualityConfirmed:true,strength:1,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
+  const signal={qualityConfirmed:true,strength:2,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   return {e,api,signal,calls,saved,orders,algos,get position(){return position},set position(p){position=p},set unknownEntry(v){unknownEntry=v},set failProtection(v){failProtection=v},set failClose(v){failClose=v}};
 }
 test('demo endpoint and signed request never contain raw secret; live URLs blocked',async()=>{
@@ -665,4 +665,20 @@ test('goal shutdown attempts every bot position even when one close fails',async
 test('explicit new session clears target lock and starts a fresh PnL window when flat',async()=>{
  const f=fixture();f.e.newRules=true;f.e.state.goalStopAt=Date.now()-1000;f.e.state.goal=true;f.e.state.dayOpenPnl=50;f.e.income=[{income:'100'}];let restarted=false;
  f.e.start=async()=>{restarted=true;};await f.e.again();assert.equal(restarted,true);assert.equal(f.e.state.goalStopAt,undefined);assert.equal(f.e.state.goal,false);assert.equal(f.e.sessionNet(),0);assert.equal(f.e.state.resetAt,f.e.state.startedAt);
+});
+test('selective mode rejects weak agreement before any exchange calls',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.strength=1;await f.e.enter(symbol,f.signal);
+ assert.equal(f.calls.length,0);assert.match(f.e.entryOutcome,/stronger/);
+});
+test('selective mode waits ten minutes after a closed trade and caps concurrency',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.state.records=[{id:'bd1_old',symbol,side:'BUY',at:Date.now()-600000,closedAt:Date.now()-300000,entryStatus:'FILLED'}];
+ await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/cooldown/);assert.equal(f.calls.length,0);
+ f.e.state.records=Array.from({length:3},(_,i)=>({id:'bd1_'+i,symbol:'COIN'+i+'USDT',side:'BUY',at:Date.now()-600000,entryStatus:'FILLED'}));
+ await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/three bot positions/);
+});
+test('selective mode spaces new fills and sizes round-trip commission to at most $1',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';
+ f.e.state.records=[{id:'bd1_recent',symbol:'OTHERUSDT',side:'BUY',at:Date.now()-10000,entryStatus:'FILLED'}];
+ await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/60 seconds/);f.e.state.records=[];
+ await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.ok(Number(r.quantity)*100*r.fee*2<=1);assert.equal(r.lossLimit,8);
 });

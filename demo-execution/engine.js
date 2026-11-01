@@ -374,10 +374,13 @@ class DemoEngine {
     const epoch=this.stopEpoch;
     if(!this.auto||this.state.goalStopAt||(!this.newRules&&this.state.goal&&!this.experimentActive())||this.owned(symbol))return skip('Auto paused, session goal reached, or already owned');
     if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return skip('Signal validation failed');
+    if(this.newRules&&!(signal.strength>=2))return skip('Selective mode: stronger trend/volume/candle agreement required');
+    if(this.newRules&&this.active().length>=3)return skip('Selective mode: three bot positions already active');
+    if(this.newRules&&this.state.records.some(r=>r.entryStatus==='FILLED'&&Date.now()+this.api.offset-r.at<60000))return skip('Selective mode: at least 60 seconds between entries');
     const experimental=this.experimentActive()&&signal.experimental===true;
     if(signal.experimental&&!experimental)return skip('Experiment expired; waiting for a normal signal');
     const lossLimit=this.newRules?8:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
-    if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<60000)))return skip('Already traded this candle or 60s re-entry cooldown');
+    if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip('Already traded this candle or re-entry cooldown (10 minutes after close in selective mode)');
     progress('Checking Binance balance, positions and open orders');
     await this.refresh();
     if(this.newRules&&await this.enforceSessionGoal())return skip('$100 net session target reached');
@@ -395,6 +398,7 @@ class DemoEngine {
     progress('Checking commission and position size');
     const feeInfo=await this.api.call('GET','/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
+    if(this.newRules&&2*signal.atr<=3*(2*price*fee))return skip('Estimated candle movement too small relative to round-trip commission');
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
@@ -413,11 +417,11 @@ class DemoEngine {
     }
     if(!selectedLeverage)return skip('Binance rejected all supported leverage candidates; continuing other coins');
     if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; sizing for volatility and fees');
-    const targetMargin=100;
+    const targetMargin=this.newRules?Math.min(100,Math.max(0,5000-capital.reserved)):100;
     const budget=Math.min(targetMargin,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),this.newRules&&fee>0?2/(2*price*fee):Infinity,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
+    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),this.newRules&&fee>0?1/(2*price*fee):Infinity,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
     const cap=number(leverage.maxNotionalValue)*.95;
@@ -589,6 +593,7 @@ class DemoEngine {
         foundCandidate=true;
         if(!trend)trend=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
         const qualified=qualifySetup(candidate,bars,trend,Date.now()+this.api.offset,r=>reason=minutes+'m: '+r,300000);
+        if(qualified&&this.newRules&&qualified.strength<2){reason=minutes+'m: selective mode requires stronger candle/volume agreement';continue;}
         if(qualified){intervalMs=minutes*60000;signal={...qualified,exitPolicy:'manual-profit-60s-loss',intervalMs};break;}
       }
       if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
