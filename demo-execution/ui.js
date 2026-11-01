@@ -35,13 +35,13 @@ function render(){
   const e=engine,connected=!!e?.connected;
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
-  $('start').disabled=!connected||e.busy||e.auto||(!e.newRules&&e.state.goal&&!e.experimentActive());
-  $('resetDemo').disabled=!connected||e.busy;
-  $('stop').disabled=!connected;$('refresh').disabled=!connected||e.busy;
+  $('start').disabled=!connected||e.controlPending||e.auto||(!e.newRules&&e.state.goal&&!e.experimentActive());
+  $('resetDemo').disabled=!connected||e.controlPending;
+  $('stop').disabled=!connected;$('refresh').disabled=!connected||e.controlPending;
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
-  status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
-  $('leverageWindow').textContent='New rules · adaptive 3× / 5× / 8× Cross · 1m → 2m → 3m signals · $4 planned loss stop';
+  status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  $('leverageWindow').textContent='New rules · adaptive 3× / 5× / 8× Cross · 1m → 2m → 3m → 4m signals · $4 planned loss stop';
   const capital=e.budgetStatus();$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · Up to $100 margin per new entry, reduced for $4 risk';
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
@@ -56,7 +56,7 @@ function render(){
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);
   $('positionsTab').textContent='Positions ('+positions.length+')';
   $('ordersTab').textContent='Open Orders ('+(e.orders.length+e.algos.length)+')';
-  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+' · Polls every 5s when idle; requests and cooldowns can delay updates.';
+  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+(e.scopedOrders?' · Order list covers tracked/open-position symbols only; each entry checks its own symbol.':'')+' · Polls every 5s when idle; requests and cooldowns can delay updates.';
   const field=(parent,label,value,cls='')=>{const d=document.createElement('div'),l=document.createElement('small'),v=document.createElement('b');l.textContent=label;v.textContent=value;v.className=cls;d.append(l,v);parent.append(d);};
   for(const p of positions){
     const r=e.owned(p.symbol),card=document.createElement('article');card.className='position-card';
@@ -69,7 +69,7 @@ function render(){
     const exits=e.algos.filter(a=>a.symbol===p.symbol),note=document.createElement('small');note.textContent='TP / SL: '+(exits.map(a=>(a.orderType||a.type||'Conditional')+' '+(a.triggerPrice??a.stopPrice??'—')).join(' · ')||'No open conditional orders in last sync');card.append(note);
     if(r&&e.exitsSuspended(r)){const warning=document.createElement('p');warning.textContent='NO AUTOMATIC EXITS during experiment · restore after '+new Date(r.experimentUntil).toLocaleString()+' while app is connected';warning.className='bad';card.append(warning);}
     if(r?.exitPolicy==='manual-profit-60s-loss'&&!e.exitsSuspended(r)){const timer=document.createElement('p');timer.textContent=Number.isFinite(r.lossSince)?'Loss timer: '+Math.max(0,Math.floor((Date.now()+e.api.offset-r.lossSince)/1000))+' / 60 seconds since first observed net loss':'Loss timer: inactive · resets at net break-even or profit';card.append(timer);const review=document.createElement('p');review.textContent=(r.continuation||'Trend review pending for a profitable position')+(r.reviewAt?' · Checked '+new Date(r.reviewAt).toLocaleTimeString():'')+' · Profit floor: '+(Number.isFinite(r.profitFloor)?'$'+r.profitFloor.toFixed(2):'arms at $1 net profit')+' · Manual close available';card.append(review);}
-    const b=document.createElement('button');b.textContent=r?(r.pendingClose?'Close awaiting confirmation':'Close position'):'Manage this position in Binance';b.disabled=e.busy||!r;b.onclick=()=>run(()=>e.close(p.symbol));card.append(b);$('positions').append(card);
+    const b=document.createElement('button');b.textContent=r?(r.pendingClose?'Close awaiting confirmation':'Close position'):'Manage this position in Binance';b.disabled=e.controlPending||!r;b.onclick=()=>run(()=>e.close(p.symbol));card.append(b);$('positions').append(card);
   }
   if(!positions.length)$('positions').textContent='No open positions in the last Binance snapshot.';
   $('openOrders').replaceChildren();
@@ -85,7 +85,12 @@ function render(){
   $('assets').replaceChildren();for(const a of e.account?.assets||[])if(Number(a.walletBalance)!==0||Number(a.unrealizedProfit)!==0)line($('assets'),[a.asset,a.walletBalance,a.availableBalance,a.marginBalance]);
   $('log').replaceChildren();for(const v of e.events){const d=document.createElement('div');d.textContent=new Date(v.at).toLocaleTimeString()+' · '+v.text;$('log').append(d);}
 }
-async function run(fn){if(!engine||engine.busy)return;engine.busy=true;render();try{await fn();if(engine.tradingReady)await engine.refresh();else await engine.refreshBalance();}catch(e){engine.block=e.message;engine.pause(e.message);}finally{engine.busy=false;render();}}
+async function run(fn,kind='action'){
+ const target=engine;if(!target)return;
+ try{await target.control(async()=>{if(engine===target)await fn();},kind);}
+ catch(error){target.block=error.message;target.pause(error.message);}
+ finally{render();}
+}
 async function acquireLock(){
   if(!navigator.locks)throw new Error('This browser cannot prevent duplicate trading tabs. Use current Chrome or Edge.');
   await new Promise((resolve,reject)=>{navigator.locks.request('btc-binance-demo-order-writer',{ifAvailable:true},lock=>{if(!lock){reject(new Error('Another tab is connected to Demo. Disconnect that tab first.'));return;}return new Promise(done=>{releaseLock=done;resolve();});}).catch(reject);});
@@ -95,9 +100,10 @@ $('connectform').onsubmit=async event=>{
   const key=$('key').value.trim(),secret=$('secret').value.trim();if(!key||!secret)return;
   const relayToken=$('localMode').checked?$('relayToken').value.trim():'';
   if($('localMode').checked&&relayToken.length<32){status('Paste the local connection token first.');return;}
+  connectionBusy=true;render();
   if($('remember').checked){
     try{await saveCredentials({key,secret,relayToken,localMode:$('localMode').checked},$('vaultPassword').value);}
-    catch(error){status(error.message);return;}
+    catch(error){connectionBusy=false;render();status(error.message);return;}
   }
   $('vaultPassword').value='';
   $('relayToken').value='';
@@ -119,7 +125,7 @@ $('connectform').onsubmit=async event=>{
   }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();if(engine?.auto)engine.tick();}
 };
-$('start').onclick=async()=>{await run(()=>engine.start());if(engine?.auto)engine.tick();};
+$('start').onclick=async()=>{await run(()=>engine.start(),'start');if(engine?.auto)engine.tick();};
 $('retry').onclick=async()=>{
   if(!engine?.api?.key||engine.busy)return;engine.busy=true;render();status('Retrying saved demo credentials…');
   try{await engine.initialize();engine.save();if(engine.connected)$('credentials').open=false;}

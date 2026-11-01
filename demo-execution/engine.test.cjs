@@ -238,7 +238,7 @@ test('scanner rotates bounded batches and explains WAIT without submitting order
   const e=new DemoEngine(api);e.experimentUntil=0;e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
-  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1m / 2m / 3m setup'));
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1m / 2m / 3m / 4m setup'));
   e.auto=false;await e.scan();assert.equal(calls.length,24);
 });
 test('scanner handles an empty universe without requests',async()=>{
@@ -473,4 +473,49 @@ test('fresh daily P&L offsets carried open P&L and retains realized income',()=>
  const f=fixture();f.e.newRules=true;f.e.state.dayOpenPnl=10;
  f.e.income=[{income:'3'}];f.e.positions=[{symbol,unRealizedProfit:'12'}];
  assert.equal(f.e.sessionNet(),5);
+});
+test('Stop during Start cannot be overwritten when initialization finishes',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.tradingReady=false;
+ f.e.prepareTrading=async()=>{f.e.pause('Stopped by user');f.e.tradingReady=true;};
+ await f.e.start();assert.equal(f.e.auto,false);
+});
+test('queued Start is cancelled by Stop while a refresh is busy',async()=>{
+ const f=fixture();f.e.busy=true;let started=false;
+ const queued=f.e.control(async()=>{started=true;},'start');
+ f.e.pause();await queued;assert.equal(started,false);assert.equal(f.e.controlPending,false);
+});
+test('manual sync waits for busy work and executes once without overlapping',async()=>{
+ const f=fixture();f.e.busy=true;let count=0;
+ const queued=f.e.control(async()=>{assert.equal(f.e.busy,true);count++;});
+ assert.equal(await f.e.control(async()=>count++),false);
+ f.e.busy=false;await queued;assert.equal(count,1);assert.equal(f.e.busy,false);
+});
+test('new inventory fallback checks tracked symbols rather than all 500 markets',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.orderUniverse=Array.from({length:507},(_,i)=>'COIN'+i+'USDT');
+ f.e.positions=[{symbol,positionAmt:'1'}];const seen=[];
+ f.api.call=async(m,p,q={})=>{if(!q.symbol)throw new DemoError('Unavailable all-market route',0);seen.push(q.symbol);return [];};
+ await f.e.readOrderInventory('/fapi/v1/openOrders');
+ assert.deepEqual(seen,[symbol]);assert.equal(f.e.scopedOrders,true);
+});
+test('new combined balance publishes before order inventory and refreshes after asset reset',async()=>{
+ const f=fixture();f.e.newRules=true;const original=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v3/account'?{assets:[{asset:'USDT',walletBalance:'6000',availableBalance:'6000',marginBalance:'6000'}],positions:[]}:original(m,p,q,s);
+ f.e.balance=1;f.e.readOrderInventory=async()=>{assert.equal(f.e.balance,6000);return [];};
+ await f.e.refresh();assert.equal(f.e.account.assets[0].walletBalance,'6000');
+});
+test('Binance-reset missing entry history reconciles a previously observed flat position',async()=>{
+ const f=fixture();await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+ f.e.newRules=true;f.position=null;f.orders.clear();f.algos.clear();await f.e.refresh();await f.e.reconcile();
+ assert.equal(f.e.active().length,0);assert.match(r.closeReason,/historical entry/);
+});
+test('4m aggregation excludes incomplete groups',()=>{
+ const {aggregateMinutes}=require('./engine.js'),t=Math.floor(Date.now()/240000)*240000-6000000;
+ const raw=Array.from({length:99},(_,i)=>[t+i*60000,100,102,99,101,10,t+(i+1)*60000-1]);
+ const result=aggregateMinutes(raw,t+99*60000,4);
+ assert.ok(result.every(b=>b[6]-b[0]===239999));assert.equal(result.length,24);
+});
+test('insufficient-margin definite entry rejection keeps scanning enabled',async()=>{
+ const f=fixture(),original=f.api.call;
+ f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order')throw new DemoError('Margin',-2019);return original(m,p,q,s);};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,true);assert.equal(f.e.active().length,0);
 });

@@ -1,0 +1,28 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const vm=require('node:vm');
+const fs=require('node:fs');
+const {DemoEngine}=require('./engine.js');
+function fixture(){
+ const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{disabled:false,hidden:false,textContent:'',classList:{add(){},remove(){}},replaceChildren(){}});return nodes.get(id);};
+ const context=vm.createContext({DemoEngine,console,setTimeout,setInterval(){},document:{getElementById:node,querySelector(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
+ vm.runInContext(`render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.connected=true;engine.tick=async()=>{};engine.refresh=async()=>{};engine.reconcile=async()=>{};engine.updateIncome=async()=>{};`,context);
+ return {node,context,e:vm.runInContext('engine',context)};
+}
+test('real Start/Stop handlers: Stop wins while setup is pending',async()=>{
+ const {node,e}=fixture();let finish;e.prepareTrading=()=>new Promise(r=>finish=r);
+ const start=node('start').onclick();await new Promise(r=>setImmediate(r));assert.equal(e.busy,true);
+ node('stop').onclick();finish();await start;assert.equal(e.auto,false);assert.equal(e.busy,false);
+});
+test('real Sync handler queues behind polling and refreshes exactly once',async()=>{
+ const {node,e}=fixture();e.tradingReady=true;e.busy=true;let reads=0;e.refresh=async()=>reads++;
+ const sync=node('refresh').onclick();assert.equal(e.controlPending,true);assert.equal(reads,0);
+ e.busy=false;await sync;assert.equal(reads,1);assert.equal(e.controlPending,false);
+});
+test('real Reset and tab handlers dispatch correctly',async()=>{
+ const {node,e}=fixture();let resets=0;e.resetFromBinance=async()=>resets++;
+ await node('resetDemo').onclick();assert.equal(resets,1);
+ node('ordersTab').onclick();assert.equal(node('positions').hidden,true);assert.equal(node('orderPanel').hidden,false);
+ node('positionsTab').onclick();assert.equal(node('positions').hidden,false);assert.equal(node('orderPanel').hidden,true);
+});

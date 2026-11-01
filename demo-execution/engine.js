@@ -80,7 +80,7 @@ function twoMinuteBars(raw,now){
   return result;
 }
 function aggregateMinutes(raw,now,minutes){
-  if(![2,3].includes(minutes))throw new DemoError('Unsupported aggregation');
+  if(![2,3,4].includes(minutes))throw new DemoError('Unsupported aggregation');
   twoMinuteBars(raw,now); // validate underlying 1m candle times
   const bars=raw.filter(b=>number(b[6])<now),out=[],ms=minutes*60000;
   for(let i=0;i+minutes<=bars.length;i++){
@@ -152,7 +152,7 @@ class DemoEngine {
   syncDaily(){
     if(!this.newRules)return;
     const now=Date.now()+this.api.offset,day=Math.floor((now+14400000)/86400000)*86400000-14400000;
-    if(this.state.dayStart!==day){this.state.dayStart=day;this.state.dayOpenPnl=null;this.state.startedAt=day;this.state.goal=false;this.income=[];this.lastIncome=0;this.save();}
+    if(this.state.dayStart!==day){this.state.dayStart=day;this.state.dayOpenPnl=null;this.state.startedAt=Math.max(day,this.state.resetAt||0);this.state.goal=false;this.income=[];this.lastIncome=0;this.save();}
   }
   save(){this.persist(this.state);}
   event(text){this.events.unshift({at:Date.now(),text});this.events=this.events.slice(0,60);this.notify();}
@@ -160,6 +160,15 @@ class DemoEngine {
   active(){return this.state.records.filter(r=>!r.closedAt&&!r.rejected);}
   owned(symbol){return this.active().find(r=>r.symbol===symbol);}
   position(symbol){return this.positions.find(p=>p.symbol===symbol&&number(p.positionAmt)!==0);}
+  async control(fn,kind='action'){
+    if(this.controlPending)return false;
+    this.controlPending=true;const epoch=this.stopEpoch;this.notify();
+    try{
+      while(this.busy){if(kind==='start'&&epoch!==this.stopEpoch)return false;await new Promise(resolve=>setTimeout(resolve,50));}
+      if(kind==='start'&&epoch!==this.stopEpoch)return false;
+      this.busy=true;this.notify();try{await fn();return true;}finally{this.busy=false;}
+    }finally{this.controlPending=false;this.notify();}
+  }
   async initialize(){
     this.pause();
     // The previously working account read must not depend on trading-only routes.
@@ -194,19 +203,27 @@ class DemoEngine {
     for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);}
     // Publish exchange positions before potentially slow order inventory reads.
     this.account=account;this.positions=positions;if(this.newRules&&this.state.dayStart&&this.state.dayOpenPnl===null){this.state.dayOpenPnl=positions.filter(p=>p.symbol.endsWith('USDT')).reduce((v,p)=>v+number(p.unRealizedProfit),0);this.save();}this.positionAt=Date.now();this.accountAt=this.positionAt;this.notify();
+    if(this.newRules){try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}this.notify();}
     const orders=await this.readOrderInventory('/fapi/v1/openOrders');
     const algos=await this.readOrderInventory('/fapi/v1/openAlgoOrders');
     if(!Array.isArray(account.assets)||!Array.isArray(positions)||!Array.isArray(orders)||!Array.isArray(algos))throw new DemoError('Invalid Binance account or order response');
     for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);if(number(p.positionAmt)!==0&&p.positionSide!=='BOTH')throw new DemoError('Hedge position detected. Auto entries stopped.');}
     this.account=account;this.positions=positions;this.orders=orders;this.algos=algos;this.ordersAt=Date.now();
-    try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}
+    if(!this.newRules){try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}}
     this.notify();
   }
   async readOrderInventory(path){
     this.inventoryModes??={};this.inventoryCache??={};
     if(!this.inventoryModes[path]){
       try{const all=await this.api.call('GET',path);if(!Array.isArray(all))throw new DemoError('Invalid order inventory');return all;}
-      catch(e){if(e.code!==0||e.uncertain||!this.orderUniverse?.length)throw e;this.inventoryModes[path]='per-symbol';this.event('All-market order read failed. Checking each contract individually; this can take a few minutes.');}
+      catch(e){if(e.code!==0||e.uncertain||!this.orderUniverse?.length)throw e;this.inventoryModes[path]='per-symbol';this.event(this.newRules?'All-market orders unavailable; showing tracked/open-position symbols. Each new entry checks its own symbol.':'All-market order read failed. Checking each contract individually; this can take a few minutes.');}
+    }
+    if(this.newRules){
+      this.scopedOrders=true;
+      const symbols=[...new Set([...this.active().map(r=>r.symbol),...this.positions.filter(p=>number(p.positionAmt)!==0).map(p=>p.symbol)])];
+      const rows=[];
+      for(const symbol of symbols){const a=await this.api.call('GET',path,{symbol});if(!Array.isArray(a))throw new DemoError('Incomplete symbol order inventory');rows.push(...a);}
+      return rows;
     }
     const cached=this.inventoryCache[path];
     if(cached&&Date.now()-cached.at<60000){
@@ -240,16 +257,19 @@ class DemoEngine {
   }
   sessionNet(){return this.income.reduce((s,x)=>s+number(x.income),0)+this.positions.filter(p=>p.symbol.endsWith('USDT')).reduce((s,p)=>s+number(p.unRealizedProfit),0)-(this.newRules?(this.state.dayOpenPnl||0):0);}
   async start(){
+    const epoch=this.stopEpoch;
     if(!this.connected)throw new DemoError('Connect demo credentials first');
     this.syncDaily();
-    await this.prepareTrading();
-    await this.refresh();await this.reconcile();
+    if(!this.tradingReady||Date.now()-this.metaAt>600000)await this.prepareTrading();else await this.refresh();
+    if(epoch!==this.stopEpoch)return;
+    await this.reconcile();
     if(this.active().some(r=>r.pendingClose||(!r.protected&&!this.exitsSuspended(r))))throw new DemoError('Resolve pending or unprotected orders before starting.');
     if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol))||this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))throw new DemoError('Unmanaged positions or orders exist in this demo account. Close/cancel them in Binance before starting this bot.');
     if(!this.newRules&&this.state.goal&&!this.experimentActive())throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m · adaptive leverage · $4 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    if(epoch!==this.stopEpoch)return;
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m · adaptive leverage · $4 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -258,11 +278,15 @@ class DemoEngine {
     await this.refresh();
     if(this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)
       throw new DemoError('Reset blocked: close positions and clear pending orders in Binance first.');
-    if(!Number.isFinite(this.balance)||this.balance<=0)
-      throw new DemoError('Reset blocked: fresh combined asset valuation is unavailable.');
+    if(!this.account?.assets.some(a=>a.asset==='USDT'&&Number.isFinite(Number(a.walletBalance))))
+      throw new DemoError('Reset blocked: fresh USDT wallet is unavailable.');
     // A pending entry may have been accepted but not appeared in position reads yet.
     for(const r of this.active()){
-      const order=await this.queryEntry(r);
+      let order;
+      try{order=await this.queryEntry(r);}catch(e){
+        if(e.code===-2013&&!e.uncertain&&(r.observedOpen||r.entryStatus==='FILLED')&&!r.pendingClose&&Date.now()+this.api.offset-r.at>60000){r.closedAt=Date.now()+this.api.offset;continue;}
+        throw e;
+      }
       if(!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(order.status)||r.pendingClose)
         throw new DemoError('Reset blocked: an order is still unresolved.');
       if(!r.observedOpen&&order.status==='FILLED')
@@ -335,7 +359,7 @@ class DemoEngine {
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
     progress('Configuring Cross margin and leverage');
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
-    const leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});
+    let leverage;try{leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});}catch(e){if(!e.uncertain&&e.code===-4028)return skip('Binance does not allow selected leverage for this coin');throw e;}
     if(number(leverage.leverage)!==selectedLeverage)throw new DemoError('Selected leverage not accepted');
     const cap=number(leverage.maxNotionalValue)*.95;
     if(cap<=0)return skip('No position capacity at selected leverage');
@@ -362,9 +386,9 @@ class DemoEngine {
     catch(e){
       if(!e.uncertain&&!r.entryStatus){
         r.rejected=true;this.save();
-        if(e.code===-2027){
-          this.event(symbol+' skipped: Binance position-size limit at '+selectedLeverage+'×; scanning continues.');
-          return skip('Binance leverage-size limit rejected this entry; continuing other coins');
+        if([-2027,-2019,-2020,-4004,-4005,-4164].includes(e.code)){
+          this.event(symbol+' entry rejected ('+e.code+'); scanning continues.');
+          return skip('Binance rejected entry ('+e.code+'); continuing other coins');
         }
       }
       this.pause(e.message);throw e;
@@ -376,13 +400,13 @@ class DemoEngine {
   }
   async ensureExit(r,p,kind,target){
     let e=r.exits.find(e=>e.kind===kind&&!e.cancelled);
-    if(e){const q=await this.queryExit(e);if(q.algoStatus==='NEW'){e.confirmed=true;return;}throw new DemoError(r.symbol+' protective '+kind+' is '+q.algoStatus+'; checking position.');}
+    if(e){if(this.newRules&&e.confirmed&&Date.now()-(e.verifiedAt||0)<15000)return;const q=await this.queryExit(e);if(q.algoStatus==='NEW'){e.confirmed=true;e.verifiedAt=Date.now();return;}throw new DemoError(r.symbol+' protective '+kind+' is '+q.algoStatus+'; checking position.');}
     const triggerPrice=exitPrice(number(p.entryPrice),Math.abs(number(p.positionAmt)),r.fee,target,r.side,r.tick);
     const mark=number(p.markPrice);if((kind==='tp')?(r.side==='BUY'?mark>=+triggerPrice:mark<=+triggerPrice):(r.side==='BUY'?mark<=+triggerPrice:mark>=+triggerPrice)){await this.close(r.symbol,kind+' threshold reached');return;}
     e={id:r.id+'_'+kind,kind,triggerPrice,confirmed:false};r.exits.push(e);this.save();
     const result=await this.sendOnce('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:r.symbol,side:r.side==='BUY'?'SELL':'BUY',positionSide:'BOTH',type:kind==='tp'?'TAKE_PROFIT_MARKET':'STOP_MARKET',closePosition:'true',triggerPrice,workingType:'MARK_PRICE',priceProtect:'false',clientAlgoId:e.id},()=>this.queryExit(e));
     if(result.algoStatus!=='NEW')throw new DemoError('Protection was not confirmed NEW');
-    e.confirmed=true;this.save();
+    e.confirmed=true;e.verifiedAt=Date.now();this.save();
   }
   async close(symbol,reason='Manual close'){
     const r=this.owned(symbol);if(!r)throw new DemoError('This position is not owned by this bot. Manage it in Binance Demo.');
@@ -399,10 +423,15 @@ class DemoEngine {
   async reconcile(){
     for(const r of this.active()){
       let order;
-      try{order=await this.queryEntry(r);}catch(e){
+      try{order=this.newRules&&r.observedOpen&&r.entryStatus==='FILLED'&&this.position(r.symbol)?{status:'FILLED',orderId:r.orderId}:await this.queryEntry(r);}catch(e){
         // A fresh position can prove that an ambiguous entry filled even when
         // the order query is temporarily unavailable. Protect it immediately.
-        if(!this.position(r.symbol))throw e;
+        if(!this.position(r.symbol)){
+          if(e.code===-2013&&!e.uncertain&&r.observedOpen&&!r.pendingClose&&!this.orders.some(o=>o.symbol===r.symbol)&&!this.algos.some(o=>o.symbol===r.symbol)){
+            r.closedAt=Date.now()+this.api.offset;r.closeReason='Binance has no position or order; historical entry no longer available';for(const exit of r.exits||[])exit.cancelled=true;this.save();this.event(r.symbol+' reconciled flat after missing Binance history');continue;
+          }
+          throw e;
+        }
         this.pause('Entry status unavailable; protecting observed position.');
         order={status:'UNKNOWN',orderId:r.orderId};
       }
@@ -461,9 +490,9 @@ class DemoEngine {
       if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:99},false);
       const now=Date.now()+this.api.offset;
-      let intervalMs=60000,signal=null,reason='No qualifying closed 1m / 2m / 3m setup',trend=null,foundCandidate=false;
+      let intervalMs=60000,signal=null,reason='No qualifying closed 1m / 2m / 3m / 4m setup',trend=null,foundCandidate=false;
       if(this.experimentActive()){signal=experimentSignal(raw,now);reason='Experiment: no fresh directional candle';}
-      else for(const minutes of [1,2,3]){
+      else for(const minutes of [1,2,3,4]){
         const bars=minutes===1?raw:aggregateMinutes(raw,now,minutes);
         const candidate=breakout(bars,now,minutes*60000);
         if(!candidate)continue;
@@ -502,7 +531,7 @@ class DemoEngine {
     this.save();this.notify();
   }
   async tick(){
-    if(!this.connected||this.busy)return;this.busy=true;
+    if(!this.connected||this.busy||this.controlPending)return;this.busy=true;
     try{
       this.syncDaily();
       if(!this.tradingReady){await this.refreshBalance();return;}
