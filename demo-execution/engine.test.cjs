@@ -543,3 +543,14 @@ test('current demo rules ignore old loss timer and still close at $4',async()=>{
  await f.e.reconcile();assert.equal(f.e.active().length,1);assert.equal(r.lossSince,null);
  f.position.unRealizedProfit=String(-4.01+fees);await f.e.reconcile();assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$4 loss threshold');
 });
+test('50x rejection falls back to accepted 20x and submits one risk-sized order',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';const original=f.api.call,attempts=[];
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverage'){attempts.push(q.leverage);if(q.leverage>20)throw new DemoError('Unsupported leverage',-4028);}return original(m,p,q,s);};
+ await f.e.enter(symbol,f.signal);assert.deepEqual(attempts,[50,25,20]);const r=f.e.active()[0];assert.equal(r.leverage,20);assert.equal(r.lossLimit,4);assert.equal(r.protected,true);
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly).length,1);
+ assert.ok(Number(r.quantity)*100/20<=100);
+});
+test('profit floors advance in five-dollar steps after 32',()=>{
+ const {profitFloor}=require('./engine.js');
+ for(const [peak,floor] of [[32,16],[32.01,32],[37,32],[37.01,37],[42,37],[42.01,42],[48,47],[100,97]])assert.equal(profitFloor(peak),floor);
+});

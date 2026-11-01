@@ -129,7 +129,7 @@ function experimentSignal(raw,now){
   if(atr<=0)return null;
   return {side:price>open?'BUY':'SELL',price,close:number(b[6]),high:number(b[2]),low:number(b[3]),atr,stopDistance:1.5*atr,qualityConfirmed:true,experimental:true,leverage:3,intervalMs:60000,exitPolicy:'manual-profit-60s-loss'};
 }
-function profitFloor(peak){if(!Number.isFinite(peak)||peak<=4)return null;let floor=4;while(peak>floor*2)floor*=2;return floor;}
+function profitFloor(peak){if(!Number.isFinite(peak)||peak<=4)return null;if(peak>32)return 32+5*Math.max(0,Math.ceil((peak-32)/5)-1);let floor=4;while(peak>floor*2)floor*=2;return floor;}
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
   const sign=side==='BUY'?1:-1;
@@ -362,17 +362,27 @@ class DemoEngine {
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
-    const selectedLeverage=this.entryLeverage(signal);
+    const preferredLeverage=this.entryLeverage(signal);
+    progress('Configuring Cross margin and leverage');
+    try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
+    let leverage,selectedLeverage;
+    const candidates=this.newRules?[50,25,20,10,5,3,2,1]:[preferredLeverage];
+    for(const candidate of candidates){
+      if(!this.auto||epoch!==this.stopEpoch)return skip('Auto stopped during leverage checks');
+      try{
+        leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:candidate});
+        if(number(leverage.leverage)!==candidate)throw new DemoError('Selected leverage not accepted');
+        selectedLeverage=candidate;break;
+      }catch(e){if(e.uncertain||e.code!==-4028)throw e;}
+    }
+    if(!selectedLeverage)return skip('Binance rejected all supported leverage candidates; continuing other coins');
+    if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; resizing entry for $4 planned risk');
     const budget=Math.min(100,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
     let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
-    progress('Configuring Cross margin and leverage');
-    try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
-    let leverage;try{leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:selectedLeverage});}catch(e){if(!e.uncertain&&e.code===-4028)return skip('Binance does not allow selected leverage for this coin');throw e;}
-    if(number(leverage.leverage)!==selectedLeverage)throw new DemoError('Selected leverage not accepted');
     const cap=number(leverage.maxNotionalValue)*.95;
     if(cap<=0)return skip('No position capacity at selected leverage');
     if(notional>cap){
@@ -382,7 +392,7 @@ class DemoEngine {
     }
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return skip('Auto stopped before entry dispatch');
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
-    if(this.entryLeverage(signal)!==selectedLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
+    if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?2:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
