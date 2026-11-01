@@ -238,7 +238,7 @@ test('scanner rotates bounded batches and explains WAIT without submitting order
   const e=new DemoEngine(api);e.experimentUntil=0;e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
-  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1m / 2m / 3m / 4m setup'));
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1m / 2m / 3m / 4m / 5m setup'));
   e.auto=false;await e.scan();assert.equal(calls.length,24);
 });
 test('scanner handles an empty universe without requests',async()=>{
@@ -438,14 +438,14 @@ test('uncertain -2027 response still stops for reconciliation',async()=>{
  f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order'){submissions++;throw new DemoError('Uncertain response',-2027,true);}return original(m,p,q,s);};
  await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(submissions,1);assert.equal(f.e.auto,false);
 });
-test('fresh rules disable experiment and use $100 margin at 50x and an $8 stop',async()=>{
+test('fresh rules disable experiment and use flexible margin at 50x and an $8 stop',async()=>{
  const f=fixture();f.e.newRules=true;f.e.experimentUntil=f.e.overrideUntil=Date.now()+3600000;
  f.e.state.goal=true;f.e.budgetStatus=()=>({free:0,reserved:800,equity:0});
  f.signal.exitPolicy='manual-profit-60s-loss';
  assert.equal(f.e.experimentActive(),false);assert.equal(f.e.entryLeverage(f.signal),50);
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  assert.equal(r.rulesVersion,3);assert.equal(r.lossLimit,8);assert.equal(r.exits[0].kind,'sl8');
- assert.equal(r.filledQty*100/50,100);
+ assert.ok(r.filledQty*100/50<100);
  f.position.unRealizedProfit='-8';await f.e.reconcile();assert.equal(f.e.active().length,0);
 });
 test('existing bot exits migrate only after replacement $8 stop is accepted',async()=>{
@@ -520,11 +520,11 @@ test('insufficient-margin definite entry rejection keeps scanning enabled',async
  f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order')throw new DemoError('Margin',-2019);return original(m,p,q,s);};
  await f.e.enter(symbol,f.signal);assert.equal(f.e.auto,true);assert.equal(f.e.active().length,0);
 });
-test('50x new entry retains $8 stop and uses $100 margin',async()=>{
+test('50x new entry retains $8 stop and uses flexible margin',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  assert.equal(r.leverage,50);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
- assert.equal(Number(r.quantity)*100/50,100);
+ assert.ok(Number(r.quantity)*100/50<100);
 });
 for(const [path,code] of [['/fapi/v1/marginType',-4067],['/fapi/v1/leverage',-4028],['/fapi/v1/commissionRate',-1000],['/fapi/v1/order',-2010],['/fapi/v1/order',-1111]])test('recoverable rejection '+path+' '+code+' preserves auto',async()=>{
  const f=fixture(),original=f.api.call;f.e.newRules=true;
@@ -548,7 +548,7 @@ test('50x rejection falls back to accepted 20x and submits one risk-sized order'
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverage'){attempts.push(q.leverage);if(q.leverage>20)throw new DemoError('Unsupported leverage',-4028);}return original(m,p,q,s);};
  await f.e.enter(symbol,f.signal);assert.deepEqual(attempts,[50,25,20]);const r=f.e.active()[0];assert.equal(r.leverage,20);assert.equal(r.lossLimit,8);assert.equal(r.protected,true);
  assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly).length,1);
- assert.equal(Number(r.quantity)*100/20,40);
+ assert.ok(Number(r.quantity)*100/20<=100);
 });
 test('profit floors advance in five-dollar steps after 32',()=>{
  const {profitFloor}=require('./engine.js');
@@ -564,13 +564,19 @@ test('existing $4 stop migrates to $8 without resetting profit peak or increasin
  r.peak=5;r.profitFloor=4;const fees=r.fee*r.filledQty*(r.entry+Number(f.position.markPrice));f.position.unRealizedProfit=String(4.5+fees);
  await f.e.reconcile();assert.equal(r.lossLimit,8);assert.equal(r.quantity,qty);assert.equal(r.peak,5);assert.equal(r.profitFloor,4);assert.ok(r.exits.some(e=>e.kind==='sl4'&&e.cancelled));assert.ok(r.exits.some(e=>e.kind==='sl8'&&e.confirmed&&!e.cancelled));
 });
-test('50x skips insufficient margin rather than opening undersized trade',async()=>{
+test('50x accepts a smaller risk-sized trade below $100 available margin',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call;
  f.api.call=async(m,p,q,s)=>{const result=await original(m,p,q,s);if(p==='/fapi/v3/account')result.assets[0].availableBalance='90';return result;};
- await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/Need \$100/);assert.equal(f.e.auto,true);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,1);assert.ok(Number(f.e.active()[0].quantity)*100/50<90);assert.equal(f.e.auto,true);
 });
-test('50x skips entry when round-trip fee exceeds the $8 loss allowance',async()=>{
+test('50x reduces quantity to keep estimated round-trip fees under $2',async()=>{
  const f=fixture();f.e.newRules=true;const original=f.api.call;
  f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.001'}:original(m,p,q,s);
- await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/cost filter/);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,1);assert.equal(f.e.auto,true);assert.ok(Number(f.e.active()[0].quantity)*100*.001*2<=2);
+});
+test('five-minute fallback has enough complete candles and ignores partial groups',()=>{
+ const {aggregateMinutes}=require('./engine.js'),t=Math.floor(Date.now()/300000)*300000-9000000;
+ const raw=Array.from({length:150},(_,i)=>[t+i*60000,100,102,99,101,10,t+(i+1)*60000-1]);
+ const bars=aggregateMinutes(raw,t+150*60000,5);assert.equal(bars.length,30);assert.equal(bars[0][5],50);assert.equal(bars[0][6]-bars[0][0],299999);
+ assert.equal(aggregateMinutes(raw.slice(0,149),t+150*60000,5).length,29);
 });

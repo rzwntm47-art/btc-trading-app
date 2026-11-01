@@ -81,7 +81,7 @@ function twoMinuteBars(raw,now){
   return result;
 }
 function aggregateMinutes(raw,now,minutes){
-  if(![2,3,4].includes(minutes))throw new DemoError('Unsupported aggregation');
+  if(![2,3,4,5].includes(minutes))throw new DemoError('Unsupported aggregation');
   twoMinuteBars(raw,now); // validate underlying 1m candle times
   const bars=raw.filter(b=>number(b[6])<now),out=[],ms=minutes*60000;
   for(let i=0;i+minutes<=bars.length;i++){
@@ -276,7 +276,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m · requested 50× leverage · $8 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m/5m · requested 50× leverage · $8 planned loss · available USDT · daily $100 progress target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -382,20 +382,17 @@ class DemoEngine {
       }catch(e){if(e.uncertain||e.code!==-4028)throw e;}
     }
     if(!selectedLeverage)return skip('Binance rejected all supported leverage candidates; continuing other coins');
-    if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; sizing margin below $100');
-    const targetMargin=this.newRules?100*selectedLeverage/50:100;
+    if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; sizing for volatility and fees');
+    const targetMargin=100;
     const budget=Math.min(targetMargin,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
     if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
-    if(this.newRules&&selectedLeverage===50&&budget<100)return skip('Need $100 margin plus estimated fees for 50× entry');
     const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    let quantity=rounded(Math.min(budget*selectedLeverage/price,(experimental||this.newRules)?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
-    if(this.newRules&&selectedLeverage===50){quantity=rounded(100*50/price,step,true);qty=number(quantity);notional=qty*price;if(qty>Math.min(number(lot.maxQty),number(normal.maxQty))||notional/50+notional*fee*2>number(usdt.availableBalance))return skip('Binance size/balance limits cannot support $100 margin at 50×');}
+    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),this.newRules&&fee>0?2/(2*price*fee):Infinity,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
     const cap=number(leverage.maxNotionalValue)*.95;
     if(cap<=0)return skip('No position capacity at selected leverage');
     if(notional>cap){
-      if(this.newRules&&selectedLeverage===50)return skip('Binance leverage cap cannot support $100 margin at 50×');
       quantity=rounded(Math.min(qty,cap/price),step);qty=number(quantity);notional=qty*price;
       if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional)return skip('Leverage position cap is below the minimum order size');
       progress('Reduced order size to fit Binance leverage limit');
@@ -522,11 +519,11 @@ class DemoEngine {
     for(const symbol of batch){
       if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)break;
       if(this.owned(symbol))continue;
-      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:99},false);
+      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:150},false);
       const now=Date.now()+this.api.offset;
-      let intervalMs=60000,signal=null,reason='No qualifying closed 1m / 2m / 3m / 4m setup',trend=null,foundCandidate=false;
+      let intervalMs=60000,signal=null,reason='No qualifying closed 1m / 2m / 3m / 4m / 5m setup',trend=null,foundCandidate=false;
       if(this.experimentActive()){signal=experimentSignal(raw,now);reason='Experiment: no fresh directional candle';}
-      else for(const minutes of [1,2,3,4]){
+      else for(const minutes of [1,2,3,4,5]){
         const bars=minutes===1?raw:aggregateMinutes(raw,now,minutes);
         const candidate=breakout(bars,now,minutes*60000);
         if(!candidate)continue;
