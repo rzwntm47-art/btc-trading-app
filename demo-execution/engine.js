@@ -129,6 +129,21 @@ function experimentSignal(raw,now){
   if(atr<=0)return null;
   return {side:price>open?'BUY':'SELL',price,close:number(b[6]),high:number(b[2]),low:number(b[3]),atr,stopDistance:1.5*atr,qualityConfirmed:true,experimental:true,leverage:3,intervalMs:60000,exitPolicy:'manual-profit-60s-loss'};
 }
+function recoverySignal(raw,trend,side,now){
+  const aligned=(input,ms)=>{
+    breakout(input,now,ms);
+    const bars=input.filter(b=>number(b[6])<now);
+    if(bars.length<21||now-number(bars.at(-1)[6])>ms+15000)return false;
+    const mean=a=>a.reduce((n,b)=>n+number(b[4]),0)/a.length;
+    const fast=mean(bars.slice(-5)),slow=mean(bars.slice(-20)),last=bars.at(-1),previous=bars.at(-2);
+    return {bars,last,ok:side==='BUY'?number(last[4])>fast&&fast>slow&&number(last[4])>number(previous[4]):number(last[4])<fast&&fast<slow&&number(last[4])<number(previous[4])};
+  };
+  const minute=aligned(raw,60000),five=aligned(trend,300000);
+  if(!minute?.ok||!five?.ok)return false;
+  const b=minute.last,open=number(b[1]),close=number(b[4]),high=number(b[2]),low=number(b[3]),range=high-low;
+  const volume=minute.bars.slice(-21,-1).reduce((n,b)=>n+number(b[5]),0)/20;
+  return range>0&&open>=low&&open<=high&&volume>0&&number(b[5])>=1.2*volume&&Math.abs(close-open)/range>=.4&&(side==='BUY'?close>open&&(close-low)/range>=.65:close<open&&(high-close)/range>=.65);
+}
 function profitFloor(peak){if(!Number.isFinite(peak)||peak<=4)return null;if(peak>32)return 32+5*Math.max(0,Math.ceil((peak-32)/5)-1);let floor=4;while(peak>floor*2)floor*=2;return floor;}
 function exitPrice(entry,qty,fee,target,side,tick){
   // Net = signed price movement minus entry and expected exit taker fees.
@@ -449,6 +464,32 @@ class DemoEngine {
     if(order.status==='FILLED'){r.pendingClose=null;this.save();}else throw new DemoError('Close order awaiting final status');
     await this.refresh();if(!this.position(symbol)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();this.event(symbol+' closed · '+reason);}
   }
+  async maybeExtendRecovery(r,p,net){
+    const now=Date.now()+this.api.offset,previous=r.recoveryObservation;
+    r.recoveryObservation={net,at:now};
+    if(!this.newRules||r.recoveryExtended||r.lossLimit!==8||net<=-8||net> -6||!previous||now-previous.at>30000||net<=previous.net||now-(r.recoveryCheckedAt||0)<30000)return;
+    r.recoveryCheckedAt=now;
+    let fresh;
+    try{
+      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'1m',limit:30},false);
+      const trend=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'5m',limit:30},false);
+      if(!recoverySignal(raw,trend,r.side,Date.now()+this.api.offset)){r.recoveryNote='Recovery check not confirmed; $8 stop retained';return;}
+      const list=await this.api.call('GET','/fapi/v3/positionRisk',{symbol:r.symbol});
+      if(!Array.isArray(list))throw new DemoError('Invalid recovery position read');
+      fresh=list.find(x=>x.symbol===r.symbol&&x.positionSide==='BOTH'&&number(x.positionAmt)!==0);
+      if(!fresh){r.recoveryNote='Position no longer open; no extension';return;}
+      const qty=Math.abs(number(fresh.positionAmt)),freshNet=number(fresh.unRealizedProfit)-r.fee*qty*(number(fresh.entryPrice)+number(fresh.markPrice));
+      Object.assign(p,fresh);
+      if(Date.now()+this.api.offset-now>15000||qty!==r.filledQty||(number(fresh.positionAmt)>0)!==(r.side==='BUY')||number(fresh.entryPrice)!==r.entry||freshNet<=-8||freshNet> -6||freshNet<net){r.recoveryNote='Recovery changed during check; $8 stop retained';return;}
+    }catch(error){r.recoveryNote='Recovery data unavailable; $8 stop retained: '+error.message;return;}
+    // Persist the one-time decision. On reload, reconcile installs/verifies sl12
+    // before cancelling sl8, including an interrupted replacement.
+    r.recoveryExtended=true;r.lossLimit=12;r.recoveryNote='One-time recovery extension: improving loss + closed 1m candle + 5m trend';this.save();
+    await this.ensureExit(r,p,'sl12',-12);if(r.closedAt||r.pendingClose)return;
+    const stop=r.exits.find(e=>e.kind==='sl12'&&!e.cancelled&&e.confirmed);
+    if(!stop)throw new DemoError('Recovery stop not confirmed');
+    await this.cancelExits(r,stop.id);this.save();this.event(r.symbol+' recovery check passed: planned stop extended once to $12. Recovery is not guaranteed.');
+  }
   async reconcile(){
     for(const r of this.active()){
       let order;
@@ -480,16 +521,19 @@ class DemoEngine {
           await this.cancelExits(r,stop.id);
           r.rulesVersion=3;r.lossLimit=8;r.exitPolicy='manual-profit-60s-loss';r.experimentUntil=null;r.lossSince=null;this.save();
         }
-        await this.ensureExit(r,p,r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
+        await this.ensureExit(r,p,r.recoveryExtended?'sl12':r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
+        if(r.recoveryExtended){const stop=r.exits.find(e=>e.kind==='sl12'&&!e.cancelled&&e.confirmed);if(!stop)throw new DemoError('Recovery stop missing');await this.cancelExits(r,stop.id);}
         if(r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
-        const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
+        let net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
         if(r.exitPolicy==='manual-profit-60s-loss'){
           const raised=profitFloor(r.peak);
           // Recompute from the retained peak, replacing saved floors from older rules.
           r.profitFloor=raised;
           this.save();
           if(Number.isFinite(r.profitFloor)&&net<=r.profitFloor){await this.close(r.symbol,'Profit pullback to $'+r.profitFloor.toFixed(2)+' floor');continue;}
+          await this.maybeExtendRecovery(r,p,net);if(r.closedAt||r.pendingClose)continue;
+          net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;
           const observedAt=Date.now()+this.api.offset;
           if(this.newRules)r.lossSince=null;
           else if(net<0){if(!Number.isFinite(r.lossSince))r.lossSince=observedAt;}else r.lossSince=null;
@@ -578,4 +622,4 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,qualifySetup,experimentSignal,profitFloor,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,qualifySetup,experimentSignal,profitFloor,recoverySignal,exitPrice,combinedValue,DEMO_BASE};

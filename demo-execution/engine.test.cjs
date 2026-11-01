@@ -580,3 +580,59 @@ test('five-minute fallback has enough complete candles and ignores partial group
  const bars=aggregateMinutes(raw,t+150*60000,5);assert.equal(bars.length,30);assert.equal(bars[0][5],50);assert.equal(bars[0][6]-bars[0][0],299999);
  assert.equal(aggregateMinutes(raw.slice(0,149),t+150*60000,5).length,29);
 });
+function recoveryBars(ms,side='BUY',at=Date.now()){
+ const end=Math.floor(at/ms)*ms,start=end-30*ms;
+ return Array.from({length:30},(_,i)=>{const c=side==='BUY'?100+i:140-i;return [start+i*ms,side==='BUY'?c-.6:c+.6,c+.8,c-.8,c,i===29?20:10,start+(i+1)*ms-1];});
+}
+test('recovery signal requires directional closed candles and trend for BUY and SELL',()=>{
+ const {recoverySignal}=require('./engine.js'),at=Date.now();
+ for(const side of ['BUY','SELL']){
+  const raw=recoveryBars(60000,side,at),trend=recoveryBars(300000,side,at);
+  // Increase candle body to meet the explicit 40% rule.
+  raw.at(-1)[1]=Number(raw.at(-1)[4])+(side==='BUY'?-.7:.7);raw.at(-1)[2]=Number(raw.at(-1)[4])+(side==='BUY'?.1:.9);raw.at(-1)[3]=Number(raw.at(-1)[4])-(side==='BUY'?.9:.1);
+  assert.equal(recoverySignal(raw,trend,side,at),true);
+  assert.equal(recoverySignal(raw,trend,side,at+400000),false);
+  raw.at(-1)[5]=1;assert.equal(recoverySignal(raw,trend,side,at),false);
+ }
+});
+async function recoveryFixture(){
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+ const r=f.e.active()[0],original=f.api.call;
+ f.setNet=n=>{f.position.unRealizedProfit=String(n+r.fee*r.filledQty*(r.entry+Number(f.position.markPrice)));};
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines'){const bars=recoveryBars(q.interval==='1m'?60000:300000);bars.at(-1)[1]=Number(bars.at(-1)[4])-.7;bars.at(-1)[2]=Number(bars.at(-1)[4])+.1;bars.at(-1)[3]=Number(bars.at(-1)[4])-.9;return bars;}return original(m,p,q,s);};
+ f.setNet(-7);r.recoveryObservation={net:-7.5,at:Date.now()-5000};return {...f,r};
+}
+test('qualified recovery confirms $12 before cancelling $8 and closes at $12',async()=>{
+ const f=await recoveryFixture(),r=f.r,start=f.calls.length;
+ await f.e.reconcile();assert.equal(r.lossLimit,12);assert.equal(r.recoveryExtended,true);
+ const calls=f.calls.slice(start),add=calls.findIndex(c=>c.method==='POST'&&c.path==='/fapi/v1/algoOrder'&&c.p.clientAlgoId.endsWith('_sl12')),remove=calls.findIndex(c=>c.method==='DELETE'&&c.p.clientAlgoId.endsWith('_sl8'));
+ assert.ok(add>=0&&remove>add);assert.equal(f.e.active().length,1);
+ f.setNet(-9);await f.e.reconcile();assert.equal(f.e.active().length,1);
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/algoOrder'&&c.p.clientAlgoId.endsWith('_sl12')).length,1);
+ f.setNet(-12.01);await f.e.reconcile();assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$12 loss threshold');
+});
+test('unavailable recovery data leaves $8 stop and does not pause auto',async()=>{
+ const f=await recoveryFixture(),original=f.api.call;
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')throw Error('Offline');return original(m,p,q,s);};
+ await f.e.reconcile();assert.equal(f.r.lossLimit,8);assert.equal(f.e.auto,true);assert.ok(!f.r.recoveryExtended);
+ f.setNet(-8.01);await f.e.reconcile();assert.equal(f.e.active().length,0);
+});
+test('worsening loss cannot extend and failed recovery protection does not continue trading',async()=>{
+ const f=await recoveryFixture();f.r.recoveryObservation.net=-6.5;
+ await f.e.reconcile();assert.equal(f.r.lossLimit,8);
+ f.r.recoveryObservation={net:-7.5,at:Date.now()-1000};const original=f.api.call;
+ f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/algoOrder'&&q.clientAlgoId.endsWith('_sl12'))throw new DemoError('Rejected',-1111);return original(m,p,q,s);};
+ await assert.rejects(()=>f.e.reconcile());assert.equal(f.e.auto,false);assert.equal(f.e.active().length,0);
+});
+test('loss crossing $8 during recovery check closes rather than extending',async()=>{
+ const f=await recoveryFixture(),original=f.api.call;let crossed=false;
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v3/positionRisk'&&!crossed){f.setNet(-9);crossed=true;}return original(m,p,q,s);};
+ await f.e.reconcile();assert.equal(f.r.lossLimit,8);assert.ok(!f.r.recoveryExtended);assert.equal(f.e.active().length,0);
+});
+test('recovery extension survives reload without adding position or leverage',async()=>{
+ const f=await recoveryFixture(),r=f.r,qty=r.quantity;
+ await f.e.reconcile();const before=f.calls.length;
+ const e=new DemoEngine(f.api,JSON.parse(JSON.stringify(f.e.state)),()=>{});await e.refresh();await e.reconcile();
+ assert.equal(e.active()[0].lossLimit,12);assert.equal(e.active()[0].quantity,qty);
+ assert.ok(!f.calls.slice(before).some(c=>c.method==='POST'));
+});

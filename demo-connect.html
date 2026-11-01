@@ -4,11 +4,11 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.33</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.34</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for USDT cross-margin trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" hidden disabled>New $100 session</button></div>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
-<p id="leverageWindow">50× preferred · lower leverage fallback · Cross · 1m / 2m / 3m / 4m / 5m entries</p><small>All available demo USDT · Flexible margin up to $100; no minimum margin requirement; $8 planned stop-loss · No timed loss exit; $8 planned loss stop only · profit floors activate above $4 → $8 → $16 → $32 → $37 → $42… · $100 daily target; trading may continue above it.</small>
+<p id="leverageWindow">50× preferred · lower leverage fallback · Cross · 1m / 2m / 3m / 4m / 5m entries</p><small>All available demo USDT · Flexible margin up to $100; no minimum margin requirement; $8 planned stop-loss · No timed loss exit; $8 default stop, one conditional extension to $12 · profit floors activate above $4 → $8 → $16 → $32 → $37 → $42… · $100 daily target; trading may continue above it.</small>
 <section><h2>Available USDT · margin allocation</h2><b id="budgetValue">Awaiting account</b><small>Uses USDT collateral only; no BTC or USDC conversions. Cross positions share available USDT. Stops target $8 including estimated fees; actual losses can be larger due to gaps or execution delays.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>Today’s USDT P&amp;L / $100 target</small><b id="session">—</b><small id="sessionNote">Realized P&amp;L + fees + funding + open P&amp;L</small></div></div>
 <section><h2>Why is my USDT wallet changing?</h2><p id="incomeAudit">Awaiting Binance income history</p><p id="incomeDiagnosis"></p><small>Account-wide USDT realized P&amp;L, commission and funding since the displayed trading-day/reset start. Includes manual trades; excludes transfers, asset resets and other income types. Open profit is not booked profit. This is not a full wallet reconciliation. Share this panel to diagnose losses; never share API keys.</small></section><div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
@@ -17,7 +17,7 @@ body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2
 <p>Continuously scans all listed trading USDT-margined perpetuals, with priority rechecks of recent candidates. Each coin is evaluated on closed 1-minute candles, then complete 2-minute, 3-minute, 4-minute and 5-minute candles if earlier timeframes do not qualify. Breakouts require a confirming 5-minute trend, volume at least 1.2× its recent average, and candle-body confirmation. BUY and SELL are supported. New entries request 50× leverage; if Binance rejects 50×, lower leverage is tried (25×, 20×, 10×, 5×, 3×, 2×, 1×). Position size is limited by available margin, the $8 stop at a volatility-based distance, and an estimated $2 round-trip commission budget. Smaller 50× positions are allowed. Existing positions retain their leverage. No trade is guaranteed profitable and these rules have not been validated by profitability backtesting.</p>
 <p>Uses available USDT up to $100 margin per entry, with no minimum margin requirement. Quantity adjusts to volatility and fees. Estimated round-trip commission is capped at $2 when sizing; actual commission can differ. The $8 planned stop remains. Market orders may incur spread and slippage. Orders respect Binance quantity, notional and leverage limits. No arbitrary position-count cap; one bot position per symbol. Cross margin shares collateral.</p>
 <p>Existing bot-owned positions adopt the new exit rules on reconciliation. A replacement $8 exchange stop is confirmed before old exits are cancelled. If the loss threshold is already breached, a reduce-only close is attempted. Existing positions keep their leverage. There is no timed loss exit. Positions close when estimated net loss reaches $8; actual execution can differ because of fees, polling delays and slippage.</p>
-<p>Profit can keep growing. No profit floor applies until observed net profit exceeds $4. Above $4 activates a $4 floor; above $8 activates $8; above $16 activates $16; above $32 activates $32, then floors increase by $5 ($37, $42, $47…). Exactly reaching a new milestone does not activate it until profit exceeds it. A pullback to or below the floor triggers a market close. The floor never decreases. Manual close remains available. Profit floors require this page open and connected; the exchange stop remains active after page closure. Polling, outages, fees, funding and slippage can change realized results.</p>
+<p>Recovery extension (demo only): while estimated net loss is between $6 and $8 and improving versus a recent observation, fresh closed 1m candle direction, body and volume must agree with a 5m trend. A fresh position check must still show improvement before $8 is breached. Only then is a $12 stop installed and confirmed before removing the $8 stop. This may happen once per trade. Failed checks retain $8; missing protective orders pause entries and attempt closure. Recovery is not guaranteed; gaps and slippage can exceed either planned stop.</p><p>Profit can keep growing. No profit floor applies until observed net profit exceeds $4. Above $4 activates a $4 floor; above $8 activates $8; above $16 activates $16; above $32 activates $32, then floors increase by $5 ($37, $42, $47…). Exactly reaching a new milestone does not activate it until profit exceeds it. A pullback to or below the floor triggers a market close. The floor never decreases. Manual close remains available. Profit floors require this page open and connected; the exchange stop remains active after page closure. Polling, outages, fees, funding and slippage can change realized results.</p>
 <p>The $100 target is daily progress, not a guarantee or stop-trading limit. The Dubai trading day resets at midnight. Daily P&amp;L includes USDT realized trading P&amp;L, commissions, funding and the change in open P&amp;L from the day’s first account snapshot. Unobserved midnight changes can affect attribution. Credentials and trade history are retained. No live trading, withdrawals or asset conversions.</p></details>
 </main><script>
 'use strict';
@@ -150,6 +150,21 @@ function experimentSignal(raw,now){
   const atr=bars.slice(-20).reduce((v,b)=>v+number(b[2])-number(b[3]),0)/20;
   if(atr<=0)return null;
   return {side:price>open?'BUY':'SELL',price,close:number(b[6]),high:number(b[2]),low:number(b[3]),atr,stopDistance:1.5*atr,qualityConfirmed:true,experimental:true,leverage:3,intervalMs:60000,exitPolicy:'manual-profit-60s-loss'};
+}
+function recoverySignal(raw,trend,side,now){
+  const aligned=(input,ms)=>{
+    breakout(input,now,ms);
+    const bars=input.filter(b=>number(b[6])<now);
+    if(bars.length<21||now-number(bars.at(-1)[6])>ms+15000)return false;
+    const mean=a=>a.reduce((n,b)=>n+number(b[4]),0)/a.length;
+    const fast=mean(bars.slice(-5)),slow=mean(bars.slice(-20)),last=bars.at(-1),previous=bars.at(-2);
+    return {bars,last,ok:side==='BUY'?number(last[4])>fast&&fast>slow&&number(last[4])>number(previous[4]):number(last[4])<fast&&fast<slow&&number(last[4])<number(previous[4])};
+  };
+  const minute=aligned(raw,60000),five=aligned(trend,300000);
+  if(!minute?.ok||!five?.ok)return false;
+  const b=minute.last,open=number(b[1]),close=number(b[4]),high=number(b[2]),low=number(b[3]),range=high-low;
+  const volume=minute.bars.slice(-21,-1).reduce((n,b)=>n+number(b[5]),0)/20;
+  return range>0&&open>=low&&open<=high&&volume>0&&number(b[5])>=1.2*volume&&Math.abs(close-open)/range>=.4&&(side==='BUY'?close>open&&(close-low)/range>=.65:close<open&&(high-close)/range>=.65);
 }
 function profitFloor(peak){if(!Number.isFinite(peak)||peak<=4)return null;if(peak>32)return 32+5*Math.max(0,Math.ceil((peak-32)/5)-1);let floor=4;while(peak>floor*2)floor*=2;return floor;}
 function exitPrice(entry,qty,fee,target,side,tick){
@@ -471,6 +486,32 @@ class DemoEngine {
     if(order.status==='FILLED'){r.pendingClose=null;this.save();}else throw new DemoError('Close order awaiting final status');
     await this.refresh();if(!this.position(symbol)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();this.event(symbol+' closed · '+reason);}
   }
+  async maybeExtendRecovery(r,p,net){
+    const now=Date.now()+this.api.offset,previous=r.recoveryObservation;
+    r.recoveryObservation={net,at:now};
+    if(!this.newRules||r.recoveryExtended||r.lossLimit!==8||net<=-8||net> -6||!previous||now-previous.at>30000||net<=previous.net||now-(r.recoveryCheckedAt||0)<30000)return;
+    r.recoveryCheckedAt=now;
+    let fresh;
+    try{
+      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'1m',limit:30},false);
+      const trend=await this.api.call('GET','/fapi/v1/klines',{symbol:r.symbol,interval:'5m',limit:30},false);
+      if(!recoverySignal(raw,trend,r.side,Date.now()+this.api.offset)){r.recoveryNote='Recovery check not confirmed; $8 stop retained';return;}
+      const list=await this.api.call('GET','/fapi/v3/positionRisk',{symbol:r.symbol});
+      if(!Array.isArray(list))throw new DemoError('Invalid recovery position read');
+      fresh=list.find(x=>x.symbol===r.symbol&&x.positionSide==='BOTH'&&number(x.positionAmt)!==0);
+      if(!fresh){r.recoveryNote='Position no longer open; no extension';return;}
+      const qty=Math.abs(number(fresh.positionAmt)),freshNet=number(fresh.unRealizedProfit)-r.fee*qty*(number(fresh.entryPrice)+number(fresh.markPrice));
+      Object.assign(p,fresh);
+      if(Date.now()+this.api.offset-now>15000||qty!==r.filledQty||(number(fresh.positionAmt)>0)!==(r.side==='BUY')||number(fresh.entryPrice)!==r.entry||freshNet<=-8||freshNet> -6||freshNet<net){r.recoveryNote='Recovery changed during check; $8 stop retained';return;}
+    }catch(error){r.recoveryNote='Recovery data unavailable; $8 stop retained: '+error.message;return;}
+    // Persist the one-time decision. On reload, reconcile installs/verifies sl12
+    // before cancelling sl8, including an interrupted replacement.
+    r.recoveryExtended=true;r.lossLimit=12;r.recoveryNote='One-time recovery extension: improving loss + closed 1m candle + 5m trend';this.save();
+    await this.ensureExit(r,p,'sl12',-12);if(r.closedAt||r.pendingClose)return;
+    const stop=r.exits.find(e=>e.kind==='sl12'&&!e.cancelled&&e.confirmed);
+    if(!stop)throw new DemoError('Recovery stop not confirmed');
+    await this.cancelExits(r,stop.id);this.save();this.event(r.symbol+' recovery check passed: planned stop extended once to $12. Recovery is not guaranteed.');
+  }
   async reconcile(){
     for(const r of this.active()){
       let order;
@@ -502,16 +543,19 @@ class DemoEngine {
           await this.cancelExits(r,stop.id);
           r.rulesVersion=3;r.lossLimit=8;r.exitPolicy='manual-profit-60s-loss';r.experimentUntil=null;r.lossSince=null;this.save();
         }
-        await this.ensureExit(r,p,r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
+        await this.ensureExit(r,p,r.recoveryExtended?'sl12':r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(r.closedAt||r.pendingClose)continue;
+        if(r.recoveryExtended){const stop=r.exits.find(e=>e.kind==='sl12'&&!e.cancelled&&e.confirmed);if(!stop)throw new DemoError('Recovery stop missing');await this.cancelExits(r,stop.id);}
         if(r.exitPolicy!=='manual-profit-60s-loss')await this.ensureExit(r,p,'tp',40);if(r.closedAt||r.pendingClose)continue;
         r.protected=true;
-        const net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
+        let net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;r.peak=Math.max(r.peak??-Infinity,net);
         if(r.exitPolicy==='manual-profit-60s-loss'){
           const raised=profitFloor(r.peak);
           // Recompute from the retained peak, replacing saved floors from older rules.
           r.profitFloor=raised;
           this.save();
           if(Number.isFinite(r.profitFloor)&&net<=r.profitFloor){await this.close(r.symbol,'Profit pullback to $'+r.profitFloor.toFixed(2)+' floor');continue;}
+          await this.maybeExtendRecovery(r,p,net);if(r.closedAt||r.pendingClose)continue;
+          net=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.netEstimate=net;
           const observedAt=Date.now()+this.api.offset;
           if(this.newRules)r.lossSince=null;
           else if(net<0){if(!Number.isFinite(r.lossSince))r.lossSince=observedAt;}else r.lossSince=null;
@@ -600,7 +644,7 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,qualifySetup,experimentSignal,profitFloor,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,qualifySetup,experimentSignal,profitFloor,recoverySignal,exitPrice,combinedValue,DEMO_BASE};
 
 </script><script>
 'use strict';
@@ -677,7 +721,7 @@ function render(){
     field(grid,'Entry price',p.entryPrice);field(grid,'Mark price',p.markPrice);field(grid,'Liquidation price',p.liquidationPrice??'—');card.append(grid);
     const exits=e.algos.filter(a=>a.symbol===p.symbol),note=document.createElement('small');note.textContent='TP / SL: '+(exits.map(a=>(a.orderType||a.type||'Conditional')+' '+(a.triggerPrice??a.stopPrice??'—')).join(' · ')||'No open conditional orders in last sync');card.append(note);
     if(r&&e.exitsSuspended(r)){const warning=document.createElement('p');warning.textContent='NO AUTOMATIC EXITS during experiment · restore after '+new Date(r.experimentUntil).toLocaleString()+' while app is connected';warning.className='bad';card.append(warning);}
-    if(r?.exitPolicy==='manual-profit-60s-loss'&&!e.exitsSuspended(r)){const timer=document.createElement('p');timer.textContent='Loss exit: $8 planned net loss · no time limit';card.append(timer);const review=document.createElement('p');review.textContent=(r.continuation||'Trend review pending for a profitable position')+(r.reviewAt?' · Checked '+new Date(r.reviewAt).toLocaleTimeString():'')+' · Profit floor: '+(Number.isFinite(r.profitFloor)?'$'+r.profitFloor.toFixed(2):'arms above $4 net profit')+' · Manual close available';card.append(review);}
+    if(r?.exitPolicy==='manual-profit-60s-loss'&&!e.exitsSuspended(r)){const timer=document.createElement('p');timer.textContent='Loss exit: $'+(r.lossLimit||8)+' planned net loss · no time limit · '+(r.recoveryNote||'Recovery extension requires fresh improving loss and candle confirmation');card.append(timer);const review=document.createElement('p');review.textContent=(r.continuation||'Trend review pending for a profitable position')+(r.reviewAt?' · Checked '+new Date(r.reviewAt).toLocaleTimeString():'')+' · Profit floor: '+(Number.isFinite(r.profitFloor)?'$'+r.profitFloor.toFixed(2):'arms above $4 net profit')+' · Manual close available';card.append(review);}
     const b=document.createElement('button');b.textContent=r?(r.pendingClose?'Close awaiting confirmation':'Close position'):'Manage this position in Binance';b.disabled=e.controlPending||!r;b.onclick=()=>run(()=>e.close(p.symbol));card.append(b);$('positions').append(card);
   }
   if(!positions.length)$('positions').textContent='No open positions in the last Binance snapshot.';
