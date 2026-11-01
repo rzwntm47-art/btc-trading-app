@@ -17,12 +17,12 @@ class RemoteDemo extends DemoEngine{
   constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.transport=transport;}
   apply(snapshot){
     if(snapshot.engine)Object.assign(this,snapshot.engine);else{this.connected=false;this.auto=false;this.busy=false;this.controlPending=false;}
-    this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.transport.generation=snapshot.generation;
+    this.appVersion=snapshot.engine?.appVersion||null;this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.transport.generation=snapshot.generation;
     render();$('credentials').hidden=true;$('backgroundNote').hidden=false;$('browserRequirement').hidden=true;
     if(onPhoneController){$('resetDemo').hidden=true;$('pairMobile').hidden=true;}
     if(!this.connected)status(snapshot.connecting?'Laptop is connecting to Binance Demo. Please wait…':snapshot.error||'Laptop bot is disconnected. Reconnect on the laptop.');
     else status('LAPTOP BACKGROUND BOT · '+$('status').textContent);
-    $('backgroundNote').textContent='Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
+    $('backgroundNote').textContent='Laptop engine '+(this.appVersion?'V'+this.appVersion:'version unavailable — update the laptop connector for the latest fixes')+'. Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
     if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.connecting?'Connecting in the background…':this.connected?'Laptop connected · '+snapshot.pairedDevices+' paired phone(s). Generate a QR below.':snapshot.error||'Reconnect Binance on the laptop.');}
   }
   async command(action,extra={}){

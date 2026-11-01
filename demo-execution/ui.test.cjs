@@ -58,7 +58,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.46');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.47');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];

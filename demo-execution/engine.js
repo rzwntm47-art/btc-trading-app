@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.46';
+const APP_VERSION='1.47';
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
 const DEMO_BASE = 'https://demo-fapi.binance.com';
 const PUBLIC = new Set(['/fapi/v1/time','/fapi/v1/exchangeInfo','/fapi/v1/klines','/fapi/v1/ticker/24hr','/fapi/v1/ticker/bookTicker','/fapi/v1/premiumIndex','/fapi/v1/assetIndex']);
@@ -12,8 +12,15 @@ const ENTRY_REJECTIONS=new Set([-2010,-2019,-2020,-2025,-2026,-2027,-2028,-1111,
 class DemoError extends Error { constructor(message, code=0, uncertain=false){super(message);this.code=code;this.uncertain=uncertain;} }
 class DemoAPI {
   constructor(key, signingKey, fetcher=(url,options)=>fetch(url,options), crypt=crypto){this.key=key;this.signingKey=signingKey;this.fetcher=fetcher;this.crypt=crypt;this.offset=0;this.synced=0;this.blockUntil=0;}
-  async call(method,path,params={},signed=true){
+  async call(method,path,params={},signed=true,options={}){
+    const started=Date.now();let ok=false,code=0;
+    try{const result=await this.request(method,path,params,signed,options);ok=true;return result;}
+    catch(error){code=Number(error.code)||0;throw error;}
+    finally{this.timings??=[];this.timings.push({at:Date.now(),method,path,signed,ms:Date.now()-started,ok,code});this.timings=this.timings.slice(-60);}
+  }
+  async request(method,path,params={},signed=true,options={}){
     if(!(signed?PRIVATE[method]?.has(path):method==='GET'&&PUBLIC.has(path)))throw new DemoError('Request is not allowed on this demo connector.');
+    if(options.signal?.aborted)throw new DemoError('Scan read cancelled');
     if(signed&&this.relayToken){
       const previous=this.requestQueue||Promise.resolve();let release;
       this.requestQueue=new Promise(resolve=>{release=resolve;});
@@ -28,6 +35,8 @@ class DemoAPI {
     const headers={};
     if(signed){query.set('timestamp',String(Date.now()+this.offset));query.set('recvWindow','5000');const bytes=await this.crypt.subtle.sign('HMAC',this.signingKey,new TextEncoder().encode(query.toString()));query.set('signature',Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,'0')).join(''));headers['X-MBX-APIKEY']=this.key;}
     const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),12000);
+    const cancel=()=>ctl.abort();options.signal?.addEventListener('abort',cancel,{once:true});
+    if(options.signal?.aborted)ctl.abort();
     try{
       const opt={method,headers,signal:ctl.signal,cache:'no-store',credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'};
       let url=DEMO_BASE+path;
@@ -51,7 +60,7 @@ class DemoAPI {
       const label=method+' '+path;
       if(e instanceof DemoError){e.message=label+': '+e.message;throw e;}
       throw new DemoError(label+': '+(e.name==='AbortError'?'Request timed out.':'The browser could not reach this Binance Demo endpoint (network or CORS block).')+(method==='GET'?' This read request did not submit an order.':' Order status must be reconciled before retrying.'),0,method!=='GET');
-    }finally{clearTimeout(timer);}
+    }finally{clearTimeout(timer);options.signal?.removeEventListener('abort',cancel);}
   }
   clear(){this.key='';this.signingKey=null;this.relayToken='';}
 }
@@ -213,7 +222,7 @@ function adaptiveLeveragePlan({price,atr,fee,lossLimit,side,tick,plan}){
 }
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
-    this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
+    this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
     for(const r of this.state.records)if(!/^[A-Z0-9]+USDT$/.test(r.symbol)||!/^bd1_[a-zA-Z0-9_-]+$/.test(r.id)||!['BUY','SELL'].includes(r.side))throw new DemoError('Invalid saved demo order record.');
   }
@@ -227,7 +236,7 @@ class DemoEngine {
   }
   save(){this.persist(this.state);}
   event(text){this.events.unshift({at:Date.now(),text});this.events=this.events.slice(0,60);this.notify();}
-  pause(reason){this.auto=false;this.stopEpoch++;if(reason)this.event(reason);}
+  pause(reason){this.auto=false;this.stopEpoch++;this.scanController?.abort();if(reason)this.event(reason);}
   active(){return this.state.records.filter(r=>!r.closedAt&&!r.rejected);}
   owned(symbol){return this.active().find(r=>r.symbol===symbol);}
   position(symbol){return this.positions.find(p=>p.symbol===symbol&&number(p.positionAmt)!==0);}
@@ -267,20 +276,18 @@ class DemoEngine {
     this.symbols=[...this.meta.keys()].sort();if(!this.symbols.length)throw new DemoError('No eligible crypto futures found');
     this.metaAt=Date.now();await this.refresh();this.tradingReady=true;
   }
-  async refresh(){
-    const account=await this.api.call('GET','/fapi/v3/account');
-    const positions=await this.api.call('GET','/fapi/v3/positionRisk');
+  async refresh({inventory=true,valuation=true}={}){
+    const [account,positions]=await Promise.all([this.api.call('GET','/fapi/v3/account'),this.api.call('GET','/fapi/v3/positionRisk')]);
     if(!Array.isArray(account.assets)||!Array.isArray(positions))throw new DemoError('Invalid Binance position snapshot');
     for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);}
     // Publish exchange positions before potentially slow order inventory reads.
     this.account=account;this.positions=positions;if(this.newRules&&this.state.dayStart&&this.state.dayOpenPnl===null){this.state.dayOpenPnl=positions.filter(p=>p.symbol.endsWith('USDT')).reduce((v,p)=>v+number(p.unRealizedProfit),0);this.save();}this.positionAt=Date.now();this.accountAt=this.positionAt;this.notify();
-    if(this.newRules){try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}this.notify();}
-    const orders=await this.readOrderInventory('/fapi/v1/openOrders');
-    const algos=await this.readOrderInventory('/fapi/v1/openAlgoOrders');
+    if(this.newRules&&valuation){try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}this.notify();}
+    const [orders,algos]=inventory?await Promise.all([this.readOrderInventory('/fapi/v1/openOrders'),this.readOrderInventory('/fapi/v1/openAlgoOrders')]):[this.orders,this.algos];
     if(!Array.isArray(account.assets)||!Array.isArray(positions)||!Array.isArray(orders)||!Array.isArray(algos))throw new DemoError('Invalid Binance account or order response');
     for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);if(number(p.positionAmt)!==0&&p.positionSide!=='BOTH')throw new DemoError('Hedge position detected. Auto entries stopped.');}
-    this.account=account;this.positions=positions;this.orders=orders;this.algos=algos;this.ordersAt=Date.now();
-    if(!this.newRules){try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}}
+    this.account=account;this.positions=positions;this.orders=orders;this.algos=algos;if(inventory)this.ordersAt=Date.now();
+    if(!this.newRules&&valuation){try{const indices=await this.api.call('GET','/fapi/v1/assetIndex',{},false);this.balance=combinedValue(account.assets,indices,Date.now()+this.api.offset);}catch{this.balance=null;}}
     this.notify();
   }
   async readOrderInventory(path){
@@ -326,6 +333,9 @@ class DemoEngine {
     }
     throw new DemoError('Income history is incomplete. Entries paused.');
   }
+  async ensureIncomeFresh(maxAge=5000){
+    if(!this.lastIncome||this.incomeWindowStart!==this.state.startedAt||Date.now()-this.lastIncome>maxAge)await this.updateIncome();
+  }
   incomeBreakdown(){
     let gains=0,losses=0,commission=0,funding=0;
     for(const x of this.income){const v=number(x.income);if(x.incomeType==='REALIZED_PNL'){if(v>0)gains+=v;else losses+=v;}else if(x.incomeType==='COMMISSION')commission+=v;else if(x.incomeType==='FUNDING_FEE')funding+=v;}
@@ -341,6 +351,7 @@ class DemoEngine {
       windowStart:this.state.startedAt??null,incomeSnapshotAt:this.lastIncome||null,positionSnapshotAt:this.positionAt||null,
       snapshotStatus:{complete,income:!incomeReady?'missing':now-this.lastIncome>30000?'stale':'loaded',positions:!positionReady?'missing':now-this.positionAt>30000?'stale':'loaded'},
       incomeWindowEnd:incomeReady?this.incomeWindowEnd:null,
+      diagnostics:{scan:this.scanStats||null,lastEntry:this.entryTiming||null,requestTimingScope:'Elapsed includes queue, signing, network and response parsing; not a network ping.',requests:(this.api.timings||[]).slice(-40),recentChecks:this.scanned.slice(0,20).map(s=>({symbol:s.symbol,phase:s.phase,reason:s.reason,at:s.at,scanMs:s.scanMs,candleClosedAt:s.candleClosedAt}))},
       scope:'Account-wide USDT income; includes manual trades. Bot records are separate. Snapshots may be at different times.',
       totals:incomeReady?this.incomeBreakdown():null,unrealized:positionReady?this.unrealizedPnl():null,openingUnrealized:this.state.dayOpenPnl||0,netSession:complete?this.sessionNet():null,
       incomeRowsOmitted:incomeReady?Math.max(0,this.income.length-200):0,
@@ -435,6 +446,7 @@ class DemoEngine {
     return {equity,reserved,free};
   }
   async enter(symbol,signal){
+    const timing={symbol,startedAt:Date.now(),stages:[]};this.entryTiming=timing;
     const recordsBefore=this.state.records.length;
     try{return await this.enterChecked(symbol,signal);}catch(e){
       // Only skip pre-entry failures when no journaled/observed position can be at risk.
@@ -443,10 +455,10 @@ class DemoEngine {
         this.event(this.entryOutcome);return false;
       }
       throw e;
-    }
+    }finally{timing.totalMs=Date.now()-timing.startedAt;timing.outcome=this.entryOutcome;const last=timing.stages.at(-1);if(last)last.ms=Date.now()-last.at;const r=this.state.records.findLast(r=>r.symbol===symbol&&r.at>=timing.startedAt+(this.api.offset||0));if(r?.entryEvidence){r.entryEvidence.timing=timing;this.save();}}
   }
   async enterChecked(symbol,signal){
-    const progress=reason=>{this.entryOutcome=reason;const row=this.scanned.find(s=>s.symbol===symbol);if(row){row.reason=reason;this.notify();}};
+    const progress=reason=>{this.entryOutcome=reason;if(this.entryTiming){const stages=this.entryTiming.stages,previous=stages.at(-1);if(previous)previous.ms=Date.now()-previous.at;stages.push({label:reason,at:Date.now()});}const row=this.scanned.find(s=>s.symbol===symbol);if(row){row.reason=reason;row.entryMs=Date.now()-(this.entryTiming?.startedAt||Date.now());this.notify();}};
     const skip=reason=>{progress(reason);return false;};
     this.entryOutcome='Checking entry';
     const epoch=this.stopEpoch;
@@ -459,12 +471,13 @@ class DemoEngine {
     const lossLimit=this.newRules?8:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
     if(this.state.records.some(r=>r.symbol===symbol&&(r.signalClose===signal.close||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip('Already traded this candle or re-entry cooldown (10 minutes after close in selective mode)');
     progress('Checking Binance balance, positions and open orders');
-    await this.refresh();
+    await this.refresh({inventory:!this.newRules,valuation:false});
     if(this.newRules&&await this.enforceSessionGoal())return skip('$100 net session target reached');
-    if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))return skip('Auto changed or existing position/order');
+    if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||(!this.newRules&&(this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))))return skip('Auto changed or existing position/order');
     // Candidate-specific reads prevent stale cached inventories admitting duplicates.
     progress('Checking this symbol for existing orders');
-    for(const path of ['/fapi/v1/openOrders','/fapi/v1/openAlgoOrders']){const existing=await this.api.call('GET',path,{symbol});if(!Array.isArray(existing))throw new DemoError('Order check incomplete');if(existing.length)return skip('Existing Binance order on this symbol');}
+    const inventories=await Promise.all(['/fapi/v1/openOrders','/fapi/v1/openAlgoOrders'].map(path=>this.api.call('GET',path,{symbol})));
+    for(const existing of inventories){if(!Array.isArray(existing))throw new DemoError('Order check incomplete');if(existing.length)return skip('Existing Binance order on this symbol');}
     if(Date.now()-this.metaAt>900000)throw new DemoError('Exchange filters expired. Reconnect to refresh.');
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return skip('Market-order filters unavailable');
@@ -582,7 +595,8 @@ class DemoEngine {
         if(margin>marginRoom+1e-8||margin+quoteEvidence.estimatedRoundTripFees>available+1e-8)return skip('Fresh quote needs more margin plus fees than available; scanning continues');
       }catch(error){if([-1003,429,418].includes(error.code))throw error;return skip('Entry quote check unavailable; scanning continues: '+error.message);}
     }
-    if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return skip('Auto stopped before entry dispatch');
+    if(!this.auto||epoch!==this.stopEpoch||this.controlPending||this.shouldScan?.()===false)return skip(this.controlPending?'Manual action queued before entry dispatch':'Auto stopped before entry dispatch');
+    if(this.newRules&&(Date.now()+this.api.offset-momentum.closedAt>75000||Date.now()+this.api.offset-signal.close>(signal.intervalMs||300000)+15000))return skip('Entry confirmation became stale during checks; rechecking next scan');
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
@@ -699,12 +713,31 @@ class DemoEngine {
       }
     }
   }
-  async scanTrendBars(symbol){
-    this.trendCache=this.trendCache||new Map();const bucket=Math.floor((Date.now()+this.api.offset)/300000),saved=this.trendCache.get(symbol);
-    if(saved?.bucket===bucket)return saved.bars;
-    const bars=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:300},false);
-    breakout(bars,Date.now()+this.api.offset,300000);
-    this.trendCache.set(symbol,{bucket,bars});return bars;
+  async scanBars(symbol,interval,limit,controller){
+    const ms=interval==='1m'?60000:300000,now=Date.now()+(this.api.offset||0),bucket=Math.floor(now/ms),key=symbol+':'+interval;
+    this.candleCache??=new Map();const saved=this.candleCache.get(key);
+    if(saved?.bucket===bucket&&saved.closedAt>=bucket*ms-1)return saved.bars;
+    if(controller?.signal.aborted)throw new DemoError('Scan read cancelled');
+    if(this.api instanceof DemoAPI){
+      const at=Math.max(Date.now(),this.nextScanReadAt||0);this.nextScanReadAt=at+100;
+      if(at>Date.now())await new Promise(resolve=>setTimeout(resolve,at-Date.now()));
+    }
+    if(controller?.signal.aborted)throw new DemoError('Scan read cancelled');
+    const bars=await this.api.call('GET','/fapi/v1/klines',{symbol,interval,limit},false,{signal:controller?.signal});
+    if(controller?.signal.aborted)throw new DemoError('Scan read cancelled');
+    const fetchedAt=Date.now()+(this.api.offset||0);breakout(bars,fetchedAt,ms);
+    const closed=bars.filter(b=>number(b[6])<fetchedAt),closedAt=Number(closed.at(-1)?.[6])||0;
+    if(closed.length>=21&&closedAt>=bucket*ms-1){this.candleCache.set(key,{bucket,closedAt,bars});if(this.candleCache.size>1200)this.candleCache.delete(this.candleCache.keys().next().value);}
+    return bars;
+  }
+  async scanTrendBars(symbol,controller){return this.scanBars(symbol,'5m',300,controller);}
+  async scanRiskCheck(){
+    if(!this.connected||!this.tradingReady||!this.active().length||Date.now()-(this.positionAt||0)<5000)return;
+    const positions=await this.api.call('GET','/fapi/v3/positionRisk');
+    if(!Array.isArray(positions))throw new DemoError('Invalid position snapshot during scan');
+    for(const p of positions){number(p.positionAmt);number(p.entryPrice);number(p.markPrice);number(p.unRealizedProfit);if(number(p.positionAmt)!==0&&p.positionSide!=='BOTH')throw new DemoError('Hedge position detected');}
+    this.positions=positions;this.positionAt=Date.now();this.notify();
+    await this.reconcile();await this.ensureIncomeFresh(5000);await this.enforceSessionGoal();
   }
   async refreshMovers(){
     if(!this.newRules||!this.meta.size||Date.now()-(this.moversCheckedAt||0)<60000)return;
@@ -721,24 +754,9 @@ class DemoEngine {
     }catch(error){this.movers=[];this.moversNote='Movers unavailable; full-market scan continues. '+error.message;if([-1003,429,418].includes(error.code))throw error;}
     this.notify();
   }
-  async scan(){
-    if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
-    const epoch=this.stopEpoch;this.lastScan=Date.now();
-    await this.refreshMovers();
-    this.rechecks=this.rechecks||new Map();
-    const due=[...this.rechecks].filter(([symbol,v])=>this.symbols.includes(symbol)&&!this.owned(symbol)&&Date.now()-v.seen<300000&&Date.now()-v.checked>=30000).sort((a,b)=>a[1].checked-b[1].checked).slice(0,4).map(([symbol])=>symbol);
-    const priority=new Map(),movers=(this.movers||[]).filter(m=>this.symbols.includes(m.symbol)&&!this.owned(m.symbol));
-    const moverBySymbol=new Map(movers.map(m=>[m.symbol,m]));
-    this.moverCursor=this.moverCursor||0;
-    for(let i=0;i<Math.min(8,movers.length);i++){const mover=movers[this.moverCursor++%movers.length];priority.set(mover.symbol,mover);}
-    const batch=[...new Set([...priority.keys(),...due])];
-    for(let i=0;i<Math.min(priority.size?4:12,this.symbols.length);i++){const symbol=this.symbols[this.cursor++%this.symbols.length];if(!batch.includes(symbol))batch.push(symbol);}
-    for(const [symbol,v] of this.rechecks)if(Date.now()-v.seen>=300000)this.rechecks.delete(symbol);
-    for(const symbol of batch){
-      if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)break;
-      if(this.owned(symbol))continue;
-      const mover=moverBySymbol.get(symbol);
-      const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:150},false);
+  async scanCandidate(symbol,mover,epoch,controller){
+    const startedAt=Date.now();
+      const raw=await this.scanBars(symbol,'1m',150,controller);
       const now=Date.now()+this.api.offset;
       let intervalMs=60000,signal=null,reason='No qualifying closed 1–5m / 10m / 15m / 20m / 30m / 60m setup',trend=null,foundCandidate=false;
       if(this.experimentActive()){signal=experimentSignal(raw,now);reason='Experiment: no fresh directional candle';}
@@ -747,14 +765,14 @@ class DemoEngine {
         const candidate=breakout(bars,now,minutes*60000);
         if(!candidate)continue;
         foundCandidate=true;
-        if(!trend)trend=await this.scanTrendBars(symbol);
+        if(!trend)trend=await this.scanTrendBars(symbol,controller);
         const qualified=qualifySetup(candidate,bars,trend,Date.now()+this.api.offset,r=>reason=minutes+'m: '+r,300000);
         if(qualified&&this.newRules&&qualified.strength<2){reason=minutes+'m: selective mode requires stronger candle/volume agreement';continue;}
         if(qualified&&mover&&qualified.side!==mover.side){reason='Mover priority awaits a '+mover.side+' confirmation; checking other timeframes';continue;}
         if(qualified){intervalMs=minutes*60000;signal={...qualified,exitPolicy:'manual-profit-60s-loss',intervalMs};break;}
       }
       if(!signal&&!this.experimentActive()&&raw.length>=21){
-        if(!trend)trend=await this.scanTrendBars(symbol);
+        if(!trend)trend=await this.scanTrendBars(symbol,controller);
         for(const minutes of [10,15,20,30,60]){
           if(!this.auto||epoch!==this.stopEpoch)break;
           const bars=aggregateFiveMinuteBars(trend,Date.now()+this.api.offset,minutes),candidate=breakout(bars,Date.now()+this.api.offset,minutes*60000);
@@ -767,11 +785,64 @@ class DemoEngine {
       }
       if(signal&&mover&&signal.side!==mover.side){reason='Mover priority awaits a '+mover.side+' confirmation; opposite signal skipped';signal=null;}
       if(signal)signal.marketSource=mover?{type:mover.side==='BUY'?'gainer':'loser',change24h:mover.change}:{type:'full-market'};
-      if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
-      this.scanChecked=(this.scanChecked||0)+1;
-      this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
-      this.scanned.unshift({symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal&&!this.newRules?this.entryLeverage(signal):undefined,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
-      if(signal&&this.auto&&epoch===this.stopEpoch){try{await this.updateIncome();if(this.newRules&&await this.enforceSessionGoal())return;if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.scanned[0].reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);this.scanned[0].reason=this.entryOutcome;}catch(e){this.scanned[0].reason='Entry failed: '+e.message;throw e;}finally{this.notify();}}
+      return {symbol,mover,signal,reason,foundCandidate,intervalMs,scanMs:Date.now()-startedAt,candleClosedAt:Number(raw.filter(b=>Number(b[6])<Date.now()+(this.api.offset||0)).at(-1)?.[6])||null};
+  }
+  async scan(){
+    if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
+    const epoch=this.stopEpoch;this.lastScan=Date.now();const startedAt=Date.now();
+    await this.refreshMovers();
+    this.rechecks=this.rechecks||new Map();
+    const due=[...this.rechecks].filter(([symbol,v])=>this.symbols.includes(symbol)&&!this.owned(symbol)&&Date.now()-v.seen<300000&&Date.now()-v.checked>=30000).sort((a,b)=>a[1].checked-b[1].checked).slice(0,4).map(([symbol])=>symbol);
+    const priority=new Map(),movers=(this.movers||[]).filter(m=>this.symbols.includes(m.symbol)&&!this.owned(m.symbol));
+    const moverBySymbol=new Map(movers.map(m=>[m.symbol,m]));
+    this.moverCursor=this.moverCursor||0;
+    for(let i=0;i<Math.min(8,movers.length);i++){const mover=movers[this.moverCursor++%movers.length];priority.set(mover.symbol,mover);}
+    const batch=[...new Set([...priority.keys(),...due])];
+    for(let i=0;i<Math.min(priority.size?4:12,this.symbols.length);i++){const symbol=this.symbols[this.cursor++%this.symbols.length];if(!batch.includes(symbol))batch.push(symbol);}
+    for(const [symbol,v] of this.rechecks)if(Date.now()-v.seen>=300000)this.rechecks.delete(symbol);
+    const controller=new AbortController();this.scanController=controller;
+    const pending=new Map();let next=0,completed=0,errors=0;
+    this.scanStats={startedAt,concurrency:3,planned:batch.length,completed:0,dataErrors:0};
+    const launch=()=>{
+      while(pending.size<3&&next<batch.length&&this.auto&&epoch===this.stopEpoch&&!this.controlPending){
+        const symbol=batch[next++];if(this.owned(symbol))continue;
+        const request=this.scanCandidate(symbol,moverBySymbol.get(symbol),epoch,controller).then(value=>({symbol,value}),error=>({symbol,error}));
+        pending.set(symbol,request);
+      }
+    };
+    try{
+      launch();
+      while(pending.size&&this.auto&&epoch===this.stopEpoch&&!this.controlPending){
+        await this.scanRiskCheck();
+        if(!this.auto||epoch!==this.stopEpoch||this.controlPending)break;
+        let timer;const result=await Promise.race([...pending.values(),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),1000);})]);clearTimeout(timer);
+        if(!result)continue;
+        pending.delete(result.symbol);launch();
+        if(!this.auto||epoch!==this.stopEpoch||this.controlPending)break;
+        const {symbol,error}=result;
+        if(error&&[401,403,418,429,451,-1003].includes(error.code))throw error;
+        const value=result.value||{symbol,reason:'Market data unavailable; continuing other coins: '+error.message,scanMs:0};
+        const {mover,signal,reason,foundCandidate,intervalMs,scanMs,candleClosedAt}=value;
+        if(error)errors++;
+        if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
+        this.scanChecked=(this.scanChecked||0)+1;completed++;
+        this.scanStats={startedAt,concurrency:3,planned:batch.length,completed,dataErrors:errors,elapsedMs:Date.now()-startedAt};
+        this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
+        const row={symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',phase:error?'Data error':signal?'Entry checks':'Signal rules',reason:signal?'Confirmed '+(intervalMs/60000)+'m signal; checking entry':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal&&!this.newRules?this.entryLeverage(signal):undefined,at:Date.now(),scanMs,candleClosedAt};
+        this.scanned.unshift(row);this.scanned=this.scanned.slice(0,30);this.notify();
+        if(signal&&this.auto&&epoch===this.stopEpoch&&!this.controlPending){
+          try{
+            await this.ensureIncomeFresh();if(this.newRules&&await this.enforceSessionGoal())return;
+            if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;row.reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}
+            await this.enter(symbol,signal);row.reason=this.entryOutcome;
+            row.entryMs=this.entryTiming?.totalMs;row.phase=this.state.records.some(r=>r.symbol===symbol&&r.at>=row.at+(this.api.offset||0)&&!r.rejected)?'Order submitted':'Entry skipped';
+          }catch(error){row.reason='Entry failed: '+error.message;row.phase='Entry error';throw error;}
+          finally{this.notify();}
+        }
+      }
+    }finally{
+      controller.abort();if(this.scanController===controller)this.scanController=null;
+      this.scanStats={startedAt,finishedAt:Date.now(),concurrency:3,planned:batch.length,completed,dataErrors:errors,elapsedMs:Date.now()-startedAt};this.notify();
     }
   }
   async reviewContinuation(){
@@ -801,16 +872,17 @@ class DemoEngine {
     try{
       this.syncDaily();
       if(!this.tradingReady){await this.refreshBalance();return;}
-      await this.refresh();
-      if(this.newRules){await this.updateIncome();if(await this.enforceSessionGoal()){await this.reconcile();await this.updateIncome();return;}}
-      await this.reconcile();if(Date.now()-this.lastIncome>15000)await this.updateIncome();
+      if(Date.now()-(this.lastFullCheck||0)>=5000||this.state.dayOpenPnl===null){await this.refresh();this.lastFullCheck=Date.now();}
+      await this.reconcile();
+      if(this.newRules){await this.ensureIncomeFresh(5000);if(await this.enforceSessionGoal()){await this.reconcile();await this.updateIncome();return;}}
+      else if(Date.now()-this.lastIncome>15000)await this.updateIncome();
       if(this.auto&&Date.now()-this.metaAt>600000){const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');for(const symbol of [...this.meta.keys()]){const m=info.symbols.find(x=>x.symbol===symbol&&x.status==='TRADING');if(m)this.meta.set(symbol,m);else this.meta.delete(symbol);}this.symbols=[...this.meta.keys()].sort();this.metaAt=Date.now();}
       if(!this.newRules&&!this.experimentActive()&&this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; new entries paused. Manual-profit positions remain open.');this.save();}
       if(!this.newRules&&!this.experimentActive()&&this.state.goal)for(const r of this.active().filter(r=>r.exitPolicy!=='manual-profit-60s-loss'))await this.close(r.symbol,'$100 session goal');
       if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol)))this.pause('Unmanaged position detected; auto entries stopped.');
       if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
-      await this.reviewContinuation();
-      if(this.auto&&Date.now()-this.lastScan>=5000)await this.scan();
+      if(this.auto&&Date.now()-this.lastScan>=1000)await this.scan();
+      await this.scanRiskCheck();await this.reviewContinuation();
       this.block='';
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }

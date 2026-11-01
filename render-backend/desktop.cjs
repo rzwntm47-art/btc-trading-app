@@ -23,8 +23,8 @@ async function body(req){
   let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2*1024*1024)throw Error('Request too large');}
   return JSON.parse(raw);
 }
-const SNAPSHOT_FIELDS=['state','connected','tradingReady','auto','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
-function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=5000}={}){
+const SNAPSHOT_FIELDS=['appVersion','scanStats','entryTiming','state','connected','tradingReady','auto','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
+function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=1000}={}){
   let engine=null,connecting=false,lastError='',pair=null,origin='',connectId='',generation=random();
   const sessions=new Map(),commands=new Map();
   try{origin=remoteOrigin(JSON.parse(fs.readFileSync(path.join(dataDir,'mobile-origin.json'),'utf8')).origin);}catch{}

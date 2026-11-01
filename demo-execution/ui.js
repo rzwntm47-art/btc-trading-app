@@ -27,6 +27,8 @@ let engine=null,releaseLock=null,connectionBusy=false;
 const money=n=>Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
 function line(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');if(v instanceof Node)td.append(v);else td.textContent=String(v??'—');tr.append(td);}parent.append(tr);}
 function status(message){$('status').textContent=message;}
+let renderPending=false;
+function queueRender(){if(renderPending)return;renderPending=true;setTimeout(()=>{renderPending=false;render();},100);}
 function render(){
   const e=engine,connected=!!e?.connected;
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
@@ -56,14 +58,16 @@ function render(){
   $('incomeDiagnosis').textContent=!e.lastIncome?'Connect and sync to load actual results.':audit.net<0?(audit.realized<0?'Realized losses exceed realized gains. ':'Realized trading P&L is positive, but costs exceed it. ')+(audit.commission<0?'Commission reduces the wallet result. ':'')+'Review these actual results before changing the strategy.':'Booked trading result is nonnegative for this window. A wallet drop may involve an earlier period, a reset, transfers, or other income types excluded here.';
 
   $('moversNote').textContent=e.moversNote||'Loading eligible futures gainers and losers';
+  const stats=e.scanStats;
+  $('scanTiming').textContent=stats?'Last batch: '+stats.completed+'/'+stats.planned+' checks · '+(stats.elapsedMs/1000).toFixed(2)+'s · up to 3 coins checked concurrently · '+stats.dataErrors+' data errors':'Waiting for scan timings';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · repeats continuously · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
-  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),s.side==='BUY'?'LONG · '+(s.leverage?s.leverage+'×':'sizing pending')+' — '+s.reason:s.side==='SELL'?'SHORT · '+(s.leverage?s.leverage+'×':'sizing pending')+' — '+s.reason:'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
-  if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
+  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),s.side==='BUY'?'LONG · '+(s.leverage?s.leverage+'×':'sizing pending')+' — '+s.reason:s.side==='SELL'?'SHORT · '+(s.leverage?s.leverage+'×':'sizing pending')+' — '+s.reason:'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString(),(s.phase||'Check')+' · scan '+((s.scanMs||0)/1000).toFixed(2)+'s'+(Number.isFinite(s.entryMs)?' · entry '+(s.entryMs/1000).toFixed(2)+'s':'')+(s.candleClosedAt?' · candle closed '+new Date(s.candleClosedAt).toLocaleTimeString():'')]);
+  if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);
   $('positionsTab').textContent='Positions ('+positions.length+')';
   $('ordersTab').textContent='Open Orders ('+(e.orders.length+e.algos.length)+')';
-  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+(e.scopedOrders?' · Order list covers tracked/open-position symbols only; each entry checks its own symbol.':'')+' · Polls every 5s when idle; requests and cooldowns can delay updates.';
+  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+(e.scopedOrders?' · Order list covers tracked/open-position symbols only; each entry checks its own symbol.':'')+' · Position checks target every 5s, including during scans; network delays and cooldowns can delay updates.';
   const field=(parent,label,value,cls='')=>{const d=document.createElement('div'),l=document.createElement('small'),v=document.createElement('b');l.textContent=label;v.textContent=value;v.className=cls;d.append(l,v);parent.append(d);};
   for(const p of positions){
     const r=e.owned(p.symbol),card=document.createElement('article');card.className='position-card';
@@ -126,7 +130,7 @@ $('connectform').onsubmit=async event=>{
     const saved=localStorage.getItem(journalKey);const state=saved?JSON.parse(saved):null;
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
     const api=new DemoAPI(key,signingKey);api.relayToken=relayToken;
-    engine=new DemoEngine(api,state,persist,render);engine.busy=true;
+    engine=new DemoEngine(api,state,persist,queueRender);engine.busy=true;
     await engine.initialize();engine.save();$('credentials').open=false;
     if(engine.tradingReady){
       try{await engine.start();}catch(error){engine.block=error.message;engine.pause(error.message);}
@@ -149,7 +153,7 @@ $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet','unrealized','pnlEquation','incomeAudit','incomeDiagnosis','sessionNote','unrealizedNote'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
-setInterval(()=>{if(engine?.connected&&!engine.remote)engine.tick();},5000);
+setInterval(()=>{if(engine?.connected&&!engine.remote)engine.tick();},1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.connected)engine.tick();});
 window.addEventListener('beforeunload',event=>{if(engine?.busy&&!engine.remote){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',()=>{if(!engine?.remote){engine?.pause();engine?.api.clear();releaseLock?.();}});

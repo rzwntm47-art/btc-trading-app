@@ -701,7 +701,7 @@ test('longer timeframes aggregate complete aligned 5m groups through 60m',()=>{
  assert.equal(aggregateFiveMinuteBars(raw.slice(0,299),t+300*300000,60).length,24);
 });
 test('trend cache reuses closed data within a 5m period and refreshes at next boundary',async()=>{
- const f=fixture();let calls=0;f.api.call=async()=>{calls++;return [];};
+ const f=fixture();let calls=0;f.api.call=async()=>{calls++;const end=Math.floor((Date.now()+f.api.offset)/300000)*300000;return Array.from({length:30},(_,i)=>[end-(30-i)*300000,100,101,99,100,10,end-(29-i)*300000-1]);};
  await f.e.scanTrendBars(symbol);await f.e.scanTrendBars(symbol);assert.equal(calls,1);
  f.api.offset+=300000;await f.e.scanTrendBars(symbol);assert.equal(calls,2);
 });
@@ -848,7 +848,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.46');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.47');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -880,7 +880,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $200 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.46');assert.equal(r.estimatedEntryMargin,200);assert.equal(r.leverage,7);
+ assert.equal(r.entryAppVersion,'1.47');assert.equal(r.estimatedEntryMargin,200);assert.equal(r.leverage,7);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.4)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.4)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(r.entryEvidence.plannedStopPrice<100);
 });
@@ -935,5 +935,83 @@ test('an unranked coin still executes a qualifying signal after priority checks'
  f.api.call=async(m,p,q)=>scanBars('BUY',q.interval==='1m'?60000:300000,q.interval==='1m'?150:300);
  let signal;f.e.updateIncome=async()=>{};f.e.enforceSessionGoal=async()=>false;f.e.enter=async(s,v)=>signal=v;
  await f.e.scan();assert.equal(signal.side,'BUY');assert.equal(signal.marketSource.type,'full-market');
+});
+
+test('scanner bounds concurrent public work at three and does not wait for a slow first coin',async()=>{
+ const f=fixture();f.e.symbols=['AUSDT','BUSDT','CUSDT','DUSDT'];f.e.moversCheckedAt=Date.now();
+ const releases=new Map();let active=0,maximum=0;const entered=[];
+ f.e.scanCandidate=async(symbol)=>{active++;maximum=Math.max(maximum,active);await new Promise(resolve=>releases.set(symbol,resolve));active--;return {symbol,signal:symbol==='BUSDT'?{side:'BUY'}:null,intervalMs:60000,reason:'Test rule',scanMs:1};};
+ f.e.ensureIncomeFresh=async()=>{};f.e.enter=async symbol=>{entered.push(symbol);f.e.entryOutcome='Test submission';};
+ const scanning=f.e.scan();await new Promise(setImmediate);assert.equal(active,3);assert.ok(!releases.has('DUSDT'));
+ releases.get('BUSDT')();await new Promise(setImmediate);assert.deepEqual(entered,['BUSDT']);assert.ok(releases.has('DUSDT'));assert.equal(active,3);
+ for(const release of releases.values())release();await scanning;assert.equal(maximum,3);assert.equal(f.e.scanStats.completed,4);
+});
+test('concurrent signals still enter one at a time',async()=>{
+ const f=fixture();f.e.symbols=['AUSDT','BUSDT','CUSDT'];f.e.moversCheckedAt=Date.now();let active=0,maximum=0,count=0;
+ f.e.scanCandidate=async symbol=>({symbol,signal:{side:'BUY'},intervalMs:60000,scanMs:0});f.e.ensureIncomeFresh=async()=>{};
+ f.e.enter=async()=>{active++;maximum=Math.max(maximum,active);await new Promise(setImmediate);count++;active--;};
+ await f.e.scan();assert.equal(count,3);assert.equal(maximum,1);
+});
+test('a public candle outage marks that row and does not stop other coins',async()=>{
+ const f=fixture();f.e.symbols=['AUSDT','BUSDT'];f.e.moversCheckedAt=Date.now();
+ f.e.scanCandidate=async symbol=>{if(symbol==='AUSDT')throw new DemoError('Timeout',0);return {symbol,reason:'No signal',scanMs:1};};
+ await f.e.scan();assert.equal(f.e.auto,true);assert.equal(f.e.scanned.find(r=>r.symbol==='AUSDT').phase,'Data error');assert.equal(f.e.scanStats.completed,2);assert.equal(f.e.scanStats.dataErrors,1);
+});
+test('rate-limit responses abort the scan instead of opening from another candidate',async()=>{
+ const f=fixture();f.e.symbols=['AUSDT','BUSDT'];f.e.moversCheckedAt=Date.now();let entered=0;
+ f.e.scanCandidate=async symbol=>{if(symbol==='AUSDT')throw new DemoError('Rate limit',429);return {symbol,signal:{side:'BUY'},intervalMs:60000};};f.e.enter=async()=>entered++;
+ await assert.rejects(()=>f.e.scan(),e=>e.code===429);assert.equal(entered,0);assert.equal(f.e.scanController,null);
+});
+test('Stop cancels in-flight scan reads and never submits their late signals',async()=>{
+ const f=fixture();f.e.symbols=['AUSDT','BUSDT','CUSDT'];f.e.moversCheckedAt=Date.now();let aborted=0,entered=0;
+ f.e.scanCandidate=async(symbol,mover,epoch,controller)=>{await new Promise(resolve=>controller.signal.addEventListener('abort',()=>{aborted++;resolve();},{once:true}));return {symbol,signal:{side:'BUY'},intervalMs:60000};};f.e.enter=async()=>entered++;
+ const scanning=f.e.scan();await new Promise(setImmediate);f.e.pause();await scanning;assert.equal(aborted,3);assert.equal(entered,0);assert.equal(f.e.auto,false);
+});
+test('queued manual control cancels the rest of a scan before any order',async()=>{
+ const f=fixture();f.e.symbols=['AUSDT','BUSDT'];f.e.moversCheckedAt=Date.now();let entered=0;
+ f.e.scanCandidate=async symbol=>{f.e.controlPending=true;return {symbol,signal:{side:'BUY'},intervalMs:60000};};f.e.enter=async()=>entered++;
+ await f.e.scan();assert.equal(entered,0);assert.equal(f.e.scanController,null);
+});
+test('profit pullback is serviced while public scanner requests are still pending',async()=>{
+ const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);
+ const r=f.e.active()[0];r.peak=9;f.position.unRealizedProfit=String(7+r.fee*r.filledQty*200);f.e.positionAt=0;f.e.tradingReady=true;
+ f.e.symbols=['OTHERUSDT'];f.e.moversCheckedAt=Date.now();
+ f.e.scanCandidate=async(symbol,mover,epoch,controller)=>{await new Promise(resolve=>controller.signal.addEventListener('abort',resolve,{once:true}));return {symbol};};
+ const scanning=f.e.scan();await new Promise(setImmediate);assert.equal(f.position,null);assert.match(r.closeReason,/Profit pullback/);
+ f.e.pause();await scanning;
+});
+test('minute cache reuses completed candles but fetches again after the next boundary',async()=>{
+ const f=fixture();let calls=0;f.api.call=async()=>{calls++;return entryBars('BUY',Date.now()+f.api.offset);};
+ await f.e.scanBars(symbol,'1m',150);await f.e.scanBars(symbol,'1m',150);assert.equal(calls,1);
+ f.api.offset=60000;await f.e.scanBars(symbol,'1m',150);assert.equal(calls,2);
+});
+test('income snapshot is reused only inside its freshness limit and the same session',async()=>{
+ const f=fixture();let calls=0;f.api.call=async()=>{calls++;return [];};
+ await f.e.ensureIncomeFresh();await f.e.ensureIncomeFresh();assert.equal(calls,1);
+ f.e.lastIncome-=6000;await f.e.ensureIncomeFresh();assert.equal(calls,2);
+ f.e.state.startedAt++;await f.e.ensureIncomeFresh();assert.equal(calls,3);
+});
+test('entry avoids duplicate all-market inventory reads while retaining fresh symbol checks',async()=>{
+ const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);
+ const before=f.calls.slice(0,f.calls.findIndex(c=>c.path==='/fapi/v1/order'&&c.method==='POST'));
+ for(const path of ['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders'])assert.equal(before.filter(c=>c.path===path).length,1);
+ assert.ok(before.filter(c=>c.path.includes('open')).every(c=>c.p.symbol===symbol));assert.ok(f.e.entryTiming.totalMs>=0);assert.ok(f.e.entryTiming.stages.length>3);
+ assert.ok(f.e.active()[0].entryEvidence.timing);
+});
+test('API diagnostics exclude signed query data, headers and credentials',async()=>{
+ const secret='never-export-this-secret',key=await webcrypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ const api=new DemoAPI('never-export-this-key',key,async url=>({ok:true,json:async()=>url.includes('/time')?{serverTime:Date.now()}:{ok:true}}),webcrypto);
+ await api.call('GET','/fapi/v1/order',{symbol,origClientOrderId:'never-export-this-id'});
+ const value=JSON.stringify(api.timings);assert.ok(!value.includes('never-export'));assert.ok(!value.includes('signature'));assert.ok(api.timings.every(t=>Number.isFinite(t.ms)));
+});
+test('a manual command queued during entry checks prevents new order dispatch',async()=>{
+ const f=fixture();f.e.newRules=true;const base=f.api.call;
+ f.api.call=async(...args)=>{const result=await base(...args);if(args[1]==='/fapi/v1/ticker/bookTicker')f.e.controlPending=true;return result;};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/Manual action queued/);
+});
+test('a signal that expires during leverage checks is not submitted',async()=>{
+ const f=fixture();f.e.newRules=true;const base=f.api.call;
+ f.api.call=async(...args)=>{const result=await base(...args);if(args[1]==='/fapi/v1/leverage')f.signal.close=Date.now()-400000;return result;};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/became stale/);assert.equal(f.e.auto,true);
 });
 
