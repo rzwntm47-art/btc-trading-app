@@ -6,7 +6,7 @@ const {DemoEngine}=require('./engine.js');
 function fixture(){
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{disabled:false,hidden:false,textContent:'',classList:{add(){},remove(){}},replaceChildren(){}});return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({DemoEngine,APP_VERSION:'1.52',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({DemoEngine,APP_VERSION:'1.53',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -58,7 +58,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.52');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.53');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -87,5 +87,5 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.52');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.53');assert.match(node('entryStatus').textContent,/No trades are required/);
 });

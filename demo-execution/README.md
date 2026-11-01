@@ -1,46 +1,42 @@
-# Binance Demo execution module — V1.52
+# Binance Demo execution module — V1.53
 
 This module sends USDⓈ-M orders exclusively to `https://demo-fapi.binance.com`. It has no live endpoint, withdrawal or transfer capability.
 
 Build with `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.html` to the repository root. Run `node --test --test-timeout=10000 demo-execution/*.test.cjs render-backend/*.test.cjs` for engine, controls, mobile and backend checks.
 
-## V1.52 behavior
+## Current exit policy
 
-V1.52 changes the planned net loss target from $4 to $20. Manual profit closing and the existing entry strategy remain unchanged. Existing bot stops are replaced during reconciliation without resizing the position.
+- No bot stop-loss, timed loss exit, recovery extension or profit-pullback floor.
+- Each bot position receives a TAKE_PROFIT_MARKET order targeting $20 estimated net profit after opening and expected closing taker fees. The engine also requests a reduce-only close when its observed net estimate reaches $20. It does not wait for a pullback. Actual fees, funding, price ticks, fills and slippage can change the result.
+- At an observed $100 account-wide net session result, latch new entries stopped and close every bot-managed position, including losers. Manual/unmanaged positions are not adopted or closed. Finish unresolved closes on later passes even if P&L falls below the target. The final booked result is not guaranteed to equal $100.
+- The session target is checked before individual profit exits so an observed qualifying aggregate result is not lost during the conversion from unrealized to realized P&L. Pending or partially filled entry orders must reach a verified terminal status before their positions close; this prevents a remaining entry quantity from refilling after the session stops. Unknown close outcomes are queried without blind order retries.
+- Existing bot positions adopt the policy when the updated engine synchronizes. Confirm a fresh $20 TP before cancelling old journaled stop-loss, TP or profit-floor orders. Keep quantity and leverage unchanged. Repeated synchronization does not replace an already confirmed TP. If exit configuration fails, pause entries and attempt an emergency reduce-only close.
+- The $100 profit target is not a loss limit. Losing positions can remain open, lose shared Cross collateral or be liquidated. The app does not set a maximum loss in this mode.
 
-New bot entries receive a planned **$20 net loss stop**, including estimated fees. Profits are closed manually: no automatic take-profit, profit-pullback floor, timed loss exit or recovery extension. Different symbols can enter consecutively after their checks, with serialized order submissions; the global one-minute entry delay is removed.
+`lossLimit` is null, `takeProfit` is 20, `exitPolicy` is `profit-cap`, and records use rules version 6. `protected` remains false because there is no loss protection; `exitsReady` means the required TP is verified. Historical stop helpers remain for old test fixtures, but production `newRules=true` bypasses those exit branches.
 
-Small movement after a signal no longer rejects an otherwise valid setup immediately. Entry prices may move up to 0.75 of the selected candle ATR from its close. Breakouts may retest their boundary by up to 0.10 ATR. Momentum entries still need to remain beyond their trend boundary, and fresh directional confirmation remains required. Larger reversals, stale quotes and unworkable costs still skip the entry.
+## Entry behavior
 
-Temporary failures while reading a candidate's candles, quote, mark, commission or order inventory skip that candidate and continue scanning. This recovery is limited to explicit GET requests before an entry is dispatched. Definite Binance price-filter rejections (-4016, -4024 and -4131) also skip the candidate without retrying the order. Unknown write outcomes, authentication/signature errors, rate limits and protection failures retain their existing reconciliation or pause behavior.
+The signal strategy remains movers plus momentum/breakout confirmation. Prioritize the top 10 eligible Futures demo gainers for BUY and top 10 losers for SELL, then rotate through other USDT perpetuals. Coins repeat. Rankings are past price changes, not predictions. Use completed 1–5m, 10m, 15m, 20m, 30m or 60m candles. The strongest agreement tier is not required, but no calibrated win probability is claimed.
 
-## Current entry rules
+Momentum requires aligned 5/20 means, confirming 5m direction, a directional candle and close, body at least 40% of range, directional close strength at least 65%, volume at least 0.8 times its recent average, and no extension beyond two ATRs. All qualifying same-direction timeframes remain candidates; an earlier failing candidate cannot hide a later valid one.
 
-- Prioritize the top 10 eligible Futures demo gainers for BUY and top 10 losers for SELL, then rotate through other USDT perpetuals. Previously checked coins repeat. Rankings are past 24-hour price changes, not predictions.
-- Accept confirmed breakouts or momentum continuation on completed 1–5m, 10m, 15m, 20m, 30m or 60m candles. The strongest agreement tier is not required. These rules do not produce a calibrated win probability; “50% good” cannot be asserted from them.
-- Momentum continuation requires aligned 5/20 means, the 5m trend in the same direction, the latest candle and close moving in that direction, body at least 40% of range, directional close strength at least 65%, and volume at least 0.8 times the prior 20-bar mean. Reject candles or extensions exceeding two recent ATRs. No new 20-candle high/low is required.
-- Target $300 margin per new trade before fees, rounded up to Binance's quantity step. Actual market fills and partial fills can differ. Do not send an undersized order when margin plus fees cannot fit. Existing positions are not resized.
-- Leverage ceiling is 3×, 5× or 10× according to observed rule agreement. Mixed, unavailable or opposing closed BTC 5m context caps it at 3×. Volatility, fees, tick sizes and exchange limits can lower it to 1×.
-- Fresh 1m direction and executable quotes must confirm the setup. Require one recent 1m ATR plus estimated round-trip costs to fit the $20 planned loss target. The selected setup timeframe supplies the commission screen: two observed ATRs must exceed three times estimated round-trip fees per unit. This is a cost screen, not a price forecast.
-- Retain every qualifying same-direction timeframe from shared candle responses. If an earlier candidate fails price, freshness or commission checks, consider the next before any order is submitted. Longer-timeframe fee screening is not limited to a single 1m move.
-- Cross margin, $5,000 total margin budget, no fixed position-count cap, one position per symbol. Keep the 10-minute same-symbol cooldown after close. Different symbols have no global entry delay.
+Target $300 margin per new entry, rounded up to the quantity step. Adaptive leverage stays within 1–10× and exchange capacity; no fixed position-count cap, one position per symbol, $5,000 total margin budget, Cross. Different symbols can enter consecutively with serialized writes. The same symbol has a 10-minute cooldown after closing.
 
-## Stops, manual profits and accounting
+The existing $20 one-ATR-and-fees allowance remains an entry sizing check only. It can reduce leverage or skip excessive exposure; it is not a stop-loss or maximum loss. New trades calculate no stop price and are not rejected for stop tick placement. Fresh spread/mark movement is included in the entry exposure estimate. The selected timeframe must clear the existing commission screen; fees cannot already consume the $20 profit target.
 
-Accepted fills receive a $20 planned net stop immediately. Exchange protection is separate from entry; failures attempt a reduce-only close. Stop fills can exceed the target through gaps, slippage, fees or delays.
+Entries tolerate up to 0.75 ATR drift from the selected close and up to a 0.10 ATR breakout retest, while momentum boundaries and fresh direction remain required. Stale, reversed or unworkable quotes skip the candidate. Temporary candidate-only GET failures and definite price-filter rejections keep scanning; uncertain writes, access errors and rate limits retain their reconciliation/pause behavior.
 
-Existing bot positions adopt the new exit policy during reconciliation. A replacement $20 exchange stop is confirmed before old bot stop, take-profit or profit-floor exits are cancelled. Existing quantities and leverage remain unchanged. If the position already breaches the loss target, the engine attempts a reduce-only close. Manual positions are not adopted or closed.
+## Accounting, controls and deployment
 
-At an observed $100 account-wide net session result, new entries pause and remain latched off. This target does not close profitable positions; manual profit control and existing loss protection remain active. A new session requires an explicit action while flat. Net includes USDT realized trading P&L, commission, funding and the change in unrealized P&L from the opening snapshot, so it differs from Binance's unrealized P&L alone.
+Net session result includes USDT realized trading P&L, commission, funding and the change in unrealized P&L from the opening snapshot. It differs from Binance unrealized P&L alone. A new $100 session requires an explicit action while flat.
 
-## Diagnostics and deployment
+Copy scan diagnostics works with zero trades, busy work or disconnected snapshots, without account requests or credentials/balances. Three public scan workers, caching, serialized order writes, responsive Stop controls and exit checks during scanning remain.
 
-Entry status and Copy scan diagnostics work with zero trades. Copying is snapshot-only, does not wait for the engine queue or call signed account endpoints, and remains available when disconnected. It includes engine version, Auto/readiness state, check/setup/accepted-entry/error counts, per-timeframe reasons and elapsed times. It excludes credentials and account balances. Trade result export retains its separate fresh-account requirement.
+Browser mode needs the page running. Accepted exchange TP orders can remain after the page closes; the account-wide $100 close requires a running engine. Pair Mobile/background mode uses laptop files and needs the laptop awake and connector running. Publishing a website does not replace that loaded engine: update its files and restart it. A browser using only the local relay loads the engine from the website. The UI reports the actual engine version and exit policy so an old engine is not presented as running the new rules.
 
-Three public scan workers, candle caching, serialized order writes, responsive controls and risk checks during scanning are retained. Browser mode needs the page running. Pair Mobile/background mode uses the engine loaded from laptop files and requires the connector running and laptop awake. Publishing or refreshing the website does not update that loaded engine: update its files and restart it. The controller displays the actual engine version and entry policy, including its loss target and profit mode. A browser using only the local relay loads the engine from the website.
+Start requires One-way and Single-Asset Mode. Account modes are not changed automatically. Credentials remain in memory or the explicitly saved encrypted vault. Use one execution owner per demo account.
 
-Start requires One-way and Single-Asset Mode. Account-wide modes are not changed automatically. API credentials remain in memory or the explicitly saved encrypted browser vault. The local order journal contains no secret. Use one execution owner for a demo account.
+Validation: 246 automated checks passed using synthetic credentials and mocked exchange responses. Coverage includes long/short fee-aware TP pricing, no automatic loss/timer exits, migration from old $4/$8/$12/$20 stops, idempotent reconciliation, $100 closure of winners and losers, failed/unknown/partial closes, target priority during ticks, entry guards, controls, diagnostics and engine-version reporting. Build checks syntax and DOM bindings. No account-connected trading or profitability backtest was performed.
 
-Validation: 235 automated checks passed with synthetic credentials and mocked exchange responses. Coverage includes bounded BUY/SELL movement, unsafe reversal rejection, temporary candidate reads, definite rejections followed by another accepted entry, unknown writes, $20 exchange protection, old-exit migration, manual profits, the $100 pause, controls, diagnostics and mobile version reporting. Build checks JavaScript syntax and DOM bindings. No account-connected trading or profitability backtest was performed; a qualifying signal does not guarantee a fill or profit.
-
-Official references: [Binance USDⓈ-M error codes](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/error-code) and [HTTP and execution-status handling](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/general-info).
+Official API reference: [USDⓈ-M New Algo Order and close-position behavior](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade).
