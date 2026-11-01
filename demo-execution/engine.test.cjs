@@ -238,7 +238,7 @@ test('scanner rotates bounded batches and explains WAIT without submitting order
   const e=new DemoEngine(api);e.experimentUntil=0;e.auto=true;e.symbols=Array.from({length:25},(_,i)=>'COIN'+i);
   await e.scan();assert.equal(calls.length,12);assert.equal(e.scanChecked,12);
   await e.scan();assert.equal(calls.length,24);assert.equal(new Set(calls).size,24);
-  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1m / 2m / 3m / 4m / 5m setup'));
+  assert.ok(e.scanned.every(s=>s.side==='WAIT'&&s.reason==='No qualifying closed 1–5m / 10m / 15m / 20m / 30m / 60m setup'));
   e.auto=false;await e.scan();assert.equal(calls.length,24);
 });
 test('scanner handles an empty universe without requests',async()=>{
@@ -681,4 +681,24 @@ test('selective mode spaces new fills and sizes round-trip commission to at most
  f.e.state.records=[{id:'bd1_recent',symbol:'OTHERUSDT',side:'BUY',at:Date.now()-10000,entryStatus:'FILLED'}];
  await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/60 seconds/);f.e.state.records=[];
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];assert.ok(Number(r.quantity)*100*r.fee*2<=1);assert.equal(r.lossLimit,8);
+});
+test('longer timeframes aggregate complete aligned 5m groups through 60m',()=>{
+ const {aggregateFiveMinuteBars}=require('./engine.js'),t=Math.floor(Date.now()/3600000)*3600000-25*3600000;
+ const raw=Array.from({length:300},(_,i)=>[t+i*300000,100,102,99,101,10,t+(i+1)*300000-1]);
+ for(const minutes of [10,15,20,30,60]){const bars=aggregateFiveMinuteBars(raw,t+300*300000,minutes);assert.equal(bars.length,1500/minutes);assert.equal(bars[0][6]-bars[0][0],minutes*60000-1);assert.equal(bars[0][5],minutes*2);}
+ assert.equal(aggregateFiveMinuteBars(raw.slice(0,299),t+300*300000,60).length,24);
+});
+test('trend cache reuses closed data within a 5m period and refreshes at next boundary',async()=>{
+ const f=fixture();let calls=0;f.api.call=async()=>{calls++;return [];};
+ await f.e.scanTrendBars(symbol);await f.e.scanTrendBars(symbol);assert.equal(calls,1);
+ f.api.offset+=300000;await f.e.scanTrendBars(symbol);assert.equal(calls,2);
+});
+test('scanner checks longer timeframes when minute chart has no breakout',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.symbols=[symbol];const at=Date.now(),end=Math.floor(at/300000)*300000;
+ const minuteEnd=Math.floor(at/60000)*60000;
+ const raw=Array.from({length:150},(_,i)=>[minuteEnd-(150-i)*60000,100,101,99,100,10,minuteEnd-(149-i)*60000-1]);
+ const trend=Array.from({length:300},(_,i)=>{const c=100+i*.01;return [end-(300-i)*300000,c-.035,c+.001,c-.04,c,i>=298?30:10,end-(299-i)*300000-1];});
+ f.api.call=async(m,p,q)=>{assert.equal(p,'/fapi/v1/klines');return q.interval==='1m'?raw:trend;};
+ f.e.updateIncome=async()=>{};let captured;f.e.enter=async(s,signal)=>{captured=signal;f.e.entryOutcome='Test entry';};
+ await f.e.scan();assert.ok(captured);assert.ok(captured.intervalMs>=600000);assert.equal(captured.side,'BUY');
 });

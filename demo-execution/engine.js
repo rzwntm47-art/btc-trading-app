@@ -93,6 +93,18 @@ function aggregateMinutes(raw,now,minutes){
   }
   return out;
 }
+function aggregateFiveMinuteBars(raw,now,minutes){
+  if(![10,15,20,30,60].includes(minutes))throw new DemoError('Unsupported longer timeframe');
+  breakout(raw,now,300000);
+  const bars=raw.filter(b=>number(b[6])<now),count=minutes/5,ms=minutes*60000,out=[];
+  for(let i=0;i+count<=bars.length;i++){
+    if(number(bars[i][0])%ms!==0)continue;
+    const group=bars.slice(i,i+count);
+    if(group.some((b,j)=>number(b[0])!==number(group[0][0])+j*300000||number(b[6])-number(b[0])!==299999))throw new DemoError('Missing longer-timeframe candles');
+    out.push([group[0][0],group[0][1],Math.max(...group.map(b=>number(b[2]))),Math.min(...group.map(b=>number(b[3]))),group.at(-1)[4],group.reduce((n,b)=>n+number(b[5]),0),group.at(-1)[6]]);i+=count-1;
+  }
+  return out;
+}
 // Experimental entry filters: score describes rule agreement, not win probability.
 function qualifySetup(signal,raw,hourly,now,explain=()=>{},trendMs=3600000){
   const reject=reason=>{explain(reason);return null;};
@@ -305,7 +317,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1m/2m/3m/4m/5m · requested 50× leverage · $8 planned loss · available USDT · net session $100 close-and-stop target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1–5m/10m/15m/20m/30m/60m · requested 50× leverage · $8 planned loss · available USDT · net session $100 close-and-stop target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -436,6 +448,7 @@ class DemoEngine {
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?3:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
+    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · size limited by volatility, $8 planned stop, $1 commission budget and Binance limits';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -571,6 +584,13 @@ class DemoEngine {
       }
     }
   }
+  async scanTrendBars(symbol){
+    this.trendCache=this.trendCache||new Map();const bucket=Math.floor((Date.now()+this.api.offset)/300000),saved=this.trendCache.get(symbol);
+    if(saved?.bucket===bucket)return saved.bars;
+    const bars=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:300},false);
+    breakout(bars,Date.now()+this.api.offset,300000);
+    this.trendCache.set(symbol,{bucket,bars});return bars;
+  }
   async scan(){
     if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
     const epoch=this.stopEpoch;this.lastScan=Date.now();
@@ -584,17 +604,28 @@ class DemoEngine {
       if(this.owned(symbol))continue;
       const raw=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'1m',limit:150},false);
       const now=Date.now()+this.api.offset;
-      let intervalMs=60000,signal=null,reason='No qualifying closed 1m / 2m / 3m / 4m / 5m setup',trend=null,foundCandidate=false;
+      let intervalMs=60000,signal=null,reason='No qualifying closed 1–5m / 10m / 15m / 20m / 30m / 60m setup',trend=null,foundCandidate=false;
       if(this.experimentActive()){signal=experimentSignal(raw,now);reason='Experiment: no fresh directional candle';}
       else for(const minutes of [1,2,3,4,5]){
         const bars=minutes===1?raw:aggregateMinutes(raw,now,minutes);
         const candidate=breakout(bars,now,minutes*60000);
         if(!candidate)continue;
         foundCandidate=true;
-        if(!trend)trend=await this.api.call('GET','/fapi/v1/klines',{symbol,interval:'5m',limit:60},false);
+        if(!trend)trend=await this.scanTrendBars(symbol);
         const qualified=qualifySetup(candidate,bars,trend,Date.now()+this.api.offset,r=>reason=minutes+'m: '+r,300000);
         if(qualified&&this.newRules&&qualified.strength<2){reason=minutes+'m: selective mode requires stronger candle/volume agreement';continue;}
         if(qualified){intervalMs=minutes*60000;signal={...qualified,exitPolicy:'manual-profit-60s-loss',intervalMs};break;}
+      }
+      if(!signal&&!this.experimentActive()&&raw.length>=21){
+        if(!trend)trend=await this.scanTrendBars(symbol);
+        for(const minutes of [10,15,20,30,60]){
+          if(!this.auto||epoch!==this.stopEpoch)break;
+          const bars=aggregateFiveMinuteBars(trend,Date.now()+this.api.offset,minutes),candidate=breakout(bars,Date.now()+this.api.offset,minutes*60000);
+          if(!candidate)continue;foundCandidate=true;
+          const qualified=qualifySetup(candidate,bars,trend,Date.now()+this.api.offset,r=>reason=minutes+'m: '+r,300000);
+          if(qualified&&this.newRules&&qualified.strength<2){reason=minutes+'m: selective mode requires stronger candle/volume agreement';continue;}
+          if(qualified){intervalMs=minutes*60000;signal={...qualified,exitPolicy:'manual-profit-60s-loss',intervalMs};break;}
+        }
       }
       if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
       this.scanChecked=(this.scanChecked||0)+1;
@@ -644,4 +675,4 @@ class DemoEngine {
     }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,qualifySetup,experimentSignal,profitFloor,recoverySignal,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,exitPrice,combinedValue,DEMO_BASE};
