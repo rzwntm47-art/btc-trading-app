@@ -1,19 +1,35 @@
-# Binance Demo execution module
+# Binance Demo execution module — V1.49
 
-Build: `node demo-execution/build.cjs`
+This module sends USDⓈ-M orders exclusively to `https://demo-fapi.binance.com`. It has no live endpoint, withdrawal or transfer capability.
 
-Tests: `node --test demo-execution/engine.test.cjs`
+Build with `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.html` to the repository root. Run `node --test demo-execution/*.test.cjs render-backend/*.test.cjs` for engine, controls, mobile and backend checks.
 
-Publish the generated `demo-connect.html` at the repository root. The main paper dashboard remains independent; its Binance Demo dialog loads this page.
+## Current entry rules
 
-This module sends USD-M orders exclusively to `https://demo-fapi.binance.com`. It has no live endpoint or fallback, withdrawal or transfer capability. Authentication stays in memory. A browser Web Lock prevents concurrent writers in tabs of the same browser. A SHA-256 API-key fingerprint namespaces a local, non-secret order journal. Different browsers/devices are not coordinated: use one dedicated demo account and one instance.
+- Prioritize the top 10 eligible Futures demo gainers for BUY and top 10 losers for SELL, then continue rotating through other USDT perpetuals. Previously checked coins repeat. Rankings are past 24-hour price changes, not predictions.
+- Accept confirmed breakouts or momentum continuation on completed 1–5m, 10m, 15m, 20m, 30m or 60m candles. The previous strongest-tier-only gate is removed; confirmation remains required.
+- Momentum continuation requires aligned 5/20 means, the 5m trend in the same direction, the latest candle and close moving in that direction, body at least 40% of range, directional close strength at least 65%, and volume at least 0.8 times the prior 20-bar mean. Reject candles or extensions exceeding two recent ATRs. It does not require a new 20-candle high/low.
+- Target $300 margin per new trade before fees, rounded up to Binance's quantity step. Actual market fills and partial fills can differ. Do not send an undersized order when margin plus fees cannot fit. Existing positions are not resized.
+- Leverage ceiling is 3×, 5× or 10× according to observed rule agreement. Mixed, unavailable or opposing closed BTC 5m context caps it at 3×. Volatility, fees, tick sizes and exchange limits can lower it to 1×. There is no probability-of-profit estimate.
+- Fresh 1m direction and executable quotes must still confirm the setup. Retain the commission screen and require one recent 1m ATR plus estimated round-trip costs to fit the $8 planned loss target. Reject stale, reversed, too extended or unworkable entries.
+- Cross margin, $5,000 total margin budget, no fixed position-count cap, one position per symbol. Preserve 60-second entry spacing and a 10-minute same-symbol cooldown after close.
 
-Start requires One-way and Single-Asset Mode; account-wide modes are never changed automatically. Each symbol is configured for 15x isolated margin before entry. MARKET_LOT_SIZE and minimum notional filters are applied; a market entry is followed by close-position stop and take-profit conditional orders. These separate API calls are not atomic. Closing the page or losing connectivity during submission can leave a position awaiting protection; inspect Binance directly in that case. Known pending IDs are reconciled after reconnect, never blindly resubmitted. No exact fill, stop loss, or profit is guaranteed.
+## Unchanged exits and accounting
 
-The 20-closed-candle 5m breakout strategy is retained as an unvalidated demo strategy. Rotating batches cover eligible crypto perpetuals. No profit assurance or inference of future candles is made. Combined balance is an estimate from the demo asset indices, not a constant copied from a screenshot. The session goal uses actual USDT income entries (realized P&L, commissions, funding) plus open USDT unrealized P&L. It excludes transfers and non-USDT asset revaluation; it is account-level, so do not mix other trading with this session. Open per-position exit estimates use taker fee rates; actual fills and funding may differ. Sessions older than seven days require review and a fresh session when flat.
+The planned net loss stop remains $8, including estimated fees. No timed loss exit and no recovery extension. Exchange stop placement is separate from entry; accepted fills receive protection immediately. Failures attempt a reduce-only close. Stop fills can exceed the target through gaps, slippage or delays.
 
-Stop Auto prevents new entries and preserves management/protection. Reload stops entry automation and clears credentials. Exchange-accepted protective orders can remain while the page is closed. New entries, profit-floor activation and session-goal enforcement require the page running. There is no server-based 24/7 execution.
+Profit-floor activation is strictly above $4, $8, $16, $32, then $37, $42, $47 and further $5 increments. Pullback to or below the highest activated floor requests a close. Reaching a milestone exactly does not activate it. A position whose peak net profit was only $3 has no active profit floor and may return to zero. The UI now shows estimated net, highest observed net and floor status. This explains the rule, not the cause of an uninspected individual trade.
 
-The test suite uses synthetic credentials, mock exchange responses and no network orders. Browser account access and signed order placement require validation with the user's private demo credentials. No live or demo exchange order was placed during development.
+At an observed $100 account-wide net session result, close bot-owned positions and latch new entries stopped. Net includes USDT realized trading P&L, commission, funding and the change in unrealized P&L from the opening snapshot. It differs from Binance's unrealized P&L alone. The final realized result may differ from the observed target. Manual positions are not closed.
 
-Official references: Binance USD-M REST trade API (order, algoOrder, leverage, marginType, positionRisk), account API (account, income, commissionRate, position mode), and market API (exchangeInfo, klines, premiumIndex, assetIndex).
+## Execution and updates
+
+V1.47's three public scan workers, candle caching, serialized order writes, controls, timing diagnostics and risk checks during scanning are retained. Definite recoverable order rejections keep scanning; uncertain writes are reconciled without blind retries. Exchange access errors and rate limits can pause entries.
+
+Browser mode needs the page running. Pair Mobile/background mode executes the engine loaded from laptop files and requires the connector running and laptop awake. A website refresh does not update the loaded laptop engine. The controller uses the actual engine's reported sizing policy; an older engine is explicitly shown as needing an update rather than being labelled with the new settings. Connection transport is unchanged in this strategy release.
+
+Start requires One-way and Single-Asset Mode. Account-wide modes are not changed automatically. API credentials remain in memory or the explicitly saved encrypted browser vault. The local order journal contains no secret. Use one execution owner for a demo account.
+
+Validation: 204 automated checks passed with synthetic credentials and mocked exchange responses, including momentum-only BUY/SELL fills, reversal rejection, leverage/capacity fallback, stops, profit-floor boundaries and mobile-version reporting. Build checks JavaScript syntax and DOM bindings. No account-connected trading or profitability backtest was performed. This is an unvalidated demo strategy; faster or more frequent entries do not establish a profitable edge.
+
+Fee reference: [Binance Futures commission calculation](https://www.binance.com/en-AE/support/faq/detail/98488a516eb84e3eb34605683dffd554) uses notional value times the fee rate. The app reads the account's actual commission rate for each proposed entry.

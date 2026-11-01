@@ -82,3 +82,8 @@ test('only owned positions can close and repeated close IDs do not repeat the ac
 test('mobile page is the generated app with same-origin policy and no referrer',()=>fixture(async({request,connect,pair})=>{
   await connect();await pair();const page=await request('/mobile',undefined,{mobile:true});assert.equal(page.status,200);assert.match(page.text,/Pair Mobile/);assert.match(page.headers.get('content-security-policy'),/connect-src 'self'/);assert.equal(page.headers.get('referrer-policy'),'no-referrer');
 }));
+
+test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
+ await connect();const state=(await request('/host/status')).json.engine;
+ assert.equal(state.appVersion,'1.49');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:10,strategy:'movers-momentum-v1'});
+}));

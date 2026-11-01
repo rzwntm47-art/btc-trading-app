@@ -31,3 +31,11 @@ test('phone pairing removes fragment, exchanges once, hides key fields and uses 
  const pair=f.requests.find(x=>x.url==='/mobile/pair');assert.ok(pair);assert.equal(pair.options.credentials,'same-origin');assert.equal(pair.options.headers.Authorization,undefined);assert.equal(JSON.parse(pair.options.body).code,'test-pairing-code');
  assert.equal(f.requests.filter(x=>x.url==='/mobile/pair').length,1);assert.ok(f.requests.every(x=>!x.url.includes('binance.com')));
 });
+
+test('remote controller never substitutes its new $300 settings for an older laptop engine',()=>{
+ const f=fixture();f.ready();
+ vm.runInContext("engine.apply({engine:{appVersion:'1.47',connected:true},generation:'old',serverAt:Date.now()})",f.context);
+ assert.equal(vm.runInContext('engine.appVersion',f.context),'1.47');assert.equal(vm.runInContext('engine.entryPolicy',f.context),null);
+ vm.runInContext("engine.apply({engine:{appVersion:'1.49',connected:true,entryPolicy:{margin:300,maxLeverage:10,strategy:'movers-momentum-v1'}},generation:'new',serverAt:Date.now()})",f.context);
+ assert.equal(vm.runInContext('engine.entryPolicy.margin',f.context),300);assert.equal(vm.runInContext('engine.entryPolicy.maxLeverage',f.context),10);
+});
