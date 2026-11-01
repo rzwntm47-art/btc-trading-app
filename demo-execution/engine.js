@@ -591,13 +591,32 @@ class DemoEngine {
     breakout(bars,Date.now()+this.api.offset,300000);
     this.trendCache.set(symbol,{bucket,bars});return bars;
   }
+  async refreshMovers(){
+    if(!this.newRules||!this.meta.size||Date.now()-(this.moversCheckedAt||0)<60000)return;
+    this.moversCheckedAt=Date.now();
+    try{
+      const rows=await this.api.call('GET','/fapi/v1/ticker/24hr',{},false);
+      if(!Array.isArray(rows))throw new DemoError('Invalid movers response');
+      const eligible=new Set(this.symbols),now=Date.now()+this.api.offset;
+      const valid=rows.filter(x=>eligible.has(x.symbol)&&this.meta.has(x.symbol)&&Number.isFinite(Number(x.priceChangePercent))&&Number(x.lastPrice)>0&&Number(x.quoteVolume)>0&&Number.isFinite(Number(x.closeTime))&&Math.abs(now-Number(x.closeTime))<600000);
+      const gainers=valid.filter(x=>Number(x.priceChangePercent)>0).sort((a,b)=>Number(b.priceChangePercent)-Number(a.priceChangePercent)).slice(0,10);
+      const losers=valid.filter(x=>Number(x.priceChangePercent)<0).sort((a,b)=>Number(a.priceChangePercent)-Number(b.priceChangePercent)).slice(0,10);
+      this.movers=[];for(let i=0;i<10;i++){if(gainers[i])this.movers.push({symbol:gainers[i].symbol,side:'BUY',change:Number(gainers[i].priceChangePercent)});if(losers[i])this.movers.push({symbol:losers[i].symbol,side:'SELL',change:Number(losers[i].priceChangePercent)});}
+      this.moversAt=Date.now();this.moversNote=this.movers.length?'Futures 24h gainers → BUY; losers → SELL · refreshed '+new Date(this.moversAt).toLocaleTimeString():'No fresh eligible movers; scanning all markets';
+    }catch(error){this.movers=[];this.moversNote='Movers unavailable; full-market scan continues. '+error.message;if([-1003,429,418].includes(error.code))throw error;}
+    this.notify();
+  }
   async scan(){
     if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
     const epoch=this.stopEpoch;this.lastScan=Date.now();
+    await this.refreshMovers();
     this.rechecks=this.rechecks||new Map();
     const due=[...this.rechecks].filter(([symbol,v])=>this.symbols.includes(symbol)&&!this.owned(symbol)&&Date.now()-v.seen<300000&&Date.now()-v.checked>=30000).sort((a,b)=>a[1].checked-b[1].checked).slice(0,4).map(([symbol])=>symbol);
-    const batch=[...due];
-    for(let i=0;i<Math.min(12,this.symbols.length);i++){const symbol=this.symbols[this.cursor++%this.symbols.length];if(!batch.includes(symbol))batch.push(symbol);}
+    const priority=new Map(),movers=(this.movers||[]).filter(m=>this.symbols.includes(m.symbol)&&!this.owned(m.symbol));
+    this.moverCursor=this.moverCursor||0;
+    for(let i=0;i<Math.min(4,movers.length);i++){const mover=movers[this.moverCursor++%movers.length];priority.set(mover.symbol,mover);}
+    const batch=[...new Set([...priority.keys(),...due])];
+    for(let i=0;i<Math.min(priority.size?8:12,this.symbols.length);i++){const symbol=this.symbols[this.cursor++%this.symbols.length];if(!batch.includes(symbol))batch.push(symbol);}
     for(const [symbol,v] of this.rechecks)if(Date.now()-v.seen>=300000)this.rechecks.delete(symbol);
     for(const symbol of batch){
       if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)break;
@@ -627,10 +646,12 @@ class DemoEngine {
           if(qualified){intervalMs=minutes*60000;signal={...qualified,exitPolicy:'manual-profit-60s-loss',intervalMs};break;}
         }
       }
+      const mover=priority.get(symbol);
+      if(signal&&mover&&signal.side!==mover.side){reason='Mover priority awaits a '+mover.side+' confirmation; opposite signal skipped';signal=null;}
       if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
       this.scanChecked=(this.scanChecked||0)+1;
       this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
-      this.scanned.unshift({symbol,reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?this.entryLeverage(signal):undefined,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      this.scanned.unshift({symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?this.entryLeverage(signal):undefined,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){try{await this.updateIncome();if(this.newRules&&await this.enforceSessionGoal())return;if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.scanned[0].reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);this.scanned[0].reason=this.entryOutcome;}catch(e){this.scanned[0].reason='Entry failed: '+e.message;throw e;}finally{this.notify();}}
     }
   }

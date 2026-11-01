@@ -58,8 +58,9 @@ function render(){
   $('incomeAudit').textContent=e.lastIncome?'Realized gains: $'+money(audit.gains)+' · Realized losses: $'+money(audit.losses)+' · Commissions: $'+money(audit.commission)+' · Funding: $'+money(audit.funding)+' · Net booked trading result: $'+money(audit.net)+' · Updated '+new Date(e.lastIncome).toLocaleTimeString():'Awaiting Binance income history';
   $('incomeDiagnosis').textContent=!e.lastIncome?'Connect and sync to load actual results.':audit.net<0?(audit.realized<0?'Realized losses exceed realized gains. ':'Realized trading P&L is positive, but costs exceed it. ')+(audit.commission<0?'Commission reduces the wallet result. ':'')+'Review these actual results before changing the strategy.':'Booked trading result is nonnegative for this window. A wallet drop may involve an earlier period, a reset, transfers, or other income types excluded here.';
 
+  $('moversNote').textContent=e.moversNote||'Loading eligible futures gainers and losers';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · repeats continuously · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
-  for(const s of e.scanned)line($('setups'),[s.symbol,s.side==='BUY'?'LONG · '+s.leverage+'× — '+s.reason:s.side==='SELL'?'SHORT · '+s.leverage+'× — '+s.reason:'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
+  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),s.side==='BUY'?'LONG · '+s.leverage+'× — '+s.reason:s.side==='SELL'?'SHORT · '+s.leverage+'× — '+s.reason:'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);

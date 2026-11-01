@@ -702,3 +702,29 @@ test('scanner checks longer timeframes when minute chart has no breakout',async(
  f.e.updateIncome=async()=>{};let captured;f.e.enter=async(s,signal)=>{captured=signal;f.e.entryOutcome='Test entry';};
  await f.e.scan();assert.ok(captured);assert.ok(captured.intervalMs>=600000);assert.equal(captured.side,'BUY');
 });
+test('movers rank eligible futures only and alternate gainers BUY / losers SELL',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.symbols=['AAAUSDT','BBBUSDT','CCCUSDT'];for(const s of f.e.symbols)f.e.meta.set(s,{});
+ const row=(symbol,change,closeTime=Date.now())=>({symbol,priceChangePercent:String(change),lastPrice:'1',quoteVolume:'100000',closeTime});let calls=0;
+ f.api.call=async()=>{calls++;return [row('AAAUSDT',12),row('BBBUSDT',-20),row('CCCUSDT',3),row('SPOTONLYUSDT',100),row('AAAUSDT',99,Date.now()-700000)];};
+ await f.e.refreshMovers();assert.deepEqual(f.e.movers.map(x=>[x.symbol,x.side]),[['AAAUSDT','BUY'],['BBBUSDT','SELL'],['CCCUSDT','BUY']]);
+ await f.e.refreshMovers();assert.equal(calls,1);
+});
+test('mover scan starts with ranked markets and still advances full market cursor',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.symbols=Array.from({length:20},(_,i)=>'C'+i+'USDT');for(const s of f.e.symbols)f.e.meta.set(s,{});
+ const seen=[];f.api.call=async(m,p,q)=>{if(p==='/fapi/v1/ticker/24hr')return [{symbol:'C19USDT',priceChangePercent:'20',lastPrice:'1',quoteVolume:'1000',closeTime:Date.now()},{symbol:'C18USDT',priceChangePercent:'-20',lastPrice:'1',quoteVolume:'1000',closeTime:Date.now()}];seen.push(q.symbol);return [];};
+ await f.e.scan();assert.deepEqual(seen.slice(0,2),['C19USDT','C18USDT']);assert.equal(f.e.cursor,8);assert.ok(seen.includes('C0USDT'));assert.ok(seen.includes('C7USDT'));
+ assert.ok(f.e.scanned.some(s=>s.symbol==='C19USDT'&&s.source==='Gainer 20.00%'));
+});
+test('movers outage falls back to all-market scanning without auto stop',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.symbols=[symbol];let candles=0;
+ f.api.call=async(m,p)=>{if(p==='/fapi/v1/ticker/24hr')throw new DemoError('Unavailable',503);candles++;return [];};
+ await f.e.scan();assert.equal(candles,1);assert.equal(f.e.auto,true);assert.match(f.e.moversNote,/unavailable/);
+});
+test('loser priority does not execute a BUY signal',async()=>{
+ const f=fixture();f.e.newRules=true;f.e.symbols=[symbol];f.e.movers=[{symbol,side:'SELL',change:-10}];f.e.moversCheckedAt=Date.now();
+ const at=Date.now(),end=Math.floor(at/300000)*300000,minuteEnd=Math.floor(at/60000)*60000;
+ const raw=Array.from({length:150},(_,i)=>[minuteEnd-(150-i)*60000,100,101,99,100,10,minuteEnd-(149-i)*60000-1]);
+ const trend=Array.from({length:300},(_,i)=>{const c=100+i*.01;return [end-(300-i)*300000,c-.035,c+.001,c-.04,c,i>=298?30:10,end-(299-i)*300000-1];});
+ f.api.call=async(m,p,q)=>q.interval==='1m'?raw:trend;let entries=0;f.e.enter=async()=>entries++;
+ await f.e.scan();assert.equal(entries,0);assert.match(f.e.scanned[0].reason,/SELL confirmation/);
+});
