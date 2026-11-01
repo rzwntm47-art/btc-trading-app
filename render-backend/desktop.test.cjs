@@ -85,5 +85,5 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.50');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:10,strategy:'movers-momentum-v1'});
+ assert.equal(state.appVersion,'1.51');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:10,strategy:'movers-momentum-v2',lossLimit:4,profitExit:'manual',priceToleranceAtr:.75,breakoutRetestAtr:.1});
 }));
