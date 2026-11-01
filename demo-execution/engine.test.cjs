@@ -670,11 +670,11 @@ test('selective mode rejects weak agreement before any exchange calls',async()=>
  const f=fixture();f.e.newRules=true;f.signal.strength=1;await f.e.enter(symbol,f.signal);
  assert.equal(f.calls.length,0);assert.match(f.e.entryOutcome,/stronger/);
 });
-test('selective mode waits ten minutes after a closed trade and caps concurrency',async()=>{
+test('re-entry cooldown remains but three active positions do not block another entry',async()=>{
  const f=fixture();f.e.newRules=true;f.e.state.records=[{id:'bd1_old',symbol,side:'BUY',at:Date.now()-600000,closedAt:Date.now()-300000,entryStatus:'FILLED'}];
  await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/cooldown/);assert.equal(f.calls.length,0);
- f.e.state.records=Array.from({length:3},(_,i)=>({id:'bd1_'+i,symbol:'COIN'+i+'USDT',side:'BUY',at:Date.now()-600000,entryStatus:'FILLED'}));
- await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/three bot positions/);
+ f.e.reconcile=async()=>{};f.e.state.records=Array.from({length:3},(_,i)=>({id:'bd1_'+i,symbol:'COIN'+i+'USDT',side:'BUY',at:Date.now()-600000,entryStatus:'FILLED'}));
+ await f.e.enter(symbol,f.signal);assert.ok(f.calls.some(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly));
 });
 test('selective mode spaces new fills and sizes round-trip commission to at most $1',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';

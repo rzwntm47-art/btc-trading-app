@@ -24,10 +24,6 @@ async function readCredentials(password){
 }
 
 let engine=null,releaseLock=null,connectionBusy=false;
-function demoVisible(){
-  if(document.hidden)return false;
-  try{const frame=window.frameElement;const dialog=frame?.closest('dialog');return !frame?.closest('[hidden]')&&(!dialog||dialog.open);}catch{return false;}
-}
 const money=n=>Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
 function line(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');if(v instanceof Node)td.append(v);else td.textContent=String(v??'—');tr.append(td);}parent.append(tr);}
 function status(message){$('status').textContent=message;}
@@ -128,7 +124,7 @@ $('connectform').onsubmit=async event=>{
     const saved=localStorage.getItem(journalKey);const state=saved?JSON.parse(saved):null;
     const persist=value=>{try{localStorage.setItem(journalKey,JSON.stringify(value));}catch{throw new Error('Cannot save order journal. Entries stopped to prevent duplicates.');}};
     const api=new DemoAPI(key,signingKey);api.relayToken=relayToken;
-    engine=new DemoEngine(api,state,persist,render);engine.busy=true;engine.shouldScan=demoVisible;
+    engine=new DemoEngine(api,state,persist,render);engine.busy=true;
     await engine.initialize();engine.save();$('credentials').open=false;
     if(engine.tradingReady){
       try{await engine.start();}catch(error){engine.block=error.message;engine.pause(error.message);}
@@ -150,15 +146,14 @@ $('disconnect').onclick=()=>{
   if(engine?.busy)return;engine?.pause();engine?.api.clear();engine=null;releaseLock?.();releaseLock=null;$('credentials').open=true;$('demoOnly').checked=false;
   for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet','unrealized','pnlEquation','incomeAudit','incomeDiagnosis','sessionNote','unrealizedNote'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
-setInterval(()=>{if(engine?.connected){if(!demoVisible()&&engine.auto)engine.pause('Demo view is hidden. New entries stopped; exchange exits remain.');engine.tick();}},5000);
-window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data==='demo-pause'){engine?.pause('Demo view closed. New entries stopped; exchange exits remain.');render();}});
+setInterval(()=>{if(engine?.connected)engine.tick();},5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.connected)engine.tick();});
 window.addEventListener('beforeunload',event=>{if(engine?.busy){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',()=>{engine?.pause();engine?.api.clear();releaseLock?.();});
 render();
 
 const paperLink=document.querySelector('a[href="./"]')||document.querySelector('a[href="index.html"]');
-if(paperLink&&window.parent!==window){paperLink.textContent='Paper simulator';paperLink.onclick=event=>{event.preventDefault();engine?.pause('Switched to paper simulation.');parent.postMessage('show-paper',location.origin);};}
+if(paperLink&&window.parent!==window){paperLink.textContent='Paper simulator';paperLink.onclick=event=>{event.preventDefault();parent.postMessage('show-paper',location.origin);};}
 
 window.addEventListener('message',event=>{
  if(event.origin!==location.origin||event.source!==parent||event.data!=='demo-refresh-assets')return;

@@ -5,10 +5,11 @@ const fs=require('node:fs');
 const {DemoEngine}=require('./engine.js');
 function fixture(){
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{disabled:false,hidden:false,textContent:'',classList:{add(){},remove(){}},replaceChildren(){}});return nodes.get(id);};
- const context=vm.createContext({DemoEngine,console,setTimeout,setInterval(){},document:{getElementById:node,querySelector(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
+ const context=vm.createContext({DemoEngine,console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.connected=true;engine.tick=async()=>{};engine.refresh=async()=>{};engine.reconcile=async()=>{};engine.updateIncome=async()=>{};`,context);
- return {node,context,e:vm.runInContext('engine',context)};
+ return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
 }
 test('real Start/Stop handlers: Stop wins while setup is pending',async()=>{
  const {node,e}=fixture();let finish;e.prepareTrading=()=>new Promise(r=>finish=r);
@@ -25,4 +26,23 @@ test('real Reset and tab handlers dispatch correctly',async()=>{
  await node('resetDemo').onclick();assert.equal(resets,1);
  node('ordersTab').onclick();assert.equal(node('positions').hidden,true);assert.equal(node('orderPanel').hidden,false);
  node('positionsTab').onclick();assert.equal(node('positions').hidden,false);assert.equal(node('orderPanel').hidden,true);
+});
+
+test('background tab polling and paper navigation preserve Demo Auto; explicit Stop still stops',async()=>{
+ const {node,context,intervals,events,paperLink,messages,e}=fixture();
+ e.auto=true;let ticks=0;e.tick=async()=>ticks++;
+ context.document.hidden=true;
+ for(const tick of intervals)tick();
+ assert.equal(ticks,1);assert.equal(e.auto,true);
+ paperLink.onclick({preventDefault(){}});
+ assert.equal(messages[0][0],'show-paper');assert.equal(e.auto,true);
+ context.document.hidden=false;events.visibilitychange();
+ assert.equal(ticks,2);assert.equal(e.auto,true);
+ node('stop').onclick();assert.equal(e.auto,false);
+});
+test('shell navigation does not send a visibility pause to the mounted demo',()=>{
+ const shell=fs.readFileSync(__dirname+'/../index.html','utf8');
+ assert.ok(!shell.includes("postMessage('demo-pause'"));
+ const ui=fs.readFileSync(__dirname+'/ui.js','utf8');
+ assert.ok(!ui.includes('shouldScan=demoVisible'));
 });
