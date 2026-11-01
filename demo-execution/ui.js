@@ -38,8 +38,8 @@ function render(){
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   if(!connected)return;
   status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
-  $('leverageWindow').textContent='New rules · 50× preferred · lower leverage fallback · Cross · 1–5m / 10m / 15m / 20m / 30m / 60m signals · $8 planned loss stop';
-  const capital=e.budgetStatus();$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · Selective mode · $5,000 margin budget · up to 3 positions · up to $100 margin/entry · estimated round-trip commission ≤ $1';
+  $('leverageWindow').textContent='$100 minimum margin · adaptive leverage up to 50× · Cross · 1–5m / 10m / 15m / 20m / 30m / 60m signals · $8 planned loss stop';
+  const capital=e.budgetStatus();$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · no position-count cap · minimum $100 estimated margin/entry · estimated round-trip commission ≤ $1';
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
@@ -56,7 +56,7 @@ function render(){
 
   $('moversNote').textContent=e.moversNote||'Loading eligible futures gainers and losers';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · repeats continuously · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
-  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),s.side==='BUY'?'LONG · '+s.leverage+'× — '+s.reason:s.side==='SELL'?'SHORT · '+s.leverage+'× — '+s.reason:'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
+  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),s.side==='BUY'?'LONG · '+(s.leverage?s.leverage+'×':'adaptive ≤50×')+' — '+s.reason:s.side==='SELL'?'SHORT · '+(s.leverage?s.leverage+'×':'adaptive ≤50×')+' — '+s.reason:'WAIT — '+s.reason,new Date(s.at).toLocaleTimeString()]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);

@@ -317,7 +317,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1–5m/10m/15m/20m/30m/60m · requested 50× leverage · $8 planned loss · available USDT · net session $100 close-and-stop target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · 1–5m/10m/15m/20m/30m/60m · $100 minimum margin · adaptive leverage up to 50× · $8 planned loss · available USDT · net session $100 close-and-stop target':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -414,40 +414,64 @@ class DemoEngine {
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
     const preferredLeverage=this.entryLeverage(signal);
+    const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
+    const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
+    const available=number(usdt.availableBalance),marginRoom=Math.max(0,5000-capital.reserved);
+    // Preserve the $100 margin floor by selecting leverage, never by shrinking the order.
+    // Round UP to the exchange lot step; skip if that exceeds any existing risk/cost limit.
+    const minimumPlan=(candidate,cap=Infinity)=>{
+      const quantity=rounded(Math.max(100*candidate/price,minNotional/price,number(lot.minQty),number(normal.minQty)),step,true);
+      const qty=number(quantity),notional=qty*price,margin=notional/candidate;
+      const costs=notional*fee*2;
+      if(margin+1e-8<100||margin>marginRoom+1e-8||margin+costs>available+1e-8||
+        qty>number(lot.maxQty)||qty>number(normal.maxQty)||notional>cap||
+        qty*(signal.stopDistance+fee*(2*price+signal.stopDistance))>lossLimit+1e-8||costs>1+1e-8)return null;
+      return {quantity,qty,notional};
+    };
+    const candidates=this.newRules?[50,25,20,15,10,8,5,4,3,2,1].filter(n=>minimumPlan(n)):[preferredLeverage];
+    if(!candidates.length)return skip(available<100||marginRoom<100?'Waiting for at least $100 free margin plus fees; scanning continues':'$100 minimum margin cannot fit the current volatility, $8 stop, fee or Binance quantity limits; scanning continues');
     progress('Configuring Cross margin and leverage');
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
-    let leverage,selectedLeverage;
-    const candidates=this.newRules?[50,25,20,10,5,3,2,1]:[preferredLeverage];
+    let leverage,selectedLeverage,minimumSize;
     for(const candidate of candidates){
       if(!this.auto||epoch!==this.stopEpoch)return skip('Auto stopped during leverage checks');
       try{
         leverage=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:candidate});
         if(number(leverage.leverage)!==candidate)throw new DemoError('Selected leverage not accepted');
+        if(this.newRules){
+          minimumSize=minimumPlan(candidate,number(leverage.maxNotionalValue)*.95);
+          if(!minimumSize)continue;
+        }
         selectedLeverage=candidate;break;
       }catch(e){if(e.uncertain||e.code!==-4028)throw e;}
     }
-    if(!selectedLeverage)return skip('Binance rejected all supported leverage candidates; continuing other coins');
-    if(selectedLeverage!==preferredLeverage)progress('Binance accepted '+selectedLeverage+'×; sizing for volatility and fees');
-    const targetMargin=this.newRules?Math.min(100,Math.max(0,5000-capital.reserved)):100;
-    const budget=Math.min(targetMargin,((this.newRules||experimental)?number(usdt.availableBalance):capital.free)/(1+2*selectedLeverage*fee),number(usdt.availableBalance)/(1+2*selectedLeverage*fee));
-    if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
-    const step=number(lot.stepSize)>0?lot.stepSize:normal.stepSize;
-    let quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),this.newRules&&fee>0?1/(2*price*fee):Infinity,number(lot.maxQty),number(normal.maxQty)),step),qty=number(quantity),notional=qty*price;
-    const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
-    if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
-    const cap=number(leverage.maxNotionalValue)*.95;
-    if(cap<=0)return skip('No position capacity at selected leverage');
-    if(notional>cap){
-      quantity=rounded(Math.min(qty,cap/price),step);qty=number(quantity);notional=qty*price;
-      if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional)return skip('Leverage position cap is below the minimum order size');
-      progress('Reduced order size to fit Binance leverage limit');
+    if(!selectedLeverage)return skip('No supported leverage fits '+(this.newRules?'$100 minimum margin and Binance limits':'Binance limits')+'; scanning continues');
+    let quantity,qty,notional;
+    if(this.newRules){
+      ({quantity,qty,notional}=minimumSize);
+      progress('Using '+selectedLeverage+'× with at least $100 estimated margin');
+      const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.leverage=selectedLeverage;
+    }else{
+      const budget=Math.min(100,(experimental?available:capital.free)/(1+2*selectedLeverage*fee),available/(1+2*selectedLeverage*fee));
+      if(budget<=0){this.block='Waiting for room in the $1,000 budget ($200 reserve)';return skip(this.block);}
+      quantity=rounded(Math.min(budget*selectedLeverage/price,experimental?Infinity:lossLimit/(signal.stopDistance+fee*(2*price+signal.stopDistance)),number(lot.maxQty),number(normal.maxQty)),step);qty=number(quantity);notional=qty*price;
+      if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||(!experimental&&notional*fee*2>=lossLimit)){this.block=symbol+': quantity/cost filter';return skip(this.block);}
+      const cap=number(leverage.maxNotionalValue)*.95;
+      if(cap<=0)return skip('No position capacity at selected leverage');
+      if(notional>cap){
+        quantity=rounded(Math.min(qty,cap/price),step);qty=number(quantity);notional=qty*price;
+        if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional)return skip('Leverage position cap is below the minimum order size');
+        progress('Reduced order size to fit Binance leverage limit');
+      }
     }
     if(!this.auto||epoch!==this.stopEpoch||this.shouldScan?.()===false)return skip('Auto stopped before entry dispatch');
+    if(this.newRules&&Math.abs(Date.now()+this.api.offset-number(mark.time))>15000)return skip('Entry quote became stale during leverage checks; scanning continues');
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?3:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,exitPolicy:signal.exitPolicy,exits:[],protected:false};
-    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · size limited by volatility, $8 planned stop, $1 commission budget and Binance limits';
+    r.estimatedEntryMargin=notional/selectedLeverage;
+    r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $100 minimum estimated margin; leverage selected within volatility, $8 planned stop, $1 commission budget and Binance limits; market fill margin may differ';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -650,7 +674,7 @@ class DemoEngine {
       if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
       this.scanChecked=(this.scanChecked||0)+1;
       this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
-      this.scanned.unshift({symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal?this.entryLeverage(signal):undefined,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
+      this.scanned.unshift({symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',reason:signal?'Checking session P&L before entry ('+(intervalMs/60000)+'m signal)':reason,side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal&&!this.newRules?this.entryLeverage(signal):undefined,at:Date.now()});this.scanned=this.scanned.slice(0,30);this.notify();
       if(signal&&this.auto&&epoch===this.stopEpoch){try{await this.updateIncome();if(this.newRules&&await this.enforceSessionGoal())return;if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.scanned[0].reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}await this.enter(symbol,signal);this.scanned[0].reason=this.entryOutcome;}catch(e){this.scanned[0].reason='Entry failed: '+e.message;throw e;}finally{this.notify();}}
     }
   }
