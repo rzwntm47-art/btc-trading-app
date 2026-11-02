@@ -67,6 +67,11 @@ function render(){
     $('leverageWindow').textContent=frames+' Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · '+(fixed?'$'+policy.margin+' margin per trade':'up to $'+policy.margin+' risk-sized margin')+' · '+(maximum?'maximum Binance-accepted leverage for that size':policy.leverageMode==='highest-fee-compatible'?'highest Binance leverage allowing the $'+policy.lossLimit+' after-fee stop, up to '+policy.maxLeverage+'×':'adaptive leverage within Binance limits, up to '+policy.maxLeverage+'×')+' · $'+policy.lossLimit+' total after-fee loss target · middle-band profit target; confirmed continuation exits before outer band';
     $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · '+(fixed?'$'+policy.margin+' per entry; no smaller orders · fees and spread must fit within the $'+policy.lossLimit+' loss target':'up to $'+policy.margin+' per entry; smaller sizes keep room for the $'+policy.lossLimit+' loss target and fees');
   }
+  if(policy?.profitExit==='stepped-net-trailing'){
+    const frames=policy.timeframes.map(m=>m+'m').join(' / ');
+    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
+    $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · $300 per entry; no smaller orders · $12 Binance backup loss target; $6 exit and recovery checks need the engine running';
+  }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
@@ -114,6 +119,15 @@ function render(){
       field(grid,'Middle-band target',r.bandTargets?.middle??'Loading');field(grid,'Before-outer-band target',r.bandTargets?.outer??'Loading');
       field(grid,'Profit stage',r.bandTargets?.stage==='outer'?'Continuation confirmed; protect middle band':'Middle band first');
       const note=document.createElement('p'),c=r.closingEstimate;note.textContent='$'+r.lossLimit+' total after-fee loss target · no loss timer or partial reduction. Profit exits require a positive closing-net estimate. '+(c?'Paid commission $'+money(c.paidCommission)+' · estimated closing fee $'+money(c.closingFee):'Waiting for fee history')+(r.estimateError?' · '+r.estimateError:'');card.append(note);
+    }
+    if(r?.exitPolicy==='stepped-net-trailing'){
+      field(grid,'Estimated total net after fees',money(r.netEstimate),Number.isFinite(r.netEstimate)?(r.netEstimate<0?'bad pnl':'good pnl'):'');
+      field(grid,'Highest net since this policy',money(r.trailPeak));
+      field(grid,'Profit pullback floor',Number.isFinite(r.profitFloor)?'$'+money(r.profitFloor):'Not armed until net exceeds $5');
+      field(grid,'Normal loss / Binance backup','$6 / $12 targets');
+      const trail=document.createElement('p');trail.textContent='Floors $5 → $8 → $11 → $14 → $17 → $20 → +$3. A level arms only after net profit exceeds it. Hold while profit rises; close on return to or below the armed floor. Floors never move down.';card.append(trail);
+      const recovery=document.createElement('p');recovery.textContent=r.lossRecovery?(r.lossRecovery.allowed?'Recovery extension active · ':'No recovery extension · ')+r.lossRecovery.reason+' · Checked '+new Date(r.lossRecovery.checkedAt).toLocaleTimeString():'At -$6, hold toward -$12 only with fresh supporting 1m/5m candles and an aligned current price. No timer or partial reduction.';card.append(recovery);
+      const note=document.createElement('small'),c=r.closingEstimate;note.textContent=(c?'Paid commission $'+money(c.paidCommission)+' · estimated closing fee $'+money(c.closingFee)+' · booked partial result '+money(c.realized)+' · funding '+money(c.funding)+'. ':'')+'Engine required for profit floors and $6 recovery decisions. Binance backup targets -$12; gaps, fees and slippage can exceed exit targets.'+(r.estimateError?' · '+r.estimateError:'');card.append(note);
     }
     if(['net-trailing','trial-net-trailing'].includes(r?.exitPolicy)){
       field(grid,'Estimated total trade net (USDT)',money(r.netEstimate),Number.isFinite(r.netEstimate)?(r.netEstimate<0?'bad pnl':'good pnl'):'');

@@ -1,4 +1,4 @@
-# Binance Demo execution module — V1.62
+# Binance Demo execution module — V1.63
 
 USDⓈ-M orders go exclusively to `https://demo-fapi.binance.com`. No live endpoint, withdrawals or transfers.
 
@@ -6,7 +6,7 @@ Build: `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.h
 
 ## Strategy
 
-The user selected Bollinger profit targets. V1.62 replaces the one-hour experiment and earlier dollar trailing/partial-loss policies with a permanent multi-timeframe Bollinger / Williams %R strategy. Defaults are Bollinger 20-close SMA ± 2 population standard deviations and Williams %R 14, because the provided transcript omitted settings.
+V1.63 preserves multi-timeframe Bollinger / Williams %R entries and replaces Profit pullback exits with the user-confirmed after-fee $5 / $8 / $11 / +$3 pullback ladder. The normal loss exit is $6; fresh recovery evidence can permit holding toward a $12 backup target. The one-hour experiment remains disabled. Defaults are Bollinger 20-close SMA ± 2 population standard deviations and Williams %R 14, because the provided transcript omitted settings.
 
 - Refresh eligible demo Futures 24h rankings once per minute. Check up to 20 gainers for LONG and 20 losers for SHORT, rotating eight slots plus recent candidates with three public workers. Recheck continuously; do not enter unrelated full-market coins. Rank is historical movement, not a forecast.
 - LONG: last or previous completed candle on that timeframe touches the lower band, one of their WR values is ≤ -80, then the latest candle closes bullish, above the previous close and lower band, with rising WR, still below the middle. SHORT mirrors this at the upper band with WR ≥ -20. Validate candle continuity, OHLC, freshness and positive ATR. Williams %R is a price-range oscillator, not buyer/seller percentages.
@@ -24,15 +24,16 @@ The prior 1.5-ATR risk sizing, $1 fee sizing cap and $20 volatility sizing veto 
 
 ## Exits and migration
 
-Current records use `rulesVersion: 11`, `lossLimit: 6`, `exitPolicy: 'bollinger-targets'`. They store entry band evidence and `bandTargets` with middle, before-outer target stage and entry intervalMs.
+Current records use `rulesVersion: 12`, `lossLimit: 6`, `maxLossLimit: 12`, `exitPolicy: 'stepped-net-trailing'`. Entry bands and timeframe remain evidence; they no longer determine profit exits.
 
 - Total trade net includes actual paid entry/partial-close commissions, realized partial-close results, funding, executable remaining P&L and estimated closing fees. Actual matched Binance fills are required. Do not use gross green unrealized P&L alone to submit a profit exit.
-- Middle band first. A positive-net trade closes there unless a fresh closed 1m candle since entry confirms momentum beyond the middle and current entry-timeframe WR is on the directional side of -50. Only then extend toward 90% of the distance from middle to opposite outer band. Freeze targets on extension; close before the outer band or on a pullback to the middle while fresh net remains positive. Before extension, refresh bands from completed candle on that timeframes. If momentum cannot be confirmed at a reached positive target, close rather than extend. Recheck actual costs and executable price before dispatch. No dollar profit ladder.
-- At ≤ -$6 estimated total trade net, close the remaining position. Install and confirm a Binance STOP_MARKET backup before cancelling older bot exits; adjust it for booked results and remaining quantity. A fee-only negative estimate above -$6 does not close a new trade. No loss timer, no new 25% loss reduction. Mark-price stops and executable-price estimates can trigger at different times; losses can exceed $6 through gaps, slippage, costs or delays.
-- Existing owned records migrate on reconciliation, retaining previous reductions/booked results and Bollinger targets. Existing $2 stops are replaced only after the $6 stop is confirmed. Pending writes reconcile before replacement. Old experiment negative-net exit intents cannot reapply the obsolete fee-only close rule. The old journal experiment is ended; its historical metadata is retained. The experiment start command refuses activation with a replacement message.
+- Profit floors: no floor at net ≤ $5. Arm each level only after net exceeds it: $5, $8, $11, $14, $17, $20, continuing by $3. A peak of exactly $20 gives a $17 floor; $20.01 gives $20. Hold rising profits; close at the next fresh observation at or below the floor. Persist the peak and floor; never lower either on ordinary checks or restart. Requote with paid/estimated costs before submission. A gap through the floor still closes at available market prices, even below the intended profit. No unconditional take-profit order or Bollinger-band exit.
+- At total net ≤ -$6, hold only if a completed 1m candle since entry and fresh 1m/5m trends support recovery. Both trends require close above SMA5 above SMA20 (LONG) or below them (SHORT), with directional close-to-close movement. The 1m candle requires body ≥40% of its range, directional close in the outer 35%, and volume ≥1.2 times the prior 20-bar mean. Current executable price must remain within 0.25 ATR of that candle in the adverse direction. Missing, stale, pre-entry or conflicting evidence cannot authorize extension. Recheck every loss evaluation and requote after the candle reads; close if support disappears. Recovery evidence is a rule, not a probability or guarantee.
+- At net ≤ -$12, close without waiting for candle analysis. Install and confirm an independent Binance STOP_MARKET backup targeting -$12 before cancelling older exits, adjusted for booked results, paid fees and remaining quantity. The normal -$6 exit and trailing profits need the engine running. During an outage the exchange backup targets -$12. Mark-price and executable-price thresholds differ; gaps, slippage and fees can exceed all targets. No loss timer, add-on, leverage change or new partial-loss reduction.
+- Existing owned positions migrate on reconciliation. Preserve quantity, leverage, fees, earlier reductions and history. Archive the previous exit policy/peak, initialize the new peak from current net (never infer a historical peak), and persist it thereafter. Confirm the $12 backup before cancelling older stops. Pending writes reconcile first; cancelled legacy exit intents recheck current conditions. Closed records remain unchanged.
 - The $100 estimated account-wide after-cost session goal remains: close bot positions, including losers, then stop new entries. Unmanaged positions are not closed. The goal latches through unresolved orders. Manual close remains available.
 
-Legacy exit/entry branches remain for historical compatibility regression tests, but the default browser and desktop engine uses `bandRules: true`. Both engine policy and version are included in remote snapshots. Profit targets and session exits need the engine online; accepted exchange loss stops persist independently. No live-account trading or profitability backtest has been performed.
+Legacy exit/entry branches remain for historical compatibility regression tests, but the default browser and desktop engine uses `bandRules: true`. Both engine policy and version are included in remote snapshots. Profit floors, $6 recovery decisions and session exits need the engine online; accepted exchange loss stops persist independently. No live-account trading or profitability backtest has been performed.
 
 ## V1.62 continuous Auto and conditional-order recovery
 
@@ -62,7 +63,7 @@ Net session result includes USDT realized trading P&L, commission, funding and t
 
 Copy scan diagnostics works with zero trades, busy work or disconnected snapshots, without account requests or credentials/balances. Three public scan workers, caching, serialized order writes, responsive Stop controls and exit checks during scanning remain.
 
-Browser mode needs the page running for Bollinger profit exits and the account-wide $100 close. Accepted exchange loss stops can remain when the page closes. Pair Mobile/background mode uses laptop files and needs the laptop awake and connector running. Publishing a website does not replace that loaded engine: update its files and restart it. A browser using only the local relay loads the engine from the website. The UI reports the actual engine version and exit policy so an old engine is not presented as running the new rules.
+Browser mode needs the page running for Profit pullback exits and the account-wide $100 close. Accepted exchange loss stops can remain when the page closes. Pair Mobile/background mode uses laptop files and needs the laptop awake and connector running. Publishing a website does not replace that loaded engine: update its files and restart it. A browser using only the local relay loads the engine from the website. The UI reports the actual engine version and exit policy so an old engine is not presented as running the new rules.
 
 Start requires One-way and Single-Asset Mode. Account modes are not changed automatically. Credentials remain in memory or the explicitly saved encrypted vault. Use one execution owner per demo account.
 
@@ -70,6 +71,6 @@ The current `render-backend/server.cjs` allows the signed Demo-only `GET /fapi/v
 
 ## Validation and references
 
-Deterministic tests cover mirrored LONG/SHORT qualification, fixed-margin maximum-leverage sizing, middle and outer target exits, fresh continuation, loss exits, migration, paid fees, manual controls, leverage/capacity errors, read recovery, unknown writes, mobile snapshots and old-connector detection. These verify execution behavior, not profitability.
+Deterministic tests cover mirrored LONG/SHORT qualification, fixed-margin maximum-leverage sizing, stepped profit exits, fresh recovery checks, $6/$12 loss exits, migration, paid fees, manual controls, leverage/capacity errors, read recovery, unknown writes, mobile snapshots and old-connector detection. These verify execution behavior, not profitability.
 
 Indicator references: [John Bollinger's rules](https://www.bollingerbands.com/bollinger-band-rules), [Bollinger Bands calculation](https://www.bollingerbands.com/bollinger-bands), [Williams %R](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/williams-r).
