@@ -39,3 +39,8 @@ test('remote controller never substitutes its new $300 settings for an older lap
  vm.runInContext("engine.apply({engine:{appVersion:'1.49',connected:true,entryPolicy:{margin:300,maxLeverage:10,strategy:'movers-momentum-v1'}},generation:'new',serverAt:Date.now()})",f.context);
  assert.equal(vm.runInContext('engine.entryPolicy.margin',f.context),300);assert.equal(vm.runInContext('engine.entryPolicy.maxLeverage',f.context),10);
 });
+
+test('remote experiment controls send explicit laptop commands, never run local trading logic',async()=>{
+ const f=fixture();f.ready();await vm.runInContext('engine.startTrial()',f.context);await vm.runInContext('engine.endTrial()',f.context);
+ assert.deepEqual(f.requests.filter(x=>x.url.endsWith('/command')).map(x=>JSON.parse(x.options.body).action),['startTrial','endTrial']);assert.ok(f.requests.every(x=>!x.url.includes('binance.com')));
+});

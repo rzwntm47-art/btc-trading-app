@@ -3,7 +3,7 @@ const http=require('node:http');
 const {timingSafeEqual}=require('node:crypto');
 const BASE='https://demo-fapi.binance.com';
 const ORIGIN='https://rzwntm47-art.github.io';
-const routes={GET:new Set(['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/positionSide/dual','/fapi/v1/multiAssetsMargin','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/commissionRate','/fapi/v1/income']),POST:new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),DELETE:new Set(['/fapi/v1/algoOrder','/fapi/v1/order'])};
+const routes={GET:new Set(['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/positionSide/dual','/fapi/v1/multiAssetsMargin','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/commissionRate','/fapi/v1/income','/fapi/v1/userTrades','/fapi/v1/leverageBracket']),POST:new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),DELETE:new Set(['/fapi/v1/algoOrder','/fapi/v1/order'])};
 function equal(a,b){const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y)}
 function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now,extension,relayLocked=()=>false}={}){
  let active=0,windowAt=now(),count=0,cooldown=0,probeAt=-Infinity,probe=null;
