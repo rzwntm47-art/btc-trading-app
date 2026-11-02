@@ -10,6 +10,14 @@ The existing dashboard is not yet wired to this service: its assigned URL is nee
 
 The free service can sleep/restart and has no durable storage. No unattended 24-hour trading guarantee. Exchange order reconciliation must precede any retry after an ambiguous write failure. Do not use live account credentials.
 
+## V1.65 Auto continuity and fee checks
+
+Update `demo-execution` and `render-backend` together, then restart `START-LAPTOP.cmd`. Refreshing the website alone does not update a running laptop engine. Preserve journals and saved credentials. Reconnect and Start once after installation; later recoverable errors retain that Start intent.
+
+New entries wait during reconciliation without disabling Auto. Position checks run before account income summaries and continue during entry-only backoff; Binance-wide rate limits and outages can still delay them. A failed symbol does not prevent checking other positions unless the error is account-wide. Manual Stop stops new entries while connected position management continues. Unknown writes, unverified exits and unmanaged orders still block entry; they are never blindly retried or adopted. The $100 net session stop remains.
+
+High commission is assessed across all coins: commission must be at most 25% of the gross reference target move and leave at least $5 net at that target, with current round-trip commission no more than half the normal $6 loss budget. Retain $300 margin and reduce leverage as needed. This is an estimate, not a profit guarantee; existing profit/loss exit rules are unchanged. The cancelled V1.64 blanket $1 commission cap is not included.
+
 ## V1.63 strategy and connector update
 
 Update this folder and `demo-execution` together, then restart the Windows connector with `START-LAPTOP.cmd`. Keep the existing laptop journal data. Refreshing only the website cannot replace the loaded backend or background engine.

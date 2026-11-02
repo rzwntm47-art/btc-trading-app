@@ -81,7 +81,7 @@ for(const side of ['BUY','SELL'])test(side+' ignores old outer-stage targets whe
  const f=await opened(side),r=f.e.owned(symbol);r.bandTargets.stage='outer';setTradeNet(f,3);await f.e.reconcile();assert.ok(!r.closedAt);assert.equal(r.profitFloor,null);
 });
 test('insufficient target room after fees skips the order without stopping Auto',async()=>{
- const f=bandFixture();f.signal.bands.middle=100.001;await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/commission/);assert.equal(f.e.auto,true);
+ const f=bandFixture();f.signal.bands.middle=100.001;await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/commission/i);assert.equal(f.e.auto,true);
 });
 test('unsupported leverage bracket read still uses a confirmed exchange setting',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverageBracket')throw new DemoError('unsupported',400);if(p==='/fapi/v1/leverage'&&q.leverage>1)throw new DemoError('not allowed',-4028);return base(m,p,q,s);};
@@ -94,8 +94,8 @@ test('definite exchange rejection continues scanning without resubmitting that o
 test('ambiguous accepted entry is reconciled once and protected by sl12',async()=>{
  const f=bandFixture();f.unknownEntry=true;await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,1);assert.ok(f.e.owned(symbol).exits.some(e=>e.kind==='sl12'&&e.confirmed));
 });
-test('a rejected loss stop closes the exposure and pauses new entries',async()=>{
- const f=bandFixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(f.e.auto,false);assert.equal(f.position,null);
+test('a rejected loss stop closes exposure and holds entries without cancelling Auto',async()=>{
+ const f=bandFixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(f.e.auto,true);assert.ok(f.e.entryHold);assert.equal(f.position,null);
 });
 test('zero available margin does not stop Auto or submit orders',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const result=await base(m,p,q,s);if(p==='/fapi/v3/account')result.assets[0].availableBalance='0';return result;};await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.equal(f.e.auto,true);
@@ -130,8 +130,8 @@ test('quantity capacity reduces leverage rather than sending a smaller-margin or
 });
 test('fees consuming $6 lower leverage to the highest setting with an untriggered stop',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0005'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.leverage,18);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.entryEvidence.adaptiveSizing.exchangeCeiling,20);assert.equal(f.e.auto,true);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
- assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[18]);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.leverage,10);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.entryEvidence.adaptiveSizing.exchangeCeiling,20);assert.equal(f.e.auto,true);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
+ assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[10]);
 });
 for(const available of [250,300.001])test('available '+available+' cannot shrink the requested $300 plus fees order',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v3/account')r.assets[0].availableBalance=String(available);return r;};
@@ -151,9 +151,9 @@ test('an old cancelled $2 close does not reapply the old loss target',async()=>{
  const f=await opened(),r=f.e.owned(symbol);r.pendingClose='bd1_old_loss_c';r.closeReason='$2 net trade loss';f.orders.set(r.pendingClose,{status:'CANCELED',executedQty:'0'});setTradeNet(f,-2.5);
  await f.e.reconcile();assert.ok(f.position);assert.ok(!r.pendingClose);assert.ok(!r.closedAt);
 });
-test('the revised $6 target permits an otherwise valid entry with fees above the obsolete $3 target',async()=>{
+test('commission is limited to half the $6 loss budget while preserving full margin',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0004'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.lossLimit,6);assert.equal(r.leverage,20);assert.equal(r.estimatedEntryMargin,300);assert.ok(r.entryEvidence.estimatedRoundTripFees>3&&r.entryEvidence.estimatedRoundTripFees<6);assert.ok(!r.closedAt);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.lossLimit,6);assert.equal(r.leverage,12);assert.equal(r.estimatedEntryMargin,300);assert.ok(r.entryEvidence.estimatedRoundTripFees<=3);assert.ok(!r.closedAt);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
 });
 
 function expandBars(rows,baseMs){
@@ -217,7 +217,7 @@ test('profit monitoring does not need obsolete band targets or candle reads belo
 test('finer ticks permit the next higher fee-compatible leverage without shrinking margin',async()=>{
  const f=bandFixture(),base=f.api.call;f.e.meta.get(symbol).filters.find(x=>x.filterType==='PRICE_FILTER').tickSize='.00001';
  f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0005'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,19);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,10);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);
 });
 test('lower leverage can fit available fees while retaining the full $300 margin',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v3/account')r.assets[0].availableBalance='300.05';return r;};

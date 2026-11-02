@@ -85,7 +85,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.63');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.65');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{
@@ -107,4 +107,12 @@ test('temporary remote Sync read failure preserves Auto and remote Stop cancels 
  const result=await request('/host/command',{id:'sync-error-recovery-12345',action:'refresh'});assert.equal(result.status,202);
  for(let i=0;i<50&&e.controlPending;i++)await delay(2);assert.equal(e.auto,true);assert.ok(e.retryAt>Date.now());
  await request('/host/command',{id:'stop-after-sync-error-123',action:'stop'});assert.equal(e.auto,false);assert.equal(e.retryAt,0);
+}));
+
+test('non-transient remote command errors hold entries without cancelling running Auto',()=>fixture(async({app,request,connect})=>{
+ await connect();const e=FakeEngine.last;e.auto=true;e.refresh=async()=>{throw Error('Order status still settling');};
+ await request('/host/command',{id:'sync-reconcile-hold-12345',action:'refresh'});
+ for(let i=0;i<50&&e.controlPending;i++)await delay(2);
+ const state=(await request('/host/status')).json.engine;assert.equal(state.auto,true);assert.match(state.entryHold,/Order status still settling/);assert.ok(state.retryAt>Date.now());
+ await request('/host/command',{id:'stop-reconcile-hold-12345',action:'stop'});assert.equal(app.snapshot().engine.auto,false);assert.equal(app.snapshot().engine.entryHold,'');
 }));

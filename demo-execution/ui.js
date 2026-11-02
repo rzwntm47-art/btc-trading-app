@@ -56,7 +56,7 @@ function render(){
   const remaining=trialActive?Math.max(0,Math.ceil((trial.until-(Date.now()+(e.api.offset||0)))/1000)):0;
   $('trialStatus').textContent=trialActive?'EXPERIMENT '+(e.auto?'RUNNING':'PAUSED')+' · '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0')+' remaining · ends '+new Date(trial.until).toLocaleTimeString()+' · confirmed setups; Binance-accepted leverage; any negative after-fee estimate closes':trial?'Experiment entry window ended. Normal entries restored; experiment positions retain their recorded exits.':'Not started. Click Start 1-hour experiment when connected.';
   if(!connected)return;
-  status((e.accountingUpdateRequired?'CONNECTOR UPDATE REQUIRED · new entries blocked':e.auto?(e.retryAt>Date.now()?'AUTO WAITING · automatic retry in '+Math.ceil((e.retryAt-Date.now())/1000)+'s':e.startPending?'AUTO STARTING · verifying connection and protection':'AUTO RUNNING · scanning for qualifying signals'):e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  status((e.accountingUpdateRequired?'CONNECTOR UPDATE REQUIRED · new entries blocked':e.auto?(e.retryAt>Date.now()?'AUTO WAITING · automatic retry in '+Math.ceil((e.retryAt-Date.now())/1000)+'s':e.startPending?'AUTO STARTING · verifying connection and protection':e.entryHold?'AUTO ENABLED · NEW ENTRIES WAITING':'AUTO RUNNING · scanning for qualifying signals'):e.tradingReady?'NEW ENTRIES STOPPED · POSITION CHECKS CONTINUE':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   const policy=e.entryPolicy;
   $('leverageWindow').textContent=policy?'$'+policy.margin+' margin · adaptive leverage up to '+policy.maxLeverage+'× · Cross · 1–60m signals · '+(policy.lossLimit===null?'no stop loss':(policy.lossLimit?'$'+policy.lossLimit:'Recorded')+' planned loss stop')+' · '+(policy.profitExit==='net-trailing'?'net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · 25% trim at -$3, full close at -$5':policy.profitExit==='positive-estimate'?'close positive estimated net · reduce 25% once when negative':policy.profitExit==='fixed'?'$'+policy.takeProfit+' net take-profit':policy.profitExit==='manual'?'manual profit close':'previous profit rules'):'Laptop engine '+(e.appVersion?'V'+e.appVersion:'version unavailable')+' uses previous settings. Update and restart it to apply $300 margin / up to 10×.';
   if(trialActive)$('leverageWindow').textContent='ONE-HOUR EXPERIMENT · up to $300 margin · adaptive 1–150× within Binance limits and fee allowance · confirmed momentum/breakout setups · close any negative after-fee estimate · net pullback $2 / $4 / $8 / $10 / +$5 · $100 net session stop';
@@ -69,7 +69,7 @@ function render(){
   }
   if(policy?.profitExit==='stepped-net-trailing'){
     const frames=policy.timeframes.map(m=>m+'m').join(' / ');
-    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
+    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit'+(policy.maxCommissionShare?' · commission ≤ '+(policy.maxCommissionShare*100)+'% of reference target move and ≤ half the normal loss budget; target net ≥ $'+policy.minimumNetAtTarget:'')+' · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
     $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · $300 per entry; no smaller orders · $12 Binance backup loss target; $6 exit and recovery checks need the engine running';
   }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
@@ -100,7 +100,7 @@ function render(){
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);
   $('positionsTab').textContent='Positions ('+positions.length+')';
   $('ordersTab').textContent='Open Orders ('+(e.orders.length+e.algos.length)+')';
-  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+(e.scopedOrders?' · Order list covers tracked/open-position symbols only; each entry checks its own symbol.':'')+' · Position checks target every '+(e.exitPollMs()/1000)+'s, including during scans; network delays and cooldowns can delay updates.';
+  $('syncNote').textContent='Positions: '+(e.positionAt?new Date(e.positionAt).toLocaleTimeString():'awaiting sync')+' · Orders: '+(e.ordersAt?new Date(e.ordersAt).toLocaleTimeString():'awaiting sync')+(e.scopedOrders?' · Order list covers tracked/open-position symbols only; each entry checks its own symbol.':'')+(e.lastRiskCheck?' · Last position management pass: '+new Date(e.lastRiskCheck).toLocaleTimeString():'')+' · Position checks target every '+(e.exitPollMs()/1000)+'s, including during scans; network delays and cooldowns can delay updates.';
   const field=(parent,label,value,cls='')=>{const d=document.createElement('div'),l=document.createElement('small'),v=document.createElement('b');l.textContent=label;v.textContent=value;v.className=cls;d.append(l,v);parent.append(d);};
   for(const p of positions){
     const r=e.owned(p.symbol),card=document.createElement('article');card.className='position-card';
@@ -166,7 +166,7 @@ function render(){
 async function run(fn,kind='action'){
  const target=engine;if(!target)return;
  try{await target.control(async()=>{if(engine===target)await fn();},kind);}
- catch(error){if(target.remote){target.block='Action not confirmed: '+error.message;status(target.block);return;}if(!target.scheduleReadRecovery(error)){target.block=error.message;target.pause(error.message);}}
+ catch(error){if(target.remote){target.block='Action not confirmed: '+error.message;status(target.block);return;}target.handleRunError(error);}
  finally{render();}
 }
 async function acquireLock(){
@@ -199,7 +199,7 @@ $('connectform').onsubmit=async event=>{
     engine=new DemoEngine(api,state,persist,queueRender);engine.busy=true;
     await engine.initialize();engine.save();$('credentials').open=false;
     if(engine.tradingReady){
-      try{await engine.start();}catch(error){engine.block=error.message;engine.pause(error.message);}
+      try{await engine.start();}catch(error){engine.handleRunError(error);}
     }
   }catch(e){if(engine?.api?.key){engine.pause();engine.connected=false;status(e.message+' Credentials remain in memory: use Retry connection, or Disconnect to clear them.');}else{releaseLock?.();releaseLock=null;status(e.message);}}
   finally{connectionBusy=false;if(engine)engine.busy=false;render();if(engine?.auto)engine.tick();}

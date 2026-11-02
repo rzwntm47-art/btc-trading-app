@@ -730,7 +730,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.63');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.65');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -762,7 +762,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.63');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.65');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(Number.isFinite(r.entryEvidence.plannedStopPrice));
 });
@@ -995,7 +995,7 @@ test('diagnostics explain zero entries without account reads or secret data',asy
  const d=f.e.scanDiagnostics(),text=JSON.stringify(d);assert.equal(d.scanAudit.checked,1);assert.equal(d.scanAudit.qualified,0);assert.equal(d.scanAudit.submitted,0);assert.match(d.status,/0 confirmed order submissions/);
  assert.match(text,/No aligned candle momentum/);assert.ok(!text.includes('PRIVATE_KEY'));assert.ok(!text.includes('PRIVATE_TOKEN'));assert.equal(f.e.state.records.length,0);
  f.e.connected=false;assert.match(f.e.scanDiagnostics().status,/Disconnected/);
- f.e.connected=true;f.e.auto=false;assert.match(f.e.scanDiagnostics().status,/Auto is stopped/);
+ f.e.connected=true;f.e.auto=false;assert.match(f.e.scanDiagnostics().status,/New entries are stopped/);
  f.e.auto=true;f.e.state.goalStopAt=Date.now();assert.match(f.e.scanDiagnostics().status,/session stop is locked/);
 });
 test('diagnostics distinguish unresolved entry errors from skipped or accepted entries',()=>{
