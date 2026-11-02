@@ -85,14 +85,19 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.58');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:10,strategy:'movers-momentum-v2',lossLimit:5,takeProfit:null,profitExit:'net-trailing',profitFloors:[2,4,6,8,10],profitStepAbove10:5,lossReduction:.25,lossReductionAt:3,sessionExit:'close-bot-positions',volatilitySizingAllowance:20,priceToleranceAtr:.75,breakoutRetestAtr:.1});
+ assert.equal(state.appVersion,'1.59');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:150,strategy:'bollinger-wr-5m',lossLimit:2,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
-test('phone trial commands are idempotent, persist expiry and Stop cancels queued activation',()=>fixture(async({app,request,connect,pair,dataDir})=>{
- await connect();const p=await pair(),options={mobile:true,cookie:p.cookie},start={id:'trial-start-0123456789',action:'startTrial',csrf:p.csrf};
+test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{
+ await connect();FakeEngine.last.bandRules=false;const p=await pair(),options={mobile:true,cookie:p.cookie},start={id:'trial-start-0123456789',action:'startTrial',csrf:p.csrf};
  await request('/mobile/command',start,options);await delay(15);const t={...app.snapshot().engine.state.oneHourTrial};assert.equal(t.until-t.startedAt,3600000);
  await request('/mobile/command',start,options);await delay(5);assert.equal(app.snapshot().engine.state.oneHourTrial.until,t.until);
  const file=fs.readdirSync(dataDir).find(x=>x.startsWith('journal-'));assert.ok(file);assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir,file))).oneHourTrial.until,t.until);
  await request('/mobile/command',{id:'trial-end-0123456789',action:'endTrial',csrf:p.csrf},options);await delay(10);assert.ok(app.snapshot().engine.state.oneHourTrial.endedAt);assert.equal(app.snapshot().engine.auto,true);
  FakeEngine.last.busy=true;await request('/host/command',{id:'trial-queue-0123456789',action:'startTrial'});await request('/host/command',{id:'trial-stop-0123456789',action:'stop'});FakeEngine.last.busy=false;await delay(70);assert.equal(app.snapshot().engine.auto,false);assert.equal(app.snapshot().engine.state.oneHourTrial.until,t.until);
+}));
+test('current laptop engine rejects obsolete experiment activation and keeps stopped intent',()=>fixture(async({app,request,connect})=>{
+ await connect();assert.equal(app.snapshot().engine.bandRules,true);
+ await request('/host/command',{id:'obsolete-trial-0123456789',action:'startTrial'});await delay(15);
+ const result=await request('/host/command?id=obsolete-trial-0123456789');assert.equal(result.json.status,'error');assert.match(result.json.error,/replaced/);assert.equal(app.snapshot().engine.auto,false);assert.equal(FakeEngine.last.starts,0);
 }));

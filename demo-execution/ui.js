@@ -50,6 +50,7 @@ function render(){
   $('again').disabled=!connected||e.busy||!e.state.startedAt||e.active().length>0||e.positions.some(p=>Number(p.positionAmt)!==0);
   $('entryStatus').textContent=e?(e.remote&&e.appVersion!==APP_VERSION?'Laptop engine '+(e.appVersion?'V'+e.appVersion:'version unknown')+' has not loaded the V'+APP_VERSION+' rules. Update/restart the laptop engine. ':'')+e.scanDiagnostics().status:'Disconnected: connect Binance Demo, then Start / Resume Demo.';
   const trial=e?.state?.oneHourTrial,trialActive=!!e?.trialActive();
+  $('trialPanel').hidden=e?.bandRules!==false;
   $('startTrial').disabled=!connected||!!e.controlPending||trialActive||!!e.state.goalStopAt||(e.remote&&e.appVersion!==APP_VERSION);
   $('endTrial').disabled=!connected||!!e.controlPending||!trialActive;
   const remaining=trialActive?Math.max(0,Math.ceil((trial.until-(Date.now()+(e.api.offset||0)))/1000)):0;
@@ -61,6 +62,10 @@ function render(){
   if(trialActive)$('leverageWindow').textContent='ONE-HOUR EXPERIMENT · up to $300 margin · adaptive 1–150× within Binance limits and fee allowance · confirmed momentum/breakout setups · close any negative after-fee estimate · net pullback $2 / $4 / $8 / $10 / +$5 · $100 net session stop';
   const capital=e.budgetStatus();$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · no position-count cap · '+(policy?'$'+policy.margin+' target margin/entry':'Previous engine entry settings; update required')+' · '+(policy?.profitExit==='net-trailing'?'paid commissions + partial results + funding + expected closing fee included':policy?.profitExit==='positive-estimate'?'closing estimates include fees · one 25% loss reduction · no stop loss':policy?.profitExit==='fixed'?'$'+policy.takeProfit+' net profit target includes estimated fees · no stop loss':'fees included in '+(policy?.lossLimit?'$'+policy.lossLimit:'recorded')+' loss target');
   if(trialActive)$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · up to $300 per experiment entry · fees can exceed $1 before the price moves';
+  if(policy?.profitExit==='bollinger-targets'){
+    $('leverageWindow').textContent='5m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · up to $300 margin, sized around a $2 total after-fee loss target · adaptive leverage within Binance limits, up to 150× · middle-band profit target; confirmed continuation exits before outer band';
+    $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · up to $300 per entry; smaller sizes keep room for the $2 loss target and fees';
+  }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
   $('balanceNote').textContent='Estimated conversion using Binance Demo asset indices; Binance website valuation may differ.';
@@ -78,10 +83,11 @@ function render(){
   $('incomeDiagnosis').textContent=!e.lastIncome?'Connect and sync to load actual results.':audit.net<0?(audit.realized<0?'Realized losses exceed realized gains. ':'Realized trading P&L is positive, but costs exceed it. ')+(audit.commission<0?'Commission reduces the wallet result. ':'')+'Review these actual results before changing the strategy.':'Booked trading result is nonnegative for this window. A wallet drop may involve an earlier period, a reset, transfers, or other income types excluded here.';
 
   const market=e.marketContext;
-  $('moversNote').textContent=(e.moversNote||'Loading eligible futures gainers and losers')+' · BTC 5m: '+(market?.side==='BUY'?'up':market?.side==='SELL'?'down':'mixed / unavailable')+' · Gainers/losers are past price changes, not profit predictions';
+  $('moversNote').textContent=(e.moversNote||'Loading eligible futures gainers and losers')+(e.bandRules?' · 5m band rebound + Williams %R required':' · BTC 5m: '+(market?.side==='BUY'?'up':market?.side==='SELL'?'down':'mixed / unavailable'))+' · Gainers/losers are past price changes, not profit predictions';
   const stats=e.scanStats;
   $('scanTiming').textContent=stats?'Last batch: '+stats.completed+'/'+stats.planned+' checks · '+(stats.elapsedMs/1000).toFixed(2)+'s · up to 3 coins checked concurrently · '+stats.dataErrors+' data errors':'Waiting for scan timings';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · repeats continuously · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
+  if(e.bandRules)$('scanTitle').textContent='Setups · futures gainers / losers · '+(e.scanChecked||0)+' checks · repeats continuously';
   for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),setupCell(s),new Date(s.at).toLocaleTimeString(),(s.phase||'Check')+' · scan '+((s.scanMs||0)/1000).toFixed(2)+'s'+(Number.isFinite(s.entryMs)?' · entry '+(s.entryMs/1000).toFixed(2)+'s':'')+(s.candleClosedAt?' · candle closed '+new Date(s.candleClosedAt).toLocaleTimeString():'')]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—','—']);
   $('positions').replaceChildren();
@@ -101,6 +107,12 @@ function render(){
     const exits=e.algos.filter(a=>a.symbol===p.symbol),note=document.createElement('small');note.textContent='TP / SL: '+(exits.map(a=>(a.orderType||a.type||'Conditional')+' '+(a.triggerPrice??a.stopPrice??'—')).join(' · ')||'No open conditional orders in last sync');card.append(note);
     if(r&&e.exitsSuspended(r)){const warning=document.createElement('p');warning.textContent='NO AUTOMATIC EXITS during experiment · restore after '+new Date(r.experimentUntil).toLocaleString()+' while app is connected';warning.className='bad';card.append(warning);}
     if(r?.sizingNote){const sizing=document.createElement('p');sizing.textContent=r.sizingNote;card.append(sizing);}
+    if(r?.exitPolicy==='bollinger-targets'){
+      field(grid,'Estimated total net after fees',money(r.netEstimate),Number.isFinite(r.netEstimate)?(r.netEstimate<0?'bad pnl':'good pnl'):'');
+      field(grid,'Middle-band target',r.bandTargets?.middle??'Loading');field(grid,'Before-outer-band target',r.bandTargets?.outer??'Loading');
+      field(grid,'Profit stage',r.bandTargets?.stage==='outer'?'Continuation confirmed; protect middle band':'Middle band first');
+      const note=document.createElement('p'),c=r.closingEstimate;note.textContent='$2 total after-fee loss target · no loss timer or partial reduction. Profit exits require a positive closing-net estimate. '+(c?'Paid commission $'+money(c.paidCommission)+' · estimated closing fee $'+money(c.closingFee):'Waiting for fee history')+(r.estimateError?' · '+r.estimateError:'');card.append(note);
+    }
     if(['net-trailing','trial-net-trailing'].includes(r?.exitPolicy)){
       field(grid,'Estimated total trade net (USDT)',money(r.netEstimate),Number.isFinite(r.netEstimate)?(r.netEstimate<0?'bad pnl':'good pnl'):'');
       const target=document.createElement('p');target.textContent='Net profit floor: '+(Number.isFinite(r.profitFloor)?'$'+money(r.profitFloor):'not armed until net exceeds $2')+' · Highest net since this policy: '+money(r.trailPeak)+' · Floors: $2 → $4 → $6 → $8 → $10 → $15 → $20… · Close on pullback; no deliberate profit exit below $2';card.append(target);

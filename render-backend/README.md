@@ -10,10 +10,12 @@ The existing dashboard is not yet wired to this service: its assigned URL is nee
 
 The free service can sleep/restart and has no durable storage. No unattended 24-hour trading guarantee. Exchange order reconciliation must precede any retry after an ambiguous write failure. Do not use live account credentials.
 
-## V1.58 fee accounting and experiment recovery update
+## V1.59 strategy and connector update
 
-Update this folder and `demo-execution` together, then restart the Windows connector. V1.58 allows signed, Demo-only `GET /fapi/v1/userTrades` so the engine can read commissions and realized partial-close results. An older relay rejects this read; refreshing only the website does not update the running backend. It also allows the signed Demo-only `GET /fapi/v1/leverageBracket` read for the one-hour experiment. No live host or new Binance write endpoint is enabled. Authenticated desktop/mobile controls can start the experiment or restore normal entries; the deadline is persisted in the existing journal. Updating or restarting does not activate an experiment or resume stopped Auto by itself.
+Update this folder and `demo-execution` together, then restart the Windows connector with `START-LAPTOP.cmd`. Keep the existing laptop journal data. Refreshing only the website cannot replace the loaded backend or background engine.
 
-V1.58 exposes automatic retry timing in laptop snapshots. The updated engine handles an unavailable leverage-bracket read without stopping Auto, checks fee-history support before entry, and filters experiment setups. Update both source folders and restart the running connector; changing only GitHub Pages cannot replace a loaded background engine.
+V1.59 uses 5m Bollinger / Williams %R signals from Futures gainers and losers, Bollinger profit targets, and a $2 after-fee loss target. The one-hour experiment is replaced. Snapshots report the actual engine version, `bandRules` and policy so the web/mobile controls can display the correct rules. Updating/restarting does not resume stopped Auto by itself; reconnect and Start once.
 
-V1.58 includes timeframe-aware entry checks, adaptive experiment leverage and a prominent old-connector warning. Replace both `demo-execution` and `render-backend`; keep the existing laptop journal data. The page download link points to the current repository ZIP. Restart `START-LAPTOP.cmd` and reconnect after the update.
+The relay permits signed Demo-only `GET /fapi/v1/userTrades` for paid commissions and realized partial-close results and `GET /fapi/v1/leverageBracket` for exchange leverage limits. Older relays reject these reads. Fee-history preflight blocks entries with an actionable update warning; missing costs are never invented. An unavailable bracket read can fall back to confirmed leverage-setting responses. Temporary read errors retry automatically while preserving explicit Stop. Unknown writes and authentication errors still require resolution.
+
+No live host or new Binance write endpoint is enabled. Replace both folders, preserve journals, and restart; a GitHub Pages refresh alone is insufficient.
