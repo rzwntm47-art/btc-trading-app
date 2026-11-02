@@ -85,7 +85,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.60');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'exchange-maximum',maxLeverage:150,strategy:'bollinger-wr-5m',lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.61');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{

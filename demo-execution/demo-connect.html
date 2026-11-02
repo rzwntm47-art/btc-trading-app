@@ -4,7 +4,7 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.60</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.61</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for USDT cross-margin trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="pairMobile" type="button">Pair Mobile</button><button id="copyScanDiagnostics">Copy scan diagnostics</button><button id="copyTradeReport">Copy trade report</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" hidden disabled>New $100 session</button></div>
 
@@ -30,26 +30,27 @@ body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2
 <div class="actions"><button id="makeQr" type="button" class="primary">Generate mobile QR</button><button id="revokePhones" type="button">Revoke all phones</button></div>
 <div id="pairQr" hidden><img id="pairQrImage" alt="One-time mobile pairing QR code" style="display:block;width:min(300px,100%);height:auto;background:white;margin:16px 0"><p id="pairQrNote"></p><a id="pairLink" target="_blank" rel="noopener noreferrer">Open mobile controller</a></div>
 </section><p id="backgroundNote" hidden role="status"></p>
-<textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><section id="trialPanel" hidden><h2>Previous engine experiment</h2><p>The one-hour experiment is replaced by the 5m Bollinger / Williams %R strategy in V1.60. Update and restart an older laptop engine to apply the new rules.</p><div class="actions"><button id="startTrial" type="button" disabled>Previous experiment</button><button id="endTrial" type="button" disabled>End previous experiment</button></div><p id="trialStatus" role="status">Replaced by the current strategy.</p></section>
+<textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><section id="trialPanel" hidden><h2>Previous engine experiment</h2><p>The one-hour experiment is replaced by the 1–10m / 15m / 20m / 30m / 60m Bollinger / Williams %R strategy in V1.61. Update and restart an older laptop engine to apply the new rules.</p><div class="actions"><button id="startTrial" type="button" disabled>Previous experiment</button><button id="endTrial" type="button" disabled>End previous experiment</button></div><p id="trialStatus" role="status">Replaced by the current strategy.</p></section>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
-<section aria-labelledby="entryStatusHeading"><h2 id="entryStatusHeading">Entry status — works with zero trades</h2><p id="entryStatus" role="status">Connect Binance Demo to load scanning status.</p><small>Shows whether Auto is stopped, data is delayed, candle setups fail, or entry checks reject them. Copy scan diagnostics works without trades and without an account refresh.</small><textarea id="scanDiagnosticsText" hidden readonly aria-label="Scan diagnostics" style="width:100%;height:220px"></textarea></section><p id="leverageWindow">5m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · Cross · $300 margin per trade · maximum Binance-accepted leverage · $6 after-fee loss target</p><small>Middle-band profit target first. With confirmed continuation, hold toward a target before the opposite outer band. No dollar profit ladder, loss timer or partial-loss reduction. The $100 net session target closes bot positions and stops entries. Manual close remains available.</small>
+<section aria-labelledby="entryStatusHeading"><h2 id="entryStatusHeading">Entry status — works with zero trades</h2><p id="entryStatus" role="status">Connect Binance Demo to load scanning status.</p><small>Shows whether Auto is stopped, data is delayed, candle setups fail, or entry checks reject them. Copy scan diagnostics works without trades and without an account refresh.</small><textarea id="scanDiagnosticsText" hidden readonly aria-label="Scan diagnostics" style="width:100%;height:220px"></textarea></section><p id="leverageWindow">1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · Cross · $300 margin per trade · highest fee-compatible Binance leverage · $6 after-fee loss target</p><small>Middle-band profit target first. With confirmed continuation, hold toward a target before the opposite outer band. No dollar profit ladder, loss timer or partial-loss reduction. The $100 net session target closes bot positions and stops entries. Manual close remains available.</small>
 <section><h2>Available USDT · margin allocation</h2><b id="budgetValue">Awaiting account</b><small>Uses USDT collateral only; no BTC or USDC conversions. Cross positions share available USDT. Exit thresholds use total trade net after paid commissions, partial-close results, funding and estimated closing fees. A -$6 exit is a target, not a guaranteed maximum: market gaps, slippage and fees can change the fill. At $100 estimated net after closing fees, all bot positions close and new entries stop.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>Binance unrealized P&amp;L · USDT positions</small><b id="unrealized">—</b><small id="unrealizedNote">Open positions only · before commissions and funding</small></div></div>
-<section><h2>Net trading result · $100 target</h2><b id="session">—</b><small id="sessionNote">Awaiting trading window</small><p id="pnlEquation"></p><small>Compare the unrealized box above with Binance unrealized P&amp;L. This net result includes booked trading results and costs; it is a different measure.</small></section><section><h2>Why is my USDT wallet changing?</h2><p id="incomeAudit">Awaiting Binance income history</p><p id="incomeDiagnosis"></p><small>Account-wide USDT realized P&amp;L, commission and funding since the displayed trading-day/reset start. Includes manual trades; excludes transfers, asset resets and other income types. Open profit is not booked profit. This is not a full wallet reconciliation. Share this panel to diagnose losses; never share API keys.</small></section><div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><small id="moversNote">Futures gainers / losers · 5m Bollinger + Williams %R</small><small id="scanTiming">Waiting for scan timings</small><small>Signals use completed candles. Expand each row to see the band and Williams %R check. Signal rules, entry checks and network errors are shown separately; a qualifying signal is not yet a filled order.</small><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th><th>Stage / elapsed time</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
+<section><h2>Net trading result · $100 target</h2><b id="session">—</b><small id="sessionNote">Awaiting trading window</small><p id="pnlEquation"></p><small>Compare the unrealized box above with Binance unrealized P&amp;L. This net result includes booked trading results and costs; it is a different measure.</small></section><section><h2>Why is my USDT wallet changing?</h2><p id="incomeAudit">Awaiting Binance income history</p><p id="incomeDiagnosis"></p><small>Account-wide USDT realized P&amp;L, commission and funding since the displayed trading-day/reset start. Includes manual trades; excludes transfers, asset resets and other income types. Open profit is not booked profit. This is not a full wallet reconciliation. Share this panel to diagnose losses; never share API keys.</small></section><div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><small id="moversNote">Futures gainers / losers · 1–10m / 15m / 20m / 30m / 60m Bollinger + Williams %R</small><small id="scanTiming">Waiting for scan timings</small><small>Signals use completed candles. Expand each row to see the band and Williams %R check. Signal rules, entry checks and network errors are shown separately; a qualifying signal is not yet a filled order.</small><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th><th>Stage / elapsed time</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
 <p id="browserRequirement"><small>Browser mode: switching tabs or viewing the paper simulator does not stop Demo Auto. Keep this app tab open and the computer awake. Chrome may delay or suspend background work; closing this tab or shutting down cannot automatically close positions. Bollinger profit exits and the $100 session close require the engine running. Accepted Binance STOP_MARKET loss exits remain active if the engine stops; they cannot guarantee an exact dollar fill.</small></p><details open><summary>Activity &amp; connection</summary><div id="log"></div></details>
 <details><summary>How this demo works</summary>
 <p>The top 20 eligible USDⓈ-M Futures demo gainers are LONG candidates; the top 20 losers are SHORT candidates. Rankings refresh once per minute. Eight rotating candidates and recent qualifying setups repeat continuously, with up to three public checks at once. Rankings describe past 24-hour changes, not future profit. Other coins are not traded by this strategy.</p>
-<p>Use completed 5-minute candles with Bollinger Bands (20-period simple average, two population standard deviations) and Williams %R (14 periods). A LONG needs a lower-band touch on the last two candles, Williams %R at or below -80 on one of those candles, then a rising bullish close back above the lower band with improving %R. SHORT uses the reverse: upper-band touch, %R at or above -20, and a falling bearish close back below the upper band. Williams %R measures price within its recent high-low range; it is not a percentage of buyers or sellers. A band touch alone is not an entry.</p>
-<p>Do not chase a setup that has already reached the middle band. Check current quotes, spread, fees, exchange limits and fresh 1m direction before entry. A small 1m pullback is allowed, but a sharp or sustained reversal is rejected. The middle-band distance must exceed twice the estimated round-trip fee per unit. Rejected candidates do not turn Auto off. Temporary read failures retry; unknown order outcomes must be reconciled before more entries.</p>
-<p>Each new trade targets $300 USDT margin, rounded up to Binance’s quantity step, within a $5,000 total margin budget. Use the highest Binance-accepted leverage that permits the full position size. A notional or quantity limit can require lower leverage; the app does not shrink the margin to fit. Insufficient margin plus fees skips the entry. If fees and spread already consume the $6 after-fee loss target, skip and show the reason instead of opening and immediately closing. Market fills can change actual margin. Existing positions are not topped up or releveraged. One position per symbol; ten-minute cooldown after a close. Cross positions share USDT collateral.</p>
+<p>Independently check completed 1–10 minute candles, plus 15m, 20m, 30m and 60m candles with Bollinger Bands (20-period simple average, two population standard deviations) and Williams %R (14 periods). A LONG needs a lower-band touch on the last two candles, Williams %R at or below -80 on one of those candles, then a rising bullish close back above the lower band with improving %R. SHORT uses the reverse: upper-band touch, %R at or above -20, and a falling bearish close back below the upper band. Williams %R measures price within its recent high-low range; it is not a percentage of buyers or sellers. A band touch alone is not an entry. The 2–4m and 6–10m candles use complete UTC-aligned 1m groups; longer frames use complete 5m groups. Each timeframe is independent. Only two shared candle datasets are needed per coin.</p>
+<p>Do not chase a setup that has already reached the middle band. Check current quotes, spread, fees, exchange limits and fresh 1m direction before entry. A 1m entry revalidates its Bollinger reversal. Longer entries allow a small 1m pullback but reject a sharp or sustained reversal. The middle-band distance must exceed twice the estimated round-trip fee per unit. Rejected candidates do not turn Auto off. Temporary read failures retry; unknown order outcomes must be reconciled before more entries.</p>
+<p>Each new trade targets $300 USDT margin, rounded up to Binance’s quantity step, within a $5,000 total margin budget. Use the highest Binance-accepted leverage that permits the full position size and leaves room for the $6 after-fee stop. Lower leverage when needed for fees, spread and tick size. A notional or quantity limit can require lower leverage; the app does not shrink the margin to fit. Insufficient margin plus fees skips the entry. If no supported leverage leaves room for the $6 after-fee loss target, skip and show the reason. Market fills can change actual margin. Existing positions are not topped up or releveraged. One position per symbol; ten-minute cooldown after a close. Cross positions share USDT collateral.</p>
 <p>Estimated total trade net = realized partial-close P&amp;L − commissions already paid + funding + remaining P&amp;L at an executable closing price − estimated closing commission. Matched Binance execution history is required. This differs from Binance unrealized P&amp;L, which excludes costs. Unknown costs defer profit exits rather than being treated as zero.</p>
-<p>At the middle band, close only when the fresh total net estimate is positive. Continue toward the opposite outer band only if a fresh closed 1m candle after entry confirms momentum beyond the middle and 5m Williams %R supports that direction. The continuation target is 90% of the distance from the middle to the opposite outer band. Once extended, freeze those targets: close before the outer band or on a pullback to the middle, while estimated total net remains positive. Before extension, targets follow fresh closed 5m bands. Recheck price and paid/estimated fees before submitting any profit close. There is no guaranteed profit or exact fill.</p>
+<p>At the middle band, close only when the fresh total net estimate is positive. Continue toward the opposite outer band only if a fresh closed 1m candle after entry confirms momentum beyond the middle and the entry timeframe’s Williams %R supports that direction. The continuation target is 90% of the distance from the middle to the opposite outer band. Once extended, freeze those targets: close before the outer band or on a pullback to the middle, while estimated total net remains positive. Before extension, targets follow fresh closed bands on the entry timeframe. Recheck price and paid/estimated fees before submitting any profit close. There is no guaranteed profit or exact fill.</p>
 <p>Close the full remaining bot position at -$6 estimated total trade net. Install a Binance STOP_MARKET backup, adjusted for paid fees and booked results. No timed loss rule and no 25% loss trim. Confirm the replacement stop before cancelling older bot exits. Existing bot positions migrate to these rules when the updated engine reconciles them; previous partial-close losses still count. Stops trigger on mark price; gaps, slippage, network delays and execution fees can exceed $6.</p>
-<p>At $100 estimated account-wide net after expected closing fees, close all bot positions, including losers, and stop new entries. The decision remains latched while unresolved orders are reconciled. Unmanaged positions are not closed. Final booked net can differ. Updating the website does not update a running laptop connector: replace its files and restart it to load V1.60.</p>
+<p>At $100 estimated account-wide net after expected closing fees, close all bot positions, including losers, and stop new entries. The decision remains latched while unresolved orders are reconciled. Unmanaged positions are not closed. Final booked net can differ. Updating the website does not update a running laptop connector: replace its files and restart it to load V1.61.</p>
 </details>
 </main><script>
 'use strict';
-const APP_VERSION='1.60';
+const APP_VERSION='1.61';
+const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
@@ -147,7 +148,7 @@ function twoMinuteBars(raw,now){
   return result;
 }
 function aggregateMinutes(raw,now,minutes){
-  if(![2,3,4,5].includes(minutes))throw new DemoError('Unsupported aggregation');
+  if(!Number.isInteger(minutes)||minutes<2||minutes>10)throw new DemoError('Unsupported aggregation');
   twoMinuteBars(raw,now); // validate underlying 1m candle times
   const bars=raw.filter(b=>number(b[6])<now),out=[],ms=minutes*60000;
   for(let i=0;i+minutes<=bars.length;i++){
@@ -245,7 +246,7 @@ function signalLeverageCeiling(signal,market,now){
   return fresh&&market.side===signal.side?base:Math.min(3,base);
 }
 function selectEntryCandidate(primary,{price,fee,now,traded=()=>false,confirm=()=>null,intervals=[1,2,3,4,5,10,15,20,30,60]}){
-  const choices=[primary,...(Array.isArray(primary.alternatives)?primary.alternatives:[])].slice(0,10),checks=[];
+  const choices=[primary,...(Array.isArray(primary.alternatives)?primary.alternatives:[])].slice(0,intervals.length),checks=[];
   for(const candidate of choices){
     const {alternatives,...signal}=candidate,intervalMs=signal.intervalMs||300000;
     let reason;
@@ -302,6 +303,14 @@ function entryMomentum(raw,side,now){
 }
 function entryConfirmation(raw,signal,now){
   const current=entryMomentum(raw,signal.side,now),minutes=(signal.intervalMs||300000)/60000;
+  if(signal.setupType==='bollinger-wr'&&minutes===1){
+    // A lower-band rebound is below the 20-close middle by definition. Requiring
+    // the momentum strategy's close > fast > slow here would reject every LONG
+    // (and the mirrored SHORT). Revalidate the actual reversal strategy instead.
+    let reason;
+    const fresh=bollingerSetup(raw,signal.side,now,r=>reason=r,60000);
+    return {...current,reason:fresh?null:'Latest 1m band setup: '+reason,signalMinutes:1,confirmation:'Fresh Bollinger / Williams %R reversal'};
+  }
   if(minutes<=1||!current.reason)return {...current,signalMinutes:minutes};
   if(!(current.atr>0)||!Number.isFinite(current.closedAt))return current;
   const sign=signal.side==='BUY'?1:-1;
@@ -358,10 +367,11 @@ function adaptiveLeveragePlan({price,atr,fee,lossLimit,side,tick,plan,maxLeverag
 }
 function trialProfitFloor(peak){if(!Number.isFinite(peak)||peak<=2)return null;const levels=[2,4,8,10];if(peak<=10)return levels.filter(v=>v<peak).at(-1);return 10+5*Math.max(0,Math.ceil((peak-10)/5)-1);}
 function netProfitFloor(peak){if(!Number.isFinite(peak)||peak<=2)return null;if(peak<=10)return Math.max(2,2*(Math.ceil(peak/2)-1));return 10+5*Math.max(0,Math.ceil((peak-10)/5)-1);}
-function bollingerSnapshot(raw,now){
-  breakout(raw,now,300000);
+function bollingerSnapshot(raw,now,intervalMs=300000){
+  if(!BAND_TIMEFRAMES.includes(intervalMs/60000))throw new DemoError('Unsupported Bollinger timeframe');
+  breakout(raw,now,intervalMs);
   const bars=raw.filter(b=>number(b[6])<now);
-  if(bars.length<21||now-number(bars.at(-1)[6])>315000)return null;
+  if(bars.length<21||now-number(bars.at(-1)[6])>intervalMs+15000)return null;
   const calculate=rows=>{
     const closes=rows.slice(-20).map(b=>number(b[4])),middle=closes.reduce((s,x)=>s+x,0)/20;
     const deviation=Math.sqrt(closes.reduce((s,x)=>s+(x-middle)**2,0)/20),last=rows.at(-1);
@@ -373,23 +383,23 @@ function bollingerSnapshot(raw,now){
   const atr=bars.slice(-20).reduce((sum,b,i)=>sum+Math.max(number(b[2])-number(b[3]),Math.abs(number(b[2])-number(bars[bars.length-21+i][4])),Math.abs(number(b[3])-number(bars[bars.length-21+i][4]))),0)/20;
   return {...current,previous,atr};
 }
-function bollingerSetup(raw,side,now,explain=()=>{}){
-  const reject=reason=>{explain(reason);return null;},b=bollingerSnapshot(raw,now);
-  if(!b||!(b.atr>0)||b.wr===null||b.previous.wr===null||!(b.upper>b.lower))return reject('Fresh 5m Bollinger / Williams %R history unavailable');
+function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
+  const reject=reason=>{explain(reason);return null;},b=bollingerSnapshot(raw,now,intervalMs),frame=intervalMs/60000+'m';
+  if(!b||!(b.atr>0)||b.wr===null||b.previous.wr===null||!(b.upper>b.lower))return reject('Fresh '+frame+' Bollinger / Williams %R history unavailable');
   const buy=side==='BUY',p=b.previous;
   if(!['BUY','SELL'].includes(side))return reject('Not in the current futures gainers/losers list');
   const touched=buy?(p.low<=p.lower||b.low<=b.lower):(p.high>=p.upper||b.high>=b.upper);
-  if(!touched)return reject(buy?'No lower-band touch on the last two 5m candles':'No upper-band touch on the last two 5m candles');
+  if(!touched)return reject('No '+(buy?'lower':'upper')+'-band touch on the last two '+frame+' candles');
   if(!(buy?Math.min(p.wr,b.wr)<=-80:Math.max(p.wr,b.wr)>=-20))return reject('Williams %R has not reached the required extreme');
-  if(!(buy?b.close>b.open&&b.close>p.close&&b.wr>p.wr&&b.close>b.lower:b.close<b.open&&b.close<p.close&&b.wr<p.wr&&b.close<b.upper))return reject('Band touched; waiting for a closed 5m bounce/rejection');
+  if(!(buy?b.close>b.open&&b.close>p.close&&b.wr>p.wr&&b.close>b.lower:b.close<b.open&&b.close<p.close&&b.wr<p.wr&&b.close<b.upper))return reject('Band touched; waiting for a closed '+frame+' bounce/rejection');
   if(!(buy?b.close<b.middle:b.close>b.middle))return reject('Middle-band target already reached; do not chase');
   const outerTarget=b.middle+.9*((buy?b.upper:b.lower)-b.middle),strength=1+Number(buy?p.wr<=-90:p.wr>=-10);
-  return {side,price:b.close,close:b.closedAt,high:b.high,low:b.low,atr:b.atr,stopDistance:1.5*b.atr,qualityConfirmed:true,strength,leverage:3,intervalMs:300000,setupType:'bollinger-wr',bands:{...b,outerTarget},invalidationPrice:buy?b.lower:b.upper};
+  return {side,price:b.close,close:b.closedAt,high:b.high,low:b.low,atr:b.atr,stopDistance:1.5*b.atr,qualityConfirmed:true,strength,leverage:3,intervalMs,setupType:'bollinger-wr',bands:{...b,outerTarget},invalidationPrice:buy?b.lower:b.upper};
 }
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
-    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'exchange-maximum',maxLeverage:150,strategy:'bollinger-wr-5m',lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -401,7 +411,7 @@ class DemoEngine {
     return !!(this.newRules&&t&&Number.isFinite(t.startedAt)&&Number.isFinite(t.until)&&t.until-t.startedAt===3600000&&!t.endedAt&&now>=t.startedAt&&now<t.until);
   }
   async startTrial(){
-    if(this.bandRules)throw new DemoError('The one-hour experiment was replaced by the 5m Bollinger strategy. Use Start / Resume Demo.');
+    if(this.bandRules)throw new DemoError('The one-hour experiment was replaced by the multi-timeframe Bollinger strategy. Use Start / Resume Demo.');
     if(!this.newRules)throw new DemoError('Update the engine before starting the one-hour experiment');
     if(this.trialActive())return false; // repeated clicks never extend an active hour
     const epoch=this.stopEpoch;await this.start();
@@ -441,7 +451,7 @@ class DemoEngine {
   }
   async initialize(){
     this.pause();
-    if(this.bandRules&&this.state.oneHourTrial&&!this.state.oneHourTrial.endedAt){this.state.oneHourTrial.endedAt=Date.now()+this.api.offset;this.state.oneHourTrial.endReason='Replaced by 5m Bollinger strategy';this.save();}
+    if(this.bandRules&&this.state.oneHourTrial&&!this.state.oneHourTrial.endedAt){this.state.oneHourTrial.endedAt=Date.now()+this.api.offset;this.state.oneHourTrial.endReason='Replaced by multi-timeframe Bollinger strategy';this.save();}
     // The previously working account read must not depend on trading-only routes.
     await this.refreshBalance();this.connected=true;this.notify();
     try{await this.prepareTrading();await this.reconcile();await this.updateIncome();this.event('Demo connected. Auto entries are stopped until Start Demo Auto.');}
@@ -637,7 +647,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 5m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest Binance-accepted leverage for that size · $6 after-fee loss target · Bollinger profit targets · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 after-fee loss target · Bollinger profit targets · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -787,7 +797,7 @@ class DemoEngine {
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     let candidateChecks;
     if(this.newRules){
-      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,...(trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),confirm:candidate=>entryConfirmation(minuteBars,candidate,Date.now()+this.api.offset).reason,traded:candidate=>this.state.records.some(r=>r.symbol===symbol&&r.signalClose===candidate.close)});
+      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,...(band?{intervals:BAND_TIMEFRAMES}:trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),confirm:candidate=>entryConfirmation(minuteBars,candidate,Date.now()+this.api.offset).reason,traded:candidate=>this.state.records.some(r=>r.symbol===symbol&&r.signalClose===candidate.close)});
       candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
       if(!selection.signal)return skip('No entry-ready timeframe: '+candidateChecks.map(c=>c.minutes+'m '+c.reason).join(' | '));
       signal=selection.signal;progress('Selected '+signal.intervalMs/60000+'m '+(signal.setupType||'breakout')+' after price and commission checks');
@@ -821,13 +831,29 @@ class DemoEngine {
       return {quantity,qty,notional};
     };
     if(this.newRules&&!flexible&&(available<ENTRY_MARGIN||marginRoom<ENTRY_MARGIN))return skip('Waiting for at least $300 free margin plus fees; scanning continues');
-    if(this.newRules&&!trial&&signal.intervalMs===60000&&2*momentum.atr<=3*(2*price*fee))return skip('Recent 1m movement is too small relative to round-trip fees; scanning continues');
+    if(this.newRules&&!band&&!trial&&signal.intervalMs===60000&&2*momentum.atr<=3*(2*price*fee))return skip('Recent 1m movement is too small relative to round-trip fees; scanning continues');
     const trialCeiling=flexible?await this.trialLeverageCeiling(symbol):null;
     const leverageCeiling=flexible?trialCeiling:this.newRules?signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset):preferredLeverage;
-    const adaptive=band?{leverage:leverageCeiling,marginTarget:ENTRY_MARGIN,leverageMode:'exchange-maximum',maxLossTarget:6}:this.newRules?adaptiveLeveragePlan({price,atr:momentum.atr,fee,lossLimit:ENTRY_VOLATILITY_ALLOWANCE,side:signal.side,tick:priceFilter.tickSize,plan:minimumPlan,maxLeverage:leverageCeiling,requireStop:false,...(trial?{leverageLimit:150,maxFees:2}:{})}):null;
+    let adaptive;
+    if(band){
+      // Test every integer locally before changing the exchange setting. Keep
+      // $300 margin; reduce leverage when fees/spread would consume the stop.
+      try{
+        const [quote,currentMark]=await Promise.all([this.entryRead('/fapi/v1/ticker/bookTicker',{symbol},false),this.entryRead('/fapi/v1/premiumIndex',{symbol},false)]);
+        const quotedPrice=number(signal.side==='BUY'?quote.askPrice:quote.bidPrice);
+        let reason='No leverage leaves room for the $6 after-fee stop';
+        for(let candidate=leverageCeiling;candidate>=1;candidate--){
+          const size=minimumPlan(candidate,quotedPrice),check=entryQuoteCheck(quote,currentMark,{symbol,side:signal.side,qty:size.qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
+          if(check.reason){reason=check.reason;continue;}
+          if(size.notional/candidate>marginRoom+1e-8||size.notional/candidate+check.estimatedRoundTripFees>available+1e-8){reason='Not enough margin plus fees for the full $300 entry';continue;}
+          adaptive={leverage:candidate,marginTarget:ENTRY_MARGIN,leverageMode:'highest-fee-compatible',maxLossTarget:6,exchangeCeiling:leverageCeiling,estimatedRoundTripFees:check.estimatedRoundTripFees,estimatedImmediateExitNet:check.estimatedImmediateExitNet};break;
+        }
+        if(!adaptive)return skip('No fee-compatible leverage for $300 margin: '+reason+'; scanning continues');
+      }catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skip('Leverage cost check unavailable; scanning continues: '+error.message);}
+    }else adaptive=this.newRules?adaptiveLeveragePlan({price,atr:momentum.atr,fee,lossLimit:ENTRY_VOLATILITY_ALLOWANCE,side:signal.side,tick:priceFilter.tickSize,plan:minimumPlan,maxLeverage:leverageCeiling,requireStop:false,...(trial?{leverageLimit:150,maxFees:2}:{})}):null;
     if(this.newRules&&!adaptive)return skip(trial?'Entry exceeds the volatility or $2 estimated commission allowance even at 1×; scanning continues':'$300 margin exceeds the entry volatility and fee allowance, even at 1×; scanning continues');
     const requestedLeverage=this.newRules?adaptive.leverage:preferredLeverage;
-    progress(band?'Checking maximum Binance leverage for $300 margin, starting at '+requestedLeverage+'×':'Configuring '+requestedLeverage+'× based on recent volatility, fees and Binance limits');
+    progress(band?'Checking highest fee-compatible Binance leverage for $300 margin, starting at '+requestedLeverage+'× (exchange ceiling '+leverageCeiling+'×)':'Configuring '+requestedLeverage+'× based on recent volatility, fees and Binance limits');
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
     let leverage,selectedLeverage,minimumSize;
     if(this.newRules){
@@ -921,12 +947,12 @@ class DemoEngine {
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,entryAppVersion:APP_VERSION,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?8:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,takeProfit:null,exitPolicy:this.newRules?'net-trailing':signal.exitPolicy,exits:[],protected:false,exitsReady:false};
     if(trial){r.oneHourTrial={...this.state.oneHourTrial};r.rulesVersion=9;r.exitPolicy='trial-net-trailing';r.lossLimit=1;}
-    if(band){r.rulesVersion=11;r.exitPolicy='bollinger-targets';r.lossLimit=6;r.bandTargets={middle:signal.bands.middle,outer:signal.bands.outerTarget,stage:'middle',closedAt:signal.close};}
+    if(band){r.rulesVersion=11;r.exitPolicy='bollinger-targets';r.lossLimit=6;r.bandTargets={middle:signal.bands.middle,outer:signal.bands.outerTarget,stage:'middle',closedAt:signal.close,intervalMs:signal.intervalMs};}
     r.estimatedEntryMargin=notional/selectedLeverage;
     if(this.newRules)r.entryEvidence={oneMinute:momentum,candidateChecks,...quoteEvidence,requestedLeverage,selectedLeverage,adaptiveSizing:{...adaptive,leverageCeiling},marketContext:this.marketContext||null,marketSource:signal.marketSource||{type:'full-market'}};
     r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $300 target margin; adaptive leverage up to 10× based on candle agreement, BTC market context, 1m volatility, fees and exchange limits; trailing net profit from $2; trim 25% at -$3; close at -$5; market fill margin may differ';
     if(trial)r.sizingNote='One-hour experiment · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · any negative estimated total net closes immediately when detected; fees alone can cause closure · net pullback floors $2 / $4 / $8 / $10 / +$5';
-    if(band)r.sizingNote='5m Bollinger / Williams %R · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · $300 margin target; maximum Binance-accepted leverage · $6 after-fee loss target · middle band first; confirmed continuation targets before the outer band';
+    if(band)r.sizingNote=signal.intervalMs/60000+'m Bollinger / Williams %R · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · $300 margin target; highest fee-compatible Binance leverage · $6 after-fee loss target · middle band first; confirmed continuation targets before the outer band';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -1107,13 +1133,14 @@ class DemoEngine {
   }
   async reconcileBandExits(r,p){
     if(r.rulesVersion!==11){r.rulesVersion=11;r.lossLimit=6;r.exitPolicy='bollinger-targets';r.profitFloor=null;r.trailPeak=null;r.lossSince=null;r.tradeAccounting=null;this.save();}
-    r.sizingNote='5m Bollinger / Williams %R · $6 total after-fee loss target · middle band first, then before outer band only with confirmed continuation · no timed loss or partial-loss rule';
+    const intervalMs=r.bandTargets?.intervalMs??(r.signal?.setupType==='bollinger-wr'?r.signal.intervalMs:null)??300000;
+    r.sizingNote=intervalMs/60000+'m Bollinger / Williams %R · $6 total after-fee loss target · middle band first, then before outer band only with confirmed continuation · no timed loss or partial-loss rule';
     try{
       const net=await this.closingEstimate(r,p);
       if(net<=-6){await this.close(r.symbol,'$6 net trade loss',{bandLoss:true});return;}
       await this.ensureLossStop(r,p);if(r.closedAt||r.pendingClose)return;
-      const snapshot=bollingerSnapshot(await this.scanBars(r.symbol,'5m',60),Date.now()+this.api.offset);
-      if(!snapshot)throw new DemoError('Fresh 5m bands unavailable; exchange loss stop remains active');
+      const snapshot=bollingerSnapshot(await this.bandCandles(r.symbol,intervalMs/60000),Date.now()+this.api.offset,intervalMs);
+      if(!snapshot)throw new DemoError('Fresh '+intervalMs/60000+'m bands unavailable; exchange loss stop remains active');
       const buy=r.side==='BUY',sign=buy?1:-1;
       r.bandTargets??={stage:'middle'};
       const target=r.bandTargets;
@@ -1270,6 +1297,15 @@ class DemoEngine {
     return bars;
   }
   async scanTrendBars(symbol,controller){return this.scanBars(symbol,'5m',300,controller);}
+  async bandCandles(symbol,minutes,controller,datasets=new Map()){
+    if(!BAND_TIMEFRAMES.includes(minutes))throw new DemoError('Unsupported Bollinger timeframe');
+    const interval=minutes===5||minutes>10?'5m':'1m',limit=interval==='5m'?300:250;
+    // Share two native datasets across all 14 independently evaluated frames.
+    // Cache failures for this scan too, avoiding repeated calls to a failing read.
+    if(!datasets.has(interval))datasets.set(interval,this.scanBars(symbol,interval,limit,controller));
+    const raw=await datasets.get(interval),now=Date.now()+this.api.offset;
+    return minutes===1||minutes===5?raw:minutes<=10?aggregateMinutes(raw,now,minutes):aggregateFiveMinuteBars(raw,now,minutes);
+  }
   async scanRiskCheck(){
     if(!this.connected||!this.tradingReady||!this.active().length||Date.now()-(this.positionAt||0)<this.exitPollMs())return;
     const positions=await this.api.call('GET','/fapi/v3/positionRisk');
@@ -1308,11 +1344,24 @@ class DemoEngine {
   }
   async scanCandidate(symbol,mover,epoch,controller){
     if(this.newRules&&this.bandRules){
-      const startedAt=Date.now();let reason='Waiting for 5m Bollinger setup',signal=null;
-      if(mover)signal=bollingerSetup(await this.scanBars(symbol,'5m',60,controller),mover.side,Date.now()+this.api.offset,r=>reason=r);
-      else reason='Not in the current futures gainers/losers list';
-      if(signal)signal.marketSource={type:mover.side==='BUY'?'gainer':'loser',change24h:mover.change};
-      return {symbol,mover,signal,reason,foundCandidate:!!signal,intervalMs:300000,scanMs:Date.now()-startedAt,candleClosedAt:signal?.close||null,checks:[{minutes:5,side:signal?.side||'WAIT',reason:signal?'Band rebound confirmed · Williams %R '+signal.bands.wr.toFixed(1):reason}]};
+      const startedAt=Date.now(),checks=[],candidates=[],datasets=new Map();
+      if(mover)for(const minutes of BAND_TIMEFRAMES){
+        if(controller?.signal.aborted||epoch!==this.stopEpoch||!this.auto)throw new DemoError('Scan read cancelled');
+        let reason,signal=null,dataError=false;
+        try{
+          const raw=await this.bandCandles(symbol,minutes,controller,datasets);
+          signal=bollingerSetup(raw,mover.side,Date.now()+this.api.offset,r=>reason=r,minutes*60000);
+        }catch(error){
+          if(controller?.signal.aborted||epoch!==this.stopEpoch||!this.auto||error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;
+          dataError=true;reason='Candle data unavailable: '+error.message;
+        }
+        if(signal){signal.marketSource={type:mover.side==='BUY'?'gainer':'loser',change24h:mover.change};candidates.push(signal);}
+        checks.push({minutes,side:signal?.side||'WAIT',reason:signal?'Band rebound confirmed · Williams %R '+signal.bands.wr.toFixed(1):reason,dataError});
+      }
+      if(controller?.signal.aborted||epoch!==this.stopEpoch||!this.auto)throw new DemoError('Scan read cancelled');
+      const signal=candidates.length?{...candidates[0],alternatives:candidates.slice(1)}:null;
+      const reason=!mover?'Not in the current futures gainers/losers list':signal?'Qualified '+candidates.map(c=>c.intervalMs/60000+'m').join(' / ')+' band setups':checks.slice(0,3).map(c=>c.minutes+'m: '+c.reason).join(' | ')+' · expand for all '+checks.length+' timeframe checks';
+      return {symbol,mover,signal,reason,foundCandidate:!!signal,hasDataError:checks.some(c=>c.dataError),intervalMs:signal?.intervalMs||60000,scanMs:Date.now()-startedAt,candleClosedAt:signal?.close||null,checks};
     }
     if(this.trialActive())return this.trialCandidate(symbol,mover,epoch,controller);
     const startedAt=Date.now(),raw=await this.scanBars(symbol,'1m',150,controller),now=Date.now()+this.api.offset;
@@ -1398,12 +1447,12 @@ class DemoEngine {
         if(error&&[401,403,418,429,451,-1003].includes(error.code))throw error;
         const value=result.value||{symbol,reason:'Market data unavailable; continuing other coins: '+error.message,scanMs:0};
         const {mover,signal,reason,foundCandidate,intervalMs,scanMs,candleClosedAt,checks}=value;
-        if(error)errors++;
+        if(error||value.hasDataError)errors++;
         if(foundCandidate)this.rechecks.set(symbol,{seen:Date.now(),checked:Date.now()});else if(this.rechecks.has(symbol))this.rechecks.get(symbol).checked=Date.now();
         this.scanChecked=(this.scanChecked||0)+1;completed++;
         this.scanStats={startedAt,concurrency:3,planned:batch.length,completed,dataErrors:errors,elapsedMs:Date.now()-startedAt};
         this.scanned=this.scanned.filter(s=>s.symbol!==symbol);
-        const row={symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',phase:error?'Data error':signal?'Entry checks':'Signal rules',reason:signal?'Confirmed '+(intervalMs/60000)+'m '+(signal.setupType||'breakout')+'; checking entry':reason,setupType:signal?.setupType||'breakout',side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal&&!this.newRules?this.entryLeverage(signal):undefined,at:Date.now(),scanMs,candleClosedAt,checks};
+        const row={symbol,source:mover?(mover.side==='BUY'?'Gainer ':'Loser ')+mover.change.toFixed(2)+'%':'Full-market / recheck',phase:error?'Data error':signal?'Entry checks':value.hasDataError?'Data error':'Signal rules',reason:signal?'Confirmed '+(intervalMs/60000)+'m '+(signal.setupType||'breakout')+'; checking entry':reason,setupType:signal?.setupType||'breakout',side:signal?.side||'WAIT',strength:signal?.strength,leverage:signal&&!this.newRules?this.entryLeverage(signal):undefined,at:Date.now(),scanMs,candleClosedAt,checks};
         this.scanned.unshift(row);this.scanned=this.scanned.slice(0,30);this.notify();
         if(signal&&this.auto&&epoch===this.stopEpoch&&!this.controlPending){
           try{
@@ -1473,7 +1522,7 @@ class DemoEngine {
     }catch(e){if(!this.scheduleReadRecovery(e)){this.block=e.message;this.pause(e.message);}}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={APP_VERSION,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
 
 
 </script><script>
@@ -1542,8 +1591,8 @@ function render(){
   const capital=e.budgetStatus();$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · no position-count cap · '+(policy?'$'+policy.margin+' target margin/entry':'Previous engine entry settings; update required')+' · '+(policy?.profitExit==='net-trailing'?'paid commissions + partial results + funding + expected closing fee included':policy?.profitExit==='positive-estimate'?'closing estimates include fees · one 25% loss reduction · no stop loss':policy?.profitExit==='fixed'?'$'+policy.takeProfit+' net profit target includes estimated fees · no stop loss':'fees included in '+(policy?.lossLimit?'$'+policy.lossLimit:'recorded')+' loss target');
   if(trialActive)$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · up to $300 per experiment entry · fees can exceed $1 before the price moves';
   if(policy?.profitExit==='bollinger-targets'){
-    const fixed=policy.marginMode==='fixed',maximum=policy.leverageMode==='exchange-maximum';
-    $('leverageWindow').textContent='5m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · '+(fixed?'$'+policy.margin+' margin per trade':'up to $'+policy.margin+' risk-sized margin')+' · '+(maximum?'maximum Binance-accepted leverage for that size':'adaptive leverage within Binance limits, up to '+policy.maxLeverage+'×')+' · $'+policy.lossLimit+' total after-fee loss target · middle-band profit target; confirmed continuation exits before outer band';
+    const fixed=policy.marginMode==='fixed',maximum=policy.leverageMode==='exchange-maximum',frames=Array.isArray(policy.timeframes)?policy.timeframes.map(m=>m+'m').join(' / '):'5m';
+    $('leverageWindow').textContent=frames+' Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · '+(fixed?'$'+policy.margin+' margin per trade':'up to $'+policy.margin+' risk-sized margin')+' · '+(maximum?'maximum Binance-accepted leverage for that size':policy.leverageMode==='highest-fee-compatible'?'highest Binance leverage allowing the $'+policy.lossLimit+' after-fee stop, up to '+policy.maxLeverage+'×':'adaptive leverage within Binance limits, up to '+policy.maxLeverage+'×')+' · $'+policy.lossLimit+' total after-fee loss target · middle-band profit target; confirmed continuation exits before outer band';
     $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · '+(fixed?'$'+policy.margin+' per entry; no smaller orders · fees and spread must fit within the $'+policy.lossLimit+' loss target':'up to $'+policy.margin+' per entry; smaller sizes keep room for the $'+policy.lossLimit+' loss target and fees');
   }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
@@ -1563,7 +1612,7 @@ function render(){
   $('incomeDiagnosis').textContent=!e.lastIncome?'Connect and sync to load actual results.':audit.net<0?(audit.realized<0?'Realized losses exceed realized gains. ':'Realized trading P&L is positive, but costs exceed it. ')+(audit.commission<0?'Commission reduces the wallet result. ':'')+'Review these actual results before changing the strategy.':'Booked trading result is nonnegative for this window. A wallet drop may involve an earlier period, a reset, transfers, or other income types excluded here.';
 
   const market=e.marketContext;
-  $('moversNote').textContent=(e.moversNote||'Loading eligible futures gainers and losers')+(e.bandRules?' · 5m band rebound + Williams %R required':' · BTC 5m: '+(market?.side==='BUY'?'up':market?.side==='SELL'?'down':'mixed / unavailable'))+' · Gainers/losers are past price changes, not profit predictions';
+  $('moversNote').textContent=(e.moversNote||'Loading eligible futures gainers and losers')+(e.bandRules?' · '+(Array.isArray(policy?.timeframes)?policy.timeframes.map(m=>m+'m').join(' / '):'5m')+' band rebound + Williams %R required':' · BTC 5m: '+(market?.side==='BUY'?'up':market?.side==='SELL'?'down':'mixed / unavailable'))+' · Gainers/losers are past price changes, not profit predictions';
   const stats=e.scanStats;
   $('scanTiming').textContent=stats?'Last batch: '+stats.completed+'/'+stats.planned+' checks · '+(stats.elapsedMs/1000).toFixed(2)+'s · up to 3 coins checked concurrently · '+stats.dataErrors+' data errors':'Waiting for scan timings';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · repeats continuously · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
@@ -1589,6 +1638,7 @@ function render(){
     if(r?.sizingNote){const sizing=document.createElement('p');sizing.textContent=r.sizingNote;card.append(sizing);}
     if(r?.exitPolicy==='bollinger-targets'){
       field(grid,'Estimated total net after fees',money(r.netEstimate),Number.isFinite(r.netEstimate)?(r.netEstimate<0?'bad pnl':'good pnl'):'');
+      field(grid,'Signal timeframe',((r.bandTargets?.intervalMs??r.signal?.intervalMs??300000)/60000)+'m');
       field(grid,'Middle-band target',r.bandTargets?.middle??'Loading');field(grid,'Before-outer-band target',r.bandTargets?.outer??'Loading');
       field(grid,'Profit stage',r.bandTargets?.stage==='outer'?'Continuation confirmed; protect middle band':'Middle band first');
       const note=document.createElement('p'),c=r.closingEstimate;note.textContent='$'+r.lossLimit+' total after-fee loss target · no loss timer or partial reduction. Profit exits require a positive closing-net estimate. '+(c?'Paid commission $'+money(c.paidCommission)+' · estimated closing fee $'+money(c.closingFee):'Waiting for fee history')+(r.estimateError?' · '+r.estimateError:'');card.append(note);

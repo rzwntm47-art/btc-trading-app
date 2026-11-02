@@ -1,10 +1,10 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {DemoEngine,DemoError,bollingerSnapshot,bollingerSetup}=require('./engine.js');
+const {DemoEngine,DemoError,bollingerSnapshot,bollingerSetup,BAND_TIMEFRAMES,aggregateMinutes,selectEntryCandidate,entryConfirmation}=require('./engine.js');
 const {fixture,entryBars,closingQuote,setTradeNet,reductionPosts,symbol}=require('./test-fixture.cjs');
-function bandBars(side='BUY',at=Date.now()){
- const end=Math.floor(at/300000)*300000;
- const rows=Array.from({length:30},(_,i)=>{const c=105+.2*Math.sin(i);return [end-(30-i)*300000,c-.1,c+.3,c-.3,c,100,end-(29-i)*300000-1];});
+function bandBars(side='BUY',at=Date.now(),minutes=5){
+ const ms=minutes*60000,end=Math.floor(at/ms)*ms;
+ const rows=Array.from({length:30},(_,i)=>{const c=105+.2*Math.sin(i);return [end-(30-i)*ms,c-.1,c+.3,c-.3,c,100,end-(29-i)*ms-1];});
  Object.assign(rows.at(-2),{1:104,2:104.3,3:95,4:96});Object.assign(rows.at(-1),{1:96,2:100.3,3:95.8,4:100});
  return side==='BUY'?rows:rows.map(b=>[b[0],200-b[1],200-b[3],200-b[2],200-b[4],b[5],b[6]]);
 }
@@ -139,12 +139,12 @@ test('quantity capacity reduces leverage rather than sending a smaller-margin or
  f.api.call=async(m,p,q,s)=>p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:50}]}:base(m,p,q,s);
  await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,40);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);assert.equal(Number(entries(f)[0].p.quantity),120);
 });
-test('fees consuming $6 skip with explicit reason, without reducing leverage or margin',async()=>{
+test('fees consuming $6 lower leverage to the highest setting with an untriggered stop',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0005'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/\$300 margin at 20×.*fees \$6.00.*\$6/);assert.equal(f.e.auto,true);
- assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[20]);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.leverage,18);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.entryEvidence.adaptiveSizing.exchangeCeiling,20);assert.equal(f.e.auto,true);assert.ok(r.exits.some(x=>x.kind==='sl6'&&x.confirmed));
+ assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[18]);
 });
-for(const available of [250,300.05])test('available '+available+' cannot shrink the requested $300 plus fees order',async()=>{
+for(const available of [250,300.001])test('available '+available+' cannot shrink the requested $300 plus fees order',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v3/account')r.assets[0].availableBalance=String(available);return r;};
  await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/margin.*fees/);
 });
@@ -165,4 +165,99 @@ test('an old cancelled $2 close does not reapply the old loss target',async()=>{
 test('the revised $6 target permits an otherwise valid entry with fees above the obsolete $3 target',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0004'}:base(m,p,q,s);
  await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.lossLimit,6);assert.equal(r.leverage,20);assert.equal(r.estimatedEntryMargin,300);assert.ok(r.entryEvidence.estimatedRoundTripFees>3&&r.entryEvidence.estimatedRoundTripFees<6);assert.ok(!r.closedAt);assert.ok(r.exits.some(x=>x.kind==='sl6'&&x.confirmed));
+});
+
+function expandBars(rows,baseMs){
+ return rows.flatMap(b=>Array.from({length:(b[6]-b[0]+1)/baseMs},(_,i)=>{
+  const last=b[0]+(i+1)*baseMs-1===b[6],o=b[1],c=last?b[4]:o;
+  return [b[0]+i*baseMs,o,last?b[2]:Math.max(o,c),i===0?b[3]:Math.min(o,c),c,b[5]*baseMs/(b[6]-b[0]+1),b[0]+(i+1)*baseMs-1];
+ }));
+}
+for(const side of ['BUY','SELL'])test(side+' 1m Bollinger entry works without a contradictory trend-above-middle requirement',async()=>{
+ const f=bandFixture(side),raw=bandBars(side,Date.now(),1),base=f.api.call;
+ f.signal=bollingerSetup(raw,side,Date.now(),()=>{},60000);assert.ok(f.signal);
+ const check=entryConfirmation(raw,f.signal,Date.now());assert.equal(check.reason,null);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'&&q.interval==='1m'?raw:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.signal.intervalMs,60000);assert.equal(r.bandTargets.intervalMs,60000);assert.equal(entries(f).length,1);
+ assert.ok(Math.abs(r.bandTargets.middle-bollingerSnapshot(raw,Date.now(),60000).middle)<1e-10);
+ const reversal=structuredClone(raw);reversal.at(-1)[1]=reversal.at(-1)[4];assert.match(entryConfirmation(reversal,f.signal,Date.now()).reason,/Latest 1m band setup/);
+});
+for(const minutes of [2,3,4,6,7,8,9,10])test(minutes+'m complete aggregation creates an independent fresh signal and rejects incomplete groups',()=>{
+ const now=Date.now(),bars=bandBars('BUY',now,minutes),raw=expandBars(bars,60000),grouped=aggregateMinutes(raw,now,minutes);
+ assert.equal(grouped.length,30);assert.deepEqual(grouped.map(b=>b.slice(0,5)),bars.map(b=>b.slice(0,5)));
+ assert.ok(bollingerSetup(grouped,'BUY',now,()=>{},minutes*60000));
+ assert.equal(aggregateMinutes(raw.slice(0,-1),now,minutes).length,29);
+ const forming=structuredClone(raw);forming.at(-1)[6]=now+1000;assert.equal(aggregateMinutes(forming,now,minutes).length,29);
+});
+test('all 14 frames share two reads, cache within the candle, and refresh on a new minute',async()=>{
+ const f=bandFixture(),base=f.api.call,reads=[];f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')reads.push({...q});return base(m,p,q,s);};
+ const mover={symbol,side:'BUY',change:12};let result=await f.e.scanCandidate(symbol,mover,f.e.stopEpoch);
+ assert.deepEqual(result.checks.map(c=>c.minutes),BAND_TIMEFRAMES);assert.ok(result.signal);assert.deepEqual(reads.map(r=>[r.interval,r.limit]),[['1m',250],['5m',300]]);
+ await f.e.scanCandidate(symbol,mover,f.e.stopEpoch);assert.equal(reads.length,2);
+ f.api.offset=60000;await f.e.scanCandidate(symbol,mover,f.e.stopEpoch);assert.ok(reads.length>=3);
+});
+for(const failed of ['1m','5m'])test('ordinary '+failed+' read failure does not hide a valid setup from the other dataset',async()=>{
+ const f=bandFixture(),base=f.api.call,reads=[];f.api.call=async(m,p,q,s)=>{
+  if(p==='/fapi/v1/klines'){reads.push(q.interval);if(q.interval===failed)throw new DemoError('temporary read',503);if(q.interval==='1m')return bandBars('BUY',Date.now(),1);}
+  return base(m,p,q,s);
+ };
+ const result=await f.e.scanCandidate(symbol,{side:'BUY',change:12},f.e.stopEpoch);assert.ok(result.signal);assert.equal(result.signal.intervalMs,failed==='1m'?300000:60000);assert.equal(reads.filter(i=>i===failed).length,1);assert.equal(result.checks.length,14);assert.equal(f.e.auto,true);
+});
+test('rate limits abort multi-frame scans and Stop during a read cannot return an entry',async()=>{
+ const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')throw new DemoError('rate limit',429);return base(m,p,q,s);};
+ await assert.rejects(()=>f.e.scanCandidate(symbol,{side:'BUY'},f.e.stopEpoch),e=>e.code===429);
+ f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v1/klines'){f.e.auto=false;f.e.stopEpoch++;}return r;};
+ await assert.rejects(()=>f.e.scanCandidate(symbol,{side:'BUY'},f.e.stopEpoch),/cancelled/);assert.equal(entries(f).length,0);
+});
+test('the fourteenth candidate remains eligible when all earlier timeframes fail entry checks',()=>{
+ const now=Date.now(),base=bollingerSetup(bandBars(),'BUY',now),choices=BAND_TIMEFRAMES.map(m=>({...base,intervalMs:m*60000,close:Math.floor(now/(m*60000))*m*60000-1,bands:{...base.bands,middle:m===60?base.bands.middle:99}}));
+ const result=selectEntryCandidate({...choices[0],alternatives:choices.slice(1)},{price:100,fee:.00001,now,intervals:BAND_TIMEFRAMES});
+ assert.equal(result.signal.intervalMs,3600000);assert.equal(result.checks.length,14);
+});
+test('synthetic 3m entry retains its own bands for exits instead of switching to 5m',async()=>{
+ const f=bandFixture(),base=f.api.call,raw=bandBars('BUY',Date.now(),3),minute=expandBars(raw,60000),expected=bollingerSnapshot(raw,Date.now(),180000);
+ f.signal=bollingerSetup(raw,'BUY',Date.now(),()=>{},180000);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'&&q.interval==='1m'&&q.limit===250?minute:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.bandTargets.intervalMs,180000);assert.equal(r.bandTargets.middle,expected.middle);
+ atPrice(f,expected.middle+.02);await f.e.reconcile();assert.ok(r.closedAt);assert.equal(r.closeReason,'Bollinger middle target');
+});
+test('pre-multiframe records retain 5m exit targets when interval metadata is absent',async()=>{
+ const f=await opened(),r=f.e.owned(symbol);delete r.bandTargets.intervalMs;delete r.signal.intervalMs;f.e.candleCache=new Map();const base=f.api.call,reads=[];
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')reads.push(q.interval);return base(m,p,q,s);};await f.e.reconcile();assert.deepEqual(reads,['5m']);assert.ok(!r.closedAt);
+});
+test('finer ticks permit the next higher fee-compatible leverage without shrinking margin',async()=>{
+ const f=bandFixture(),base=f.api.call;f.e.meta.get(symbol).filters.find(x=>x.filterType==='PRICE_FILTER').tickSize='.00001';
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0005'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,19);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);
+});
+test('lower leverage can fit available fees while retaining the full $300 margin',async()=>{
+ const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v3/account')r.assets[0].availableBalance='300.05';return r;};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,8);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);
+});
+test('when even 1x fees reach the stop, no leverage write or order is sent and Auto remains on',async()=>{
+ const f=bandFixture(),base=f.api.call;f.signal.bands.middle=150;f.signal.bands.upper=160;f.signal.bands.outerTarget=159;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.01'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/No fee-compatible leverage/);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/leverage').length,0);assert.equal(f.e.auto,true);
+});
+test('a worsening final quote after leverage selection cannot submit an unsafe entry',async()=>{
+ const f=bandFixture(),base=f.api.call;let reads=0;f.api.call=async(m,p,q,s)=>{
+  if(p==='/fapi/v1/ticker/bookTicker'&&++reads===2)return {symbol,bidPrice:'99',askPrice:'101',bidQty:'1000',askQty:'1000',time:Date.now()};return base(m,p,q,s);
+ };
+ await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/spread.*fees.*loss target/);assert.equal(f.e.auto,true);
+});
+
+test('a valid 1m mover is selected even when every 5m candle is flat',async()=>{
+ const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{
+  if(p==='/fapi/v1/klines'&&q.interval==='1m')return bandBars('BUY',Date.now(),1);
+  if(p==='/fapi/v1/klines'&&q.interval==='5m')return bandBars().map(b=>[b[0],100,100.1,99.9,100,100,b[6]]);
+  return base(m,p,q,s);
+ };
+ const result=await f.e.scanCandidate(symbol,{side:'BUY',change:10},f.e.stopEpoch);assert.ok(result.signal);assert.equal(result.signal.intervalMs,60000);assert.equal(result.checks.find(c=>c.minutes===5).side,'WAIT');
+ await f.e.enter(symbol,result.signal);assert.equal(entries(f).length,1);assert.equal(f.e.owned(symbol).bandTargets.intervalMs,60000);
+});
+test('a 60m signal is derived from complete 5m groups with its own freshness boundary',async()=>{
+ const f=bandFixture(),base=f.api.call,rows=bandBars('SELL',Date.now(),60),raw=expandBars(rows,300000);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'&&q.interval==='5m'?raw:base(m,p,q,s);
+ const bars=await f.e.bandCandles(symbol,60),signal=bollingerSetup(bars,'SELL',Date.now(),()=>{},3600000);assert.ok(signal);assert.equal(signal.close,rows.at(-1)[6]);assert.equal(signal.intervalMs,3600000);
+ assert.equal(bollingerSetup(bars,'SELL',Date.now()+7200000,()=>{},3600000),null);
 });
