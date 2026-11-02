@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
 const {randomBytes,createHash,timingSafeEqual,webcrypto}=require('node:crypto');
-const {DemoAPI,DemoEngine}=require('../demo-execution/engine.js');
+const {DemoAPI,DemoEngine,APP_VERSION}=require('../demo-execution/engine.js');
 const {createServer}=require('./server.cjs');
 const qrcode=require('./vendor/qrcode.cjs');
 const DASHBOARD_ORIGIN='https://rzwntm47-art.github.io';
@@ -23,7 +23,7 @@ async function body(req){
   let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2*1024*1024)throw Error('Request too large');}
   return JSON.parse(raw);
 }
-const SNAPSHOT_FIELDS=['appVersion','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','retryAt','retryAttempt','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
+const SNAPSHOT_FIELDS=['appVersion','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','retryAt','retryAttempt','accountingUpdateRequired','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
 function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=1000}={}){
   let engine=null,connecting=false,lastError='',pair=null,origin='',connectId='',generation=random();
   const sessions=new Map(),commands=new Map();
@@ -160,7 +160,7 @@ if(require.main===module){
   const {server}=createDesktop({token});
   server.on('error',error=>{console.error(error.code==='EADDRINUSE'?'Port 10000 is already in use. Stop the old connector, then run START-LAPTOP.cmd again.':error.message);process.exitCode=1;});
   server.listen(10000,'127.0.0.1',()=>{
-    console.log('Laptop connector V2 ready. Keep this window open and laptop awake.');
+    console.log('Laptop connector ready · trading engine V'+APP_VERSION+'. Keep this window open and laptop awake.');
     console.log('Local connection token (paste only into your laptop dashboard):\n'+token);
     console.log('Open https://rzwntm47-art.github.io/btc-trading-app/ and click Pair Mobile.');
   });
