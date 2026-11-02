@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.59';
+const APP_VERSION='1.60';
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
@@ -339,7 +339,7 @@ function bollingerSetup(raw,side,now,explain=()=>{}){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
-    this.entryPolicy={margin:300,maxLeverage:150,strategy:'bollinger-wr-5m',lossLimit:2,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'exchange-maximum',maxLeverage:150,strategy:'bollinger-wr-5m',lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -587,7 +587,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 5m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · up to $300 risk-sized margin · $2 after-fee loss target · Bollinger profit targets · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 5m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest Binance-accepted leverage for that size · $6 after-fee loss target · Bollinger profit targets · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -708,7 +708,7 @@ class DemoEngine {
     const experimental=this.experimentActive()&&signal.experimental===true;
     if(signal.experimental&&!experimental)return skip('Experiment expired; waiting for a normal signal');
     if(band&&signal.setupType!=='bollinger-wr')return skip('Old strategy candidate ignored; rechecking Bollinger / Williams %R');
-    const lossLimit=band?2:trial?null:this.newRules?5:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
+    const lossLimit=band?6:trial?null:this.newRules?5:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
     if(!trial&&this.state.records.some(r=>r.symbol===symbol&&((!this.newRules&&r.signalClose===signal.close)||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip('Already traded this candle or re-entry cooldown (10 minutes after close)');
     if(this.newRules){progress('Checking fee-history support before entry');await this.checkEntryAccounting(symbol);}
     progress('Checking Binance balance, positions and open orders');
@@ -753,13 +753,17 @@ class DemoEngine {
     const minNotional=number(m.filters.find(f=>f.filterType==='MIN_NOTIONAL')?.notional||m.filters.find(f=>f.filterType==='NOTIONAL')?.minNotional||0);
     const available=number(usdt.availableBalance),marginRoom=Math.max(0,5000-capital.reserved);
     if(flexible&&(!(available>0)||!(marginRoom>0)))return skip('Waiting for available margin; scanning continues');
+    if(band&&(available<ENTRY_MARGIN||marginRoom<ENTRY_MARGIN))return skip('Waiting for $300 margin plus fees; no smaller entry will be sent');
     const minimumPlan=(candidate,entryPrice=price,cap=Infinity)=>{
+      if(band){
+        // Keep the requested margin. Capacity limits may reduce leverage, never size.
+        const quantity=rounded(ENTRY_MARGIN*candidate/entryPrice,step,true);
+        const qty=number(quantity);return {quantity,qty,notional:qty*entryPrice};
+      }
       if(flexible){
         const budget=Math.min(300,marginRoom,available/(1+2*candidate*fee));
         if(!(budget>0))throw new DemoError('No free margin for entry');
-        const riskQty=band?2/(signal.stopDistance+fee*(2*entryPrice+signal.stopDistance)):Infinity;
-        const feeQty=band&&fee>0?1/(2*entryPrice*fee):Infinity;
-        const quantity=rounded(Math.min(riskQty,feeQty,budget*candidate/entryPrice,cap/entryPrice,number(lot.maxQty),number(normal.maxQty)),step);
+        const quantity=rounded(Math.min(budget*candidate/entryPrice,cap/entryPrice,number(lot.maxQty),number(normal.maxQty)),step);
         const qty=number(quantity);return {quantity,qty,notional:qty*entryPrice};
       }
       const quantity=rounded(Math.max(ENTRY_MARGIN*candidate/entryPrice,minNotional/entryPrice,number(lot.minQty),number(normal.minQty)),step,true);
@@ -770,16 +774,14 @@ class DemoEngine {
     if(this.newRules&&!trial&&signal.intervalMs===60000&&2*momentum.atr<=3*(2*price*fee))return skip('Recent 1m movement is too small relative to round-trip fees; scanning continues');
     const trialCeiling=flexible?await this.trialLeverageCeiling(symbol):null;
     const leverageCeiling=flexible?trialCeiling:this.newRules?signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset):preferredLeverage;
-    const bandNotional=band?Math.min(2/(signal.stopDistance+fee*(2*price+signal.stopDistance)),fee>0?1/(2*price*fee):Infinity)*price:0;
-    const bandLeverage=band?Math.min(leverageCeiling,Math.max(1,Math.ceil(bandNotional/Math.max(.01,Math.min(300,marginRoom,available-1))))):null;
-    const adaptive=band?{leverage:bandLeverage,riskStopDistance:signal.stopDistance,maxLossTarget:2,maxEstimatedFees:1}:this.newRules?adaptiveLeveragePlan({price,atr:momentum.atr,fee,lossLimit:ENTRY_VOLATILITY_ALLOWANCE,side:signal.side,tick:priceFilter.tickSize,plan:minimumPlan,maxLeverage:leverageCeiling,requireStop:false,...(trial?{leverageLimit:150,maxFees:2}:{})}):null;
+    const adaptive=band?{leverage:leverageCeiling,marginTarget:ENTRY_MARGIN,leverageMode:'exchange-maximum',maxLossTarget:6}:this.newRules?adaptiveLeveragePlan({price,atr:momentum.atr,fee,lossLimit:ENTRY_VOLATILITY_ALLOWANCE,side:signal.side,tick:priceFilter.tickSize,plan:minimumPlan,maxLeverage:leverageCeiling,requireStop:false,...(trial?{leverageLimit:150,maxFees:2}:{})}):null;
     if(this.newRules&&!adaptive)return skip(trial?'Entry exceeds the volatility or $2 estimated commission allowance even at 1×; scanning continues':'$300 margin exceeds the entry volatility and fee allowance, even at 1×; scanning continues');
     const requestedLeverage=this.newRules?adaptive.leverage:preferredLeverage;
-    progress('Configuring '+requestedLeverage+'× based on recent volatility, fees and Binance limits');
+    progress(band?'Checking maximum Binance leverage for $300 margin, starting at '+requestedLeverage+'×':'Configuring '+requestedLeverage+'× based on recent volatility, fees and Binance limits');
     try{await this.api.call('POST','/fapi/v1/marginType',{symbol,marginType:'CROSSED'});}catch(e){if(e.code!==-4046)throw e;}
     let leverage,selectedLeverage,minimumSize;
     if(this.newRules){
-      // Keep the risk-sized notional within margin and exchange limits.
+      // Confirm the maximum accepted leverage that permits the full requested size.
       const tryLeverage=async candidate=>{
         if(!this.auto||epoch!==this.stopEpoch)return false;
         try{
@@ -788,7 +790,7 @@ class DemoEngine {
           if(flexible&&!(number(response.maxNotionalValue)>0))return false;
           const size=minimumPlan(candidate,price,flexible?number(response.maxNotionalValue):Infinity);
           if(flexible&&(size.qty<Math.max(number(lot.minQty),number(normal.minQty))||size.notional<minNotional))return false;
-          if(size.notional>number(response.maxNotionalValue))return false;
+          if(size.notional>number(response.maxNotionalValue)||size.qty>number(lot.maxQty)||size.qty>number(normal.maxQty))return false;
           leverage=response;selectedLeverage=candidate;minimumSize=size;return true;
         }catch(e){
           if(e.uncertain||![-4028,-1130,-4202,-4203,-4205,-4206,-4208,-4209,-4403].includes(e.code))throw e;
@@ -799,6 +801,7 @@ class DemoEngine {
         // Binance accepts integer leverage below its ceiling. Find the exact
         // highest accepted value, including values absent from preset lists.
         let low=1,high=requestedLeverage-1;
+        if(band)while(low<=high){const size=minimumPlan(low);if(size.qty>=Math.max(number(lot.minQty),number(normal.minQty))&&size.notional>=minNotional)break;low++;}
         while(low<=high&&this.auto&&epoch===this.stopEpoch){
           const candidate=Math.floor((low+high)/2);
           if(await tryLeverage(candidate))low=candidate+1;else high=candidate-1;
@@ -815,12 +818,13 @@ class DemoEngine {
       if(number(leverage.leverage)!==preferredLeverage)throw new DemoError('Selected leverage not accepted');
       selectedLeverage=preferredLeverage;
     }
-    if(!selectedLeverage)return skip(flexible?'No supported leverage permits the risk-sized minimum order with available margin; scanning continues':'No supported leverage permits $300 margin; scanning continues');
+    if(!selectedLeverage)return skip(band?'No Binance-accepted leverage permits the full $300 order; scanning continues':flexible?'No supported leverage permits the minimum order with available margin; scanning continues':'No supported leverage permits $300 margin; scanning continues');
     let quantity,qty,notional;
     if(this.newRules){
       ({quantity,qty,notional}=minimumSize);
       const margin=notional/selectedLeverage,costs=notional*fee*2;
-      if((!flexible&&margin+1e-8<ENTRY_MARGIN)||margin>marginRoom+1e-8||margin+costs>available+1e-8)return skip('Not enough room for entry margin plus fees at the selected leverage; scanning continues');
+      if(((!flexible||band)&&margin+1e-8<ENTRY_MARGIN)||margin>marginRoom+1e-8||margin+costs>available+1e-8)return skip('Not enough room for entry margin plus fees at the selected leverage; scanning continues');
+      if(band&&costs>=lossLimit)return skip('$300 margin at '+selectedLeverage+'× has estimated round-trip fees $'+costs.toFixed(2)+' that already reach the $6 after-fee loss target; no entry sent');
       if(qty>number(lot.maxQty)||qty>number(normal.maxQty))return skip('$300 order exceeds Binance quantity limits; scanning continues');
       progress('Using '+selectedLeverage+'× with $'+margin.toFixed(2)+' estimated margin'+(trial?' · experiment; fees can trigger immediate loss closure':''));
       const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.leverage=selectedLeverage;
@@ -848,7 +852,7 @@ class DemoEngine {
         quoteEvidence=entryQuoteCheck(quote,currentMark,{symbol,side:signal.side,qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
         if(quoteEvidence.reason)return skip(quoteEvidence.reason+'; scanning continues');
         quoteEvidence.estimatedLossAtOneAtr=Math.max(0,-quoteEvidence.estimatedImmediateExitNet,-quoteEvidence.estimatedMarkNet)+qty*(momentum?.atr||0)*(1+fee);
-        if(quoteEvidence.estimatedLossAtOneAtr>ENTRY_VOLATILITY_ALLOWANCE+1e-8)return skip('Fresh spread, mark movement and one recent 1m ATR exceed the entry sizing allowance; scanning continues');
+        if(!band&&quoteEvidence.estimatedLossAtOneAtr>ENTRY_VOLATILITY_ALLOWANCE+1e-8)return skip('Fresh spread, mark movement and one recent 1m ATR exceed the entry sizing allowance; scanning continues');
         if(trial&&quoteEvidence.estimatedRoundTripFees>2+1e-8)return skip('Fresh quote exceeds the $2 estimated commission allowance; scanning continues');
         const quoteReason=entryPriceReason(quotedPrice,signal,{tolerant:true});if(quoteReason)return skip('Executable quote: '+quoteReason+'; scanning continues');
         if(band&&((signal.bands.middle-quotedPrice)*(signal.side==='BUY'?1:-1)<=2*fee*(quotedPrice+signal.bands.middle)))return skip('Fresh quote leaves too little profit room to the middle band after fees');
@@ -867,12 +871,12 @@ class DemoEngine {
     const id='bd1_'+crypto.randomUUID().replaceAll('-','').slice(0,24);
     const r={id,entryAppVersion:APP_VERSION,symbol,side:signal.side,quantity,fee,tick:priceFilter.tickSize,at:Date.now()+this.api.offset,signalClose:signal.close,signal,rulesVersion:this.newRules?8:1,experimentUntil:experimental?this.experimentUntil:null,leverage:selectedLeverage,lossLimit,takeProfit:null,exitPolicy:this.newRules?'net-trailing':signal.exitPolicy,exits:[],protected:false,exitsReady:false};
     if(trial){r.oneHourTrial={...this.state.oneHourTrial};r.rulesVersion=9;r.exitPolicy='trial-net-trailing';r.lossLimit=1;}
-    if(band){r.rulesVersion=10;r.exitPolicy='bollinger-targets';r.lossLimit=2;r.bandTargets={middle:signal.bands.middle,outer:signal.bands.outerTarget,stage:'middle',closedAt:signal.close};}
+    if(band){r.rulesVersion=11;r.exitPolicy='bollinger-targets';r.lossLimit=6;r.bandTargets={middle:signal.bands.middle,outer:signal.bands.outerTarget,stage:'middle',closedAt:signal.close};}
     r.estimatedEntryMargin=notional/selectedLeverage;
     if(this.newRules)r.entryEvidence={oneMinute:momentum,candidateChecks,...quoteEvidence,requestedLeverage,selectedLeverage,adaptiveSizing:{...adaptive,leverageCeiling},marketContext:this.marketContext||null,marketSource:signal.marketSource||{type:'full-market'}};
     r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $300 target margin; adaptive leverage up to 10× based on candle agreement, BTC market context, 1m volatility, fees and exchange limits; trailing net profit from $2; trim 25% at -$3; close at -$5; market fill margin may differ';
     if(trial)r.sizingNote='One-hour experiment · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · any negative estimated total net closes immediately when detected; fees alone can cause closure · net pullback floors $2 / $4 / $8 / $10 / +$5';
-    if(band)r.sizingNote='5m Bollinger / Williams %R · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · sized for a $2 after-fee loss target · middle band first; confirmed continuation targets before the outer band';
+    if(band)r.sizingNote='5m Bollinger / Williams %R · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · $300 margin target; maximum Binance-accepted leverage · $6 after-fee loss target · middle band first; confirmed continuation targets before the outer band';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -880,7 +884,7 @@ class DemoEngine {
       if(order.status==='FILLED'&&Number(order.avgPrice)>0&&Number(order.executedQty)>0){
         const filled={entryPrice:order.avgPrice,positionAmt:r.side==='BUY'?order.executedQty:String(-Number(order.executedQty)),markPrice:order.avgPrice};r.entry=Number(order.avgPrice);r.filledQty=Number(order.executedQty);this.save();
         try{
-          if(band){await this.ensureExit(r,filled,'sl2',-2);r.exitsReady=!r.closedAt;r.protected=!r.closedAt;}
+          if(band){await this.ensureExit(r,filled,'sl6',-6);r.exitsReady=!r.closedAt;r.protected=!r.closedAt;}
           else if(trial){await this.reconcileTrialExits(r,filled);}
           else if(this.newRules){await this.ensureExit(r,filled,'sl5',-5);r.exitsReady=!r.closedAt;r.protected=!r.closedAt;}
           else if(!this.exitsSuspended(r)){await this.ensureExit(r,filled,r.rulesVersion===5?'sl20':r.rulesVersion===4?'sl4m':r.rulesVersion===3?'sl8':r.rulesVersion===2?'sl4':'sl',-(r.lossLimit??9));if(!r.closedAt&&!['manual-profit','manual-profit-60s-loss'].includes(r.exitPolicy))await this.ensureExit(r,filled,'tp',40);r.protected=!r.closedAt;}
@@ -986,7 +990,7 @@ class DemoEngine {
     return Number.isFinite(r.profitFloor)&&net<=r.profitFloor;
   }
   async ensureLossStop(r,p){
-    const qty=Math.abs(Number(p.positionAmt)),entry=Number(p.entryPrice),ledger=r.tradeAccounting,limit=this.bandRules?2:r.oneHourTrial?1:5,kind=this.bandRules?'sl2':r.oneHourTrial?'sl1':'sl5';
+    const qty=Math.abs(Number(p.positionAmt)),entry=Number(p.entryPrice),ledger=r.tradeAccounting,limit=this.bandRules?6:r.oneHourTrial?1:5,kind=this.bandRules?'sl6':r.oneHourTrial?'sl1':'sl5';
     let target=-limit-(ledger?.bookedNet??(-qty*entry*r.fee))-qty*entry*r.fee;
     const sign=r.side==='BUY'?1:-1,raw=(target/qty+entry*(sign+r.fee))/(sign-r.fee),minimum=Math.max(Number(r.tick),Number(this.meta.get(r.symbol)?.filters?.find(f=>f.filterType==='PRICE_FILTER')?.minPrice)||0);
     if(r.side==='BUY'&&raw<minimum)target=(minimum-entry)*qty-qty*(entry+minimum)*r.fee;
@@ -1052,11 +1056,11 @@ class DemoEngine {
     }
   }
   async reconcileBandExits(r,p){
-    if(r.rulesVersion!==10){r.rulesVersion=10;r.lossLimit=2;r.exitPolicy='bollinger-targets';r.profitFloor=null;r.trailPeak=null;r.lossSince=null;r.tradeAccounting=null;this.save();}
-    r.sizingNote='5m Bollinger / Williams %R · $2 total after-fee loss target · middle band first, then before outer band only with confirmed continuation · no timed loss or partial-loss rule';
+    if(r.rulesVersion!==11){r.rulesVersion=11;r.lossLimit=6;r.exitPolicy='bollinger-targets';r.profitFloor=null;r.trailPeak=null;r.lossSince=null;r.tradeAccounting=null;this.save();}
+    r.sizingNote='5m Bollinger / Williams %R · $6 total after-fee loss target · middle band first, then before outer band only with confirmed continuation · no timed loss or partial-loss rule';
     try{
       const net=await this.closingEstimate(r,p);
-      if(net<=-2){await this.close(r.symbol,'$2 net trade loss',{bandLoss:true});return;}
+      if(net<=-6){await this.close(r.symbol,'$6 net trade loss',{bandLoss:true});return;}
       await this.ensureLossStop(r,p);if(r.closedAt||r.pendingClose)return;
       const snapshot=bollingerSnapshot(await this.scanBars(r.symbol,'5m',60),Date.now()+this.api.offset);
       if(!snapshot)throw new DemoError('Fresh 5m bands unavailable; exchange loss stop remains active');
@@ -1079,8 +1083,8 @@ class DemoEngine {
       await this.close(r.symbol,'Bollinger middle target',{bandProfit:'middle'});
     }catch(error){
       r.estimateError=error.message;r.netEstimate=null;r.closingEstimate=null;this.save();
-      if(!r.closedAt&&!r.pendingClose&&!r.exits?.some(e=>e.kind==='sl2'&&e.confirmed&&!e.cancelled)){
-        try{await this.ensureLossStop(r,p);}catch(protectionError){this.pause('Cannot confirm $2 loss protection on '+r.symbol);await this.close(r.symbol,'Loss protection failure');throw protectionError;}
+      if(!r.closedAt&&!r.pendingClose&&!r.exits?.some(e=>e.kind==='sl6'&&e.confirmed&&!e.cancelled)){
+        try{await this.ensureLossStop(r,p);}catch(protectionError){this.pause('Cannot confirm $6 loss protection on '+r.symbol);await this.close(r.symbol,'Loss protection failure');throw protectionError;}
       }
       if(error.uncertain||r.pendingClose||r.lossReduction?.status==='PENDING'||ACCOUNT_BLOCKS.has(error.code)||[418,429].includes(error.code))throw error;
     }
@@ -1112,15 +1116,15 @@ class DemoEngine {
     const p=list.find(x=>x.symbol===symbol&&x.positionSide==='BOTH'&&number(x.positionAmt)!==0);
     if(!p){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();return;}
     if((number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot. Inspect Binance.');
-    if(this.bandRules&&['Experiment negative net','Experiment profit pullback','$5 net trade loss','Net profit trailing pullback'].includes(reason)){reason='$2 net trade loss';options={...options,bandLoss:true};}
+    if(this.bandRules&&['Experiment negative net','Experiment profit pullback','$5 net trade loss','Net profit trailing pullback','$2 net trade loss','sl2 threshold reached','$3 net trade loss','sl3 threshold reached'].includes(reason)){reason='$6 net trade loss';options={...options,bandLoss:true};}
     if(this.bandRules){
-      if(reason==='$2 net trade loss')options={...options,bandLoss:true};
+      if(reason==='$6 net trade loss')options={...options,bandLoss:true};
       const targetReason={'Bollinger middle target':'middle','Bollinger outer target':'outer','Bollinger middle-band pullback':'pullback'}[reason];
       if(targetReason)options={...options,bandProfit:targetReason};
     }
     if(options.bandLoss||options.bandProfit){
       const net=await this.closingEstimate(r,p,{forceAccounting:true});
-      if(net<=-2)reason='$2 net trade loss';
+      if(net<=-6)reason='$6 net trade loss';
       else if(options.bandLoss||!(net>0))return false;
       else{
         const t=r.bandTargets,sign=r.side==='BUY'?1:-1,price=r.closingEstimate.price;

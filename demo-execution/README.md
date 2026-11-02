@@ -1,4 +1,4 @@
-# Binance Demo execution module — V1.59
+# Binance Demo execution module — V1.60
 
 USDⓈ-M orders go exclusively to `https://demo-fapi.binance.com`. No live endpoint, withdrawals or transfers.
 
@@ -6,7 +6,7 @@ Build: `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.h
 
 ## Strategy
 
-The user selected Bollinger profit targets. V1.59 replaces the one-hour experiment and earlier dollar trailing/partial-loss policies with a permanent 5m Bollinger / Williams %R strategy. Defaults are Bollinger 20-close SMA ± 2 population standard deviations and Williams %R 14, because the provided transcript omitted settings.
+The user selected Bollinger profit targets. V1.60 replaces the one-hour experiment and earlier dollar trailing/partial-loss policies with a permanent 5m Bollinger / Williams %R strategy. Defaults are Bollinger 20-close SMA ± 2 population standard deviations and Williams %R 14, because the provided transcript omitted settings.
 
 - Refresh eligible demo Futures 24h rankings once per minute. Check up to 20 gainers for LONG and 20 losers for SHORT, rotating eight slots plus recent candidates with three public workers. Recheck continuously; do not enter unrelated full-market coins. Rank is historical movement, not a forecast.
 - LONG: last or previous completed 5m candle touches the lower band, one of their WR values is ≤ -80, then the latest candle closes bullish, above the previous close and lower band, with rising WR, still below the middle. SHORT mirrors this at the upper band with WR ≥ -20. Validate candle continuity, OHLC, freshness and positive ATR. Williams %R is a price-range oscillator, not buyer/seller percentages.
@@ -14,18 +14,20 @@ The user selected Bollinger profit targets. V1.59 replaces the one-hour experime
 
 ## Size and leverage
 
-Up to $300 margin per entry, $5,000 total margin budget, USDT collateral, Cross, one position per symbol. No fixed position-count cap; ten-minute same-symbol cooldown after closing. No automatic adding to losers.
+Each new trade targets $300 margin, rounded up to the exchange quantity step. Retain a $5,000 total margin budget, USDT collateral, Cross, one position per symbol and ten-minute same-symbol cooldown. Do not top up or change leverage on existing positions.
 
-Quantity is rounded down to exchange steps. Bound size by $2 divided by (1.5 recent 5m ATR + estimated opening/closing fees per unit), a $1 round-trip commission allowance, available margin, and exchange quantity/notional caps. Choose the lowest integer leverage sufficient for that risk-sized notional within available/up-to-$300 margin, capped by Binance and 150×. Smaller margin is intentional: forcing $300 can consume a $2 loss allowance in fees or place a stop too close. Recalculate size at the final executable quote and validate the actual accepted leverage setting. Estimated stop/fee allowances are not guaranteed fills.
+Read the symbol leverage ceiling and confirm the highest accepted integer setting that permits the full $300-margin position under Binance notional and quantity limits (supported ceiling 150×). If the highest setting is rejected or lacks capacity, search lower settings and reconfirm the final choice. An unavailable bracket read can use confirmed setting responses. Do not reduce leverage solely to satisfy a fee/volatility allowance and do not reduce order margin to fit free balance or notional caps. Round quantity at the final quote and verify margin plus fees, lot steps, notional limits and the $6 stop before sending one order.
+
+The prior 1.5-ATR risk sizing, $1 fee sizing cap and $20 volatility sizing veto no longer apply to these entries. The existing Bollinger signal and price checks remain. Fees and spread must still allow an untriggered $6 after-fee loss stop. Otherwise show the conflict and skip while Auto keeps scanning. The full amount plus fees must be available; no smaller order is sent. Actual market fills can change margin and stop results.
 
 ## Exits and migration
 
-Current records use `rulesVersion: 10`, `lossLimit: 2`, `exitPolicy: 'bollinger-targets'`. They store entry band evidence and `bandTargets` with middle, before-outer target and stage.
+Current records use `rulesVersion: 11`, `lossLimit: 3`, `exitPolicy: 'bollinger-targets'`. They store entry band evidence and `bandTargets` with middle, before-outer target and stage.
 
 - Total trade net includes actual paid entry/partial-close commissions, realized partial-close results, funding, executable remaining P&L and estimated closing fees. Actual matched Binance fills are required. Do not use gross green unrealized P&L alone to submit a profit exit.
 - Middle band first. A positive-net trade closes there unless a fresh closed 1m candle since entry confirms momentum beyond the middle and current 5m WR is on the directional side of -50. Only then extend toward 90% of the distance from middle to opposite outer band. Freeze targets on extension; close before the outer band or on a pullback to the middle while fresh net remains positive. Before extension, refresh bands from completed 5m candles. If momentum cannot be confirmed at a reached positive target, close rather than extend. Recheck actual costs and executable price before dispatch. No dollar profit ladder.
-- At ≤ -$2 estimated total trade net, close the remaining position. Install and confirm a Binance STOP_MARKET backup before cancelling older bot exits; adjust it for booked results and remaining quantity. A fee-only negative estimate above -$2 does not close a new trade. No loss timer, no new 25% loss reduction. Mark-price stops and executable-price estimates can trigger at different times; losses can exceed $2 through gaps, slippage, costs or delays.
-- Existing owned records migrate on reconciliation, retaining previous reductions/booked results. Pending writes reconcile before replacement. Old experiment negative-net exit intents cannot reapply the obsolete fee-only close rule. The old journal experiment is ended; its historical metadata is retained. The experiment start command refuses activation with a replacement message.
+- At ≤ -$6 estimated total trade net, close the remaining position. Install and confirm a Binance STOP_MARKET backup before cancelling older bot exits; adjust it for booked results and remaining quantity. A fee-only negative estimate above -$6 does not close a new trade. No loss timer, no new 25% loss reduction. Mark-price stops and executable-price estimates can trigger at different times; losses can exceed $6 through gaps, slippage, costs or delays.
+- Existing owned records migrate on reconciliation, retaining previous reductions/booked results and Bollinger targets. Existing $2 stops are replaced only after the $6 stop is confirmed. Pending writes reconcile before replacement. Old experiment negative-net exit intents cannot reapply the obsolete fee-only close rule. The old journal experiment is ended; its historical metadata is retained. The experiment start command refuses activation with a replacement message.
 - The $100 estimated account-wide after-cost session goal remains: close bot positions, including losers, then stop new entries. Unmanaged positions are not closed. The goal latches through unresolved orders. Manual close remains available.
 
 Legacy exit/entry branches remain for historical compatibility regression tests, but the default browser and desktop engine uses `bandRules: true`. Both engine policy and version are included in remote snapshots. Profit targets and session exits need the engine online; accepted exchange loss stops persist independently. No live-account trading or profitability backtest has been performed.
@@ -54,6 +56,6 @@ The current `render-backend/server.cjs` allows the signed Demo-only `GET /fapi/v
 
 ## Validation and references
 
-Deterministic tests cover mirrored LONG/SHORT qualification, risk/fee sizing, middle and outer target exits, fresh continuation, loss exits, migration, paid fees, manual controls, leverage/capacity errors, read recovery, unknown writes, mobile snapshots and old-connector detection. These verify execution behavior, not profitability.
+Deterministic tests cover mirrored LONG/SHORT qualification, fixed-margin maximum-leverage sizing, middle and outer target exits, fresh continuation, loss exits, migration, paid fees, manual controls, leverage/capacity errors, read recovery, unknown writes, mobile snapshots and old-connector detection. These verify execution behavior, not profitability.
 
 Indicator references: [John Bollinger's rules](https://www.bollingerbands.com/bollinger-band-rules), [Bollinger Bands calculation](https://www.bollingerbands.com/bollinger-bands), [Williams %R](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/williams-r).
