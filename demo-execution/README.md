@@ -1,18 +1,8 @@
-# Binance Demo execution module — V1.64
+# Binance Demo execution module — V1.63
 
 USDⓈ-M orders go exclusively to `https://demo-fapi.binance.com`. No live endpoint, withdrawals or transfers.
 
 Build: `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.html` to the repository root. Verify with `node --test --test-timeout=10000 demo-execution/*.test.cjs render-backend/*.test.cjs`.
-
-## V1.64 entry recovery and commission limit
-
-The repeated HUMAUSDT `GET /fapi/v1/commissionRate` -1000 failures occurred before order submission. Previously every qualified check repeated the full account/order/price preflight and the failing commission read. Now commission is checked before the balance/order preflight, using only a validated Binance response for that symbol and connection. Rates are cached in memory for at most five minutes, never across keys, symbols or reconnects. Unknown, malformed or expired rates cannot authorize an order; no guessed fee fallback is used.
-
-Transient or unsupported commission reads delay only that symbol: retry after 5 / 10 / 20 / 40 / 60 seconds, capped at 60 seconds. Waiting checks avoid repeated account/order preflights and repeated activity messages. Other candidates continue; the symbol becomes eligible for a new checked entry automatically after the delay. Authentication and rate-limit handling, ambiguous-write reconciliation and manual Stop retain their existing behavior.
-
-New Bollinger entries have a **$1 maximum estimated opening plus closing commission**, across all symbols, not a BLESSUSDT blacklist. Keep $300 margin and lower leverage to the highest supported setting meeting both this cap and the existing spread/stop checks. Skip if even 1x cannot fit. Check the rounded quantity again at the final executable quote before submission. This limits estimated commission, not slippage, funding or final fill costs. Existing positions retain their exits and leverage. Actual fees are reconciled from Binance fills.
-
-Previously filled candles remain consumed. Closed symbols can qualify again after the existing ten-minute cooldown, shown with seconds remaining. A definitively rejected order does not consume its candle forever: after the existing 60-second entry-attempt pause, it can be re-evaluated with fresh prices and all other checks. This does not retry uncertain writes. Scanner rotation and entry signal quality rules are unchanged.
 
 ## Strategy
 
@@ -28,9 +18,9 @@ Check 1m, 2m, 3m, 4m, 5m, 6m, 7m, 8m, 9m, 10m, 15m, 20m, 30m and 60m independent
 
 Each new trade targets $300 margin, rounded up to the exchange quantity step. Retain a $5,000 total margin budget, USDT collateral, Cross, one position per symbol and ten-minute same-symbol cooldown. Do not top up or change leverage on existing positions.
 
-Read the symbol leverage ceiling and confirm the highest accepted integer setting that permits the full $300-margin position under Binance notional and quantity limits (supported ceiling 150×). If the highest setting is rejected or lacks capacity, search lower settings and reconfirm the final choice. An unavailable bracket read can use confirmed setting responses. First evaluate every integer leverage locally against executable spread, actual commission rate, mark price, tick-rounded $6 stop and margin plus fees. Select the highest setting also within the $1 estimated round-trip commission cap, then confirm exchange capacity. Reduce leverage when needed; do not reduce the $300 margin target. Round quantity at the final quote and verify margin plus fees, lot steps, notional limits and the $6 stop before sending one order.
+Read the symbol leverage ceiling and confirm the highest accepted integer setting that permits the full $300-margin position under Binance notional and quantity limits (supported ceiling 150×). If the highest setting is rejected or lacks capacity, search lower settings and reconfirm the final choice. An unavailable bracket read can use confirmed setting responses. First evaluate every integer leverage locally against executable spread, actual commission rate, mark price, tick-rounded $6 stop and margin plus fees. Select the highest feasible setting, then confirm exchange capacity. Reduce leverage when needed; do not reduce the $300 margin target. Round quantity at the final quote and verify margin plus fees, lot steps, notional limits and the $6 stop before sending one order.
 
-The prior 1.5-ATR risk sizing and $20 volatility sizing veto do not apply to these entries. V1.64 reinstates a separate $1 estimated opening-plus-closing commission cap at the user’s request. The existing Bollinger signal and price checks remain. Fees and spread must still allow an untriggered $6 after-fee loss stop. If no supported leverage leaves room, show the conflict and skip while Auto keeps scanning. The full amount plus fees must be available; no smaller order is sent. Actual market fills can change margin and stop results.
+The prior 1.5-ATR risk sizing, $1 fee sizing cap and $20 volatility sizing veto no longer apply to these entries. The existing Bollinger signal and price checks remain. Fees and spread must still allow an untriggered $6 after-fee loss stop. If no supported leverage leaves room, show the conflict and skip while Auto keeps scanning. The full amount plus fees must be available; no smaller order is sent. Actual market fills can change margin and stop results.
 
 ## Exits and migration
 

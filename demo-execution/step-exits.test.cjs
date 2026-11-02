@@ -10,7 +10,7 @@ function bandBars(side){
 }
 async function opened(side='BUY'){
  const f=fixture(),base=f.api.call;f.e.newRules=f.e.bandRules=true;f.signal.side=side;
- f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.00001'}:p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:20,notionalCap:1000000,notionalFloor:0}]}:p==='/fapi/v1/klines'?(q.interval==='5m'?bandBars(side):entryBars(side)):base(m,p,q,s);
+ f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.00001'}:p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:20,notionalCap:1000000,notionalFloor:0}]}:p==='/fapi/v1/klines'?(q.interval==='5m'?bandBars(side):entryBars(side)):base(m,p,q,s);
  f.signal=bollingerSetup(bandBars(side),side,Date.now());await f.e.enter(symbol,f.signal);assert.ok(f.e.owned(symbol));return f;
 }
 function recoveryCandles(f,{stale=false,weak=false,against=false,beforeEntry=false}={}){

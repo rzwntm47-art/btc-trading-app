@@ -18,7 +18,7 @@ function entryBars(side='BUY',at=Date.now(),scale=1){
 }
 function lowVolatility(f){
  f.signal.strength=3;f.e.marketContext={side:f.signal.side,closedAt:Date.now()-1000};
- const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars(f.signal.side,Date.now(),.1):p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.00001'}:base(m,p,q,s);
+ const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars(f.signal.side,Date.now(),.1):p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.00001'}:base(m,p,q,s);
 }
 function fixture(){
   let position=null,orders=new Map(),algos=new Map(),calls=[],trades=[],fillPrice=100,unknownEntry=false,failProtection=false,failClose=false;
@@ -32,7 +32,7 @@ function fixture(){
     if(path==='/fapi/v1/ticker/bookTicker')return {symbol,bidPrice:'100',askPrice:'100',bidQty:'1000',askQty:'1000',time:Date.now()};
     if(path==='/fapi/v1/premiumIndex')return {markPrice:'100',time:Date.now()};
     if(path==='/fapi/v1/klines')return entryBars(signal.side);
-    if(path==='/fapi/v1/commissionRate')return {symbol:p.symbol,takerCommissionRate:'.0005'};
+    if(path==='/fapi/v1/commissionRate')return {takerCommissionRate:'.0005'};
     if(path==='/fapi/v1/marginType')return {code:200};
     if(path==='/fapi/v1/leverageBracket')return {symbol,brackets:[{initialLeverage:125,notionalCap:1000000,notionalFloor:0}]};
     if(path==='/fapi/v1/leverage')return {leverage:p.leverage,maxNotionalValue:'1000000'};
