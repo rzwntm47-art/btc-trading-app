@@ -7,7 +7,7 @@ function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,APP_VERSION:'1.56',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,APP_VERSION:'1.57',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -59,7 +59,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.56');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.57');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -88,7 +88,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.56');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.57');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();
@@ -108,4 +108,9 @@ test('experiment controls dispatch once and show remaining time without restarti
  const at=Date.now();e.state.oneHourTrial={startedAt:at,until:at+3600000,id:'trial_ui'};e.account={assets:[]};e.auto=true;vm.runInContext('renderActual()',context);
  assert.equal(node('startTrial').disabled,true);assert.equal(node('endTrial').disabled,false);assert.match(node('trialStatus').textContent,/EXPERIMENT RUNNING/);assert.match(node('leverageWindow').textContent,/150×/);
  e.state.oneHourTrial.startedAt-=3600001;e.state.oneHourTrial.until-=3600001;vm.runInContext('renderActual()',context);assert.match(node('trialStatus').textContent,/Normal entries restored/);assert.match(node('leverageWindow').textContent,/up to 10×/);
+});
+
+test('retry countdown keeps Stop enabled and does not suggest Auto must be clicked again',()=>{
+ const {e,node,context}=fixture();e.account={assets:[]};e.tradingReady=true;e.auto=true;e.retryAt=Date.now()+30000;e.block='Temporary read failure';
+ vm.runInContext('renderActual()',context);assert.match(node('status').textContent,/AUTO WAITING · automatic retry/);assert.equal(node('stop').disabled,false);assert.equal(node('start').disabled,true);assert.match(node('entryStatus').textContent,/Retrying in/);
 });

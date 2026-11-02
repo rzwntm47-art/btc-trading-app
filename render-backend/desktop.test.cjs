@@ -85,7 +85,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.56');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:10,strategy:'movers-momentum-v2',lossLimit:5,takeProfit:null,profitExit:'net-trailing',profitFloors:[2,4,6,8,10],profitStepAbove10:5,lossReduction:.25,lossReductionAt:3,sessionExit:'close-bot-positions',volatilitySizingAllowance:20,priceToleranceAtr:.75,breakoutRetestAtr:.1});
+ assert.equal(state.appVersion,'1.57');assert.deepEqual(state.entryPolicy,{margin:300,maxLeverage:10,strategy:'movers-momentum-v2',lossLimit:5,takeProfit:null,profitExit:'net-trailing',profitFloors:[2,4,6,8,10],profitStepAbove10:5,lossReduction:.25,lossReductionAt:3,sessionExit:'close-bot-positions',volatilitySizingAllowance:20,priceToleranceAtr:.75,breakoutRetestAtr:.1});
 }));
 
 test('phone trial commands are idempotent, persist expiry and Stop cancels queued activation',()=>fixture(async({app,request,connect,pair,dataDir})=>{

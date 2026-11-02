@@ -804,7 +804,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.56');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.57');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -836,7 +836,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.56');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.57');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(Number.isFinite(r.entryEvidence.plannedStopPrice));
 });
@@ -1377,7 +1377,7 @@ test('trial accepts maximum exchange leverage, sizes at most $300 and immediatel
  const r=f.e.state.records[0];assert.ok(r);assert.equal(r.leverage,125);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.exitPolicy,'trial-net-trailing');
  assert.ok(r.closedAt);assert.equal(r.closeReason,'Experiment negative net');assert.equal(entryPosts(f).length,1);assert.equal(f.e.auto,true);assert.equal(reductionPosts(f).length,0);
  assert.ok(f.trades.reduce((v,t)=>v+Number(t.realizedPnl)-Number(t.commission),0)<-1,'maximum-leverage fees can exceed the desired $1');
- assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/klines').length,0,'trial bypasses ordinary trend/momentum/fee-profitability filters');
+ assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/klines').length,1,'trial rechecks fresh momentum before configuring leverage');
 });
 test('trial leverage fallback finds account-supported maximum and keeps small capital valid',async()=>{
  const f=fixture(),signal=trialSignal(f),base=f.api.call;
@@ -1434,10 +1434,11 @@ test('trial loss checks retain actual commission accounting and unknown accounti
  const f=await currentTrade(),r=f.e.owned(symbol);r.oneHourTrial={...armTrial(f.e)};r.rulesVersion=9;setTradeNet(f,5);await f.e.reconcile();r.tradeAccounting=null;
  const base=f.api.call;f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/userTrades')return [];return base(m,p,q,s);};await f.e.reconcile();assert.equal(r.netEstimate,null);assert.ok(r.estimateError);assert.ok(!r.closedAt);assert.ok(r.exits.some(e=>e.kind==='sl1'&&e.confirmed&&!e.cancelled));
 });
-test('trial candidate accepts candle direction against mover trend and falls back past a doji',async()=>{
- const f=fixture();armTrial(f.e);const reads=[];
- f.e.scanBars=async(_s,interval)=>{reads.push(interval);const ms=interval==='1m'?60000:180000,b=continuationBars('SELL',ms);if(interval==='1m')b.at(-1)[1]=b.at(-1)[4];return b;};
- const candidate=await f.e.scanCandidate(symbol,{side:'BUY'},f.e.stopEpoch);assert.equal(candidate.signal.side,'SELL');assert.equal(candidate.signal.intervalMs,180000);assert.deepEqual(reads,['1m','3m']);assert.equal(candidate.signal.oneHourTrial,f.e.state.oneHourTrial.id);
+test('trial candidate requires mover alignment and confirms a setup past a doji',async()=>{
+ const f=fixture();armTrial(f.e);const reads=[],minutes={'1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'2h':120,'4h':240};
+ f.e.scanBars=async(_s,interval)=>{reads.push(interval);const b=continuationBars('SELL',minutes[interval]*60000);if(interval==='1m')b.at(-1)[1]=b.at(-1)[4];return b;};
+ const aligned=await f.e.scanCandidate(symbol,{side:'SELL'},f.e.stopEpoch);assert.equal(aligned.signal.side,'SELL');assert.equal(aligned.signal.intervalMs,180000);assert.equal(aligned.signal.oneHourTrial,f.e.state.oneHourTrial.id);
+ const opposite=await f.e.scanCandidate(symbol,{side:'BUY'},f.e.stopEpoch);assert.equal(opposite.signal,null);assert.ok(opposite.checks.some(c=>c.reason.includes('disagree')));
 });
 test('trial scanner ignores forming and stale candles, and supports all advertised intervals',async()=>{
  const f=fixture();armTrial(f.e);const reads=[];
@@ -1457,4 +1458,81 @@ test('short trial candle cache cannot replace longer normal-strategy history aft
  const f=fixture(),reads=[];f.api.call=async(m,p,q)=>{reads.push(q.limit);return scanBars('BUY',300000,q.limit);};
  await f.e.scanBars(symbol,'5m',30);const long=await f.e.scanBars(symbol,'5m',300);await f.e.scanBars(symbol,'5m',300);
  assert.deepEqual(reads,[30,300]);assert.equal(long.length,300);
+});
+
+for(const status of [400,404])test('bracket HTTP '+status+' falls back to confirmed 20x without stopping Auto or sending rejected trade orders',async()=>{
+ const f=fixture(),signal=trialSignal(f),base=f.api.call;let bracketReads=0,probes=[];
+ f.api.call=async(m,p,q,s)=>{
+  if(p==='/fapi/v1/leverageBracket'){bracketReads++;throw new DemoError('route unavailable',status);}
+  if(p==='/fapi/v1/leverage'){probes.push(q.leverage);if(q.leverage>20)throw new DemoError('invalid leverage',-4028);}
+  return base(m,p,q,s);
+ };
+ await f.e.enter(symbol,signal);assert.equal(f.e.auto,true);assert.equal(f.e.state.records[0].leverage,20);assert.equal(entryPosts(f).length,1);assert.ok(probes.at(-1)===20);
+ await f.e.enter(symbol,{...signal,close:signal.close+1});assert.equal(bracketReads,1);assert.equal(entryPosts(f).length,2);assert.equal(f.e.auto,true);
+});
+for(const code of [401,403,-2015,-1022,429])test('bracket authentication or rate failure '+code+' never starts fallback probes',async()=>{
+ const f=fixture(),signal=trialSignal(f),base=f.api.call;
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/leverageBracket')throw new DemoError('blocked',code);return base(m,p,q,s);};
+ await assert.rejects(()=>f.e.enter(symbol,signal));assert.equal(entryPosts(f).length,0);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/leverage').length,0);
+});
+test('unavailable fee history blocks entry, retains Auto and clearly asks for old relay update',async()=>{
+ const f=fixture(),signal=trialSignal(f),base=f.api.call;let reads=0;
+ f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/userTrades'){reads++;const e=new DemoError('unsupported route',400);e.backendUpdateRequired=true;throw e;}return base(m,p,q,s);};
+ await f.e.enter(symbol,signal);await f.e.enter(symbol,signal);assert.equal(reads,1);assert.equal(entryPosts(f).length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/Update and restart/);
+ f.api.call=base;f.e.accountingRetryAt=0;await f.e.enter(symbol,signal);assert.equal(entryPosts(f).length,1);assert.equal(f.e.accountingBlock,'');
+});
+test('trial skips inadequate movement after commission without querying leverage or stopping',async()=>{
+ const f=fixture(),signal={...trialSignal(f),atr:.001};await f.e.enter(symbol,signal);
+ assert.equal(entryPosts(f).length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/commission/);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/leverage').length,0);
+});
+test('trial rechecks current direction and does not enter a reversed market',async()=>{
+ const f=fixture(),signal=trialSignal(f),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars('SELL'):base(m,p,q,s);
+ await f.e.enter(symbol,signal);assert.equal(entryPosts(f).length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/momentum|movement|direction|revers/i);
+});
+test('trial rejects low-volume candles even when their direction is clear',async()=>{
+ const f=fixture();armTrial(f.e);const minutes={'1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'2h':120,'4h':240};
+ f.e.scanBars=async(_s,interval)=>{const b=continuationBars('BUY',minutes[interval]*60000);b.at(-1)[5]=1;return b;};
+ const out=await f.e.scanCandidate(symbol,null,f.e.stopEpoch);assert.equal(out.signal,null);assert.ok(out.checks.some(c=>c.reason.includes('Volume')));
+});
+test('confirmed generic HTTP 400 entry rejection does not stop Auto or repeat a trade order',async()=>{
+ const f=fixture(),signal=trialSignal(f),base=f.api.call;let dispatches=0;
+ f.api.call=async(m,p,q,s)=>{if(m==='POST'&&p==='/fapi/v1/order'&&!q.reduceOnly){dispatches++;throw new DemoError('entry rejected',400);}return base(m,p,q,s);};
+ await f.e.enter(symbol,signal);assert.equal(dispatches,1);assert.equal(f.e.auto,true);assert.equal(f.e.state.records[0].rejected,true);
+});
+function recoveryFixture(){
+ const f=fixture();f.e.newRules=true;f.e.tradingReady=true;f.e.syncDaily=()=>{};f.e.ensureIncomeFresh=async()=>{};f.e.enforceSessionGoal=async()=>false;f.e.reconcile=async()=>{};f.e.scanRiskCheck=async()=>{};f.e.reviewContinuation=async()=>{};f.e.refresh=async()=>{};return f;
+}
+test('temporary read failure retries automatically with backoff, refreshing before scanning',async()=>{
+ const f=recoveryFixture();let scanned=0,refreshed=0;f.e.scan=async()=>scanned++;
+ const error=new DemoError('network timeout',0);error.requestMethod='GET';error.requestPath='/fapi/v3/positionRisk';f.e.refresh=async()=>{throw error;};
+ await f.e.tick();assert.equal(f.e.auto,true);assert.ok(f.e.retryAt>Date.now());assert.equal(scanned,0);const first=f.e.retryAt;
+ await f.e.tick();assert.equal(f.e.retryAt,first);assert.equal(scanned,0);
+ f.e.retryAt=0;f.e.refresh=async()=>refreshed++;await f.e.tick();assert.equal(refreshed,1);assert.equal(scanned,1);assert.equal(f.e.auto,true);assert.equal(f.e.retryAt,0);
+});
+test('read cooldown respects Binance deadline and explicit Stop cancels automatic resume',async()=>{
+ const f=recoveryFixture();let scans=0;f.e.scan=async()=>scans++;const err=new DemoError('rate limit',429);err.requestMethod='GET';f.api.blockUntil=Date.now()+120000;f.e.refresh=async()=>{throw err;};
+ await f.e.tick();assert.equal(f.e.auto,true);assert.ok(f.e.retryAt>=f.api.blockUntil);f.e.pause('User Stop');assert.equal(f.e.retryAt,0);
+ f.e.refresh=async()=>{};await f.e.tick();assert.equal(f.e.auto,false);assert.equal(scans,0);
+});
+test('authentication and uncertain order writes never trigger automatic read recovery',async()=>{
+ for(const [code,method,uncertain] of [[401,'GET',false],[-1022,'GET',false],[0,'POST',true],[500,'POST',true]]){
+  const f=recoveryFixture(),err=new DemoError('requires review',code,uncertain);err.requestMethod=method;f.e.refresh=async()=>{throw err;};await f.e.tick();assert.equal(f.e.auto,false);assert.equal(f.e.retryAt,0);
+ }
+ const f=recoveryFixture(),err=new DemoError('read failed',0);err.requestMethod='GET';f.e.state.records=[{id:'bd1_pending',symbol,side:'BUY',pendingClose:'bd1_close',entryStatus:'FILLED'}];
+ assert.equal(f.e.scheduleReadRecovery(err),false);
+});
+test('Stop during an in-flight read prevents error recovery from re-enabling Auto',async()=>{
+ const f=recoveryFixture();let release;f.e.refresh=()=>new Promise((_,reject)=>{release=reject;});const tick=f.e.tick();f.e.pause('User Stop');const err=new DemoError('offline',0);err.requestMethod='GET';release(err);await tick;assert.equal(f.e.auto,false);assert.equal(f.e.retryAt,0);
+});
+test('API reports obsolete relay routes honestly and classifies read errors separately from writes',async()=>{
+ const key=await webcrypto.subtle.importKey('raw',new TextEncoder().encode('unit-test-secret'),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ const api=new DemoAPI('fake-key',key,async()=>Response.json({error:'Unsupported demo request'},{status:400}),webcrypto);api.synced=Date.now();api.relayToken='test-token';
+ await assert.rejects(()=>api.call('GET','/fapi/v1/leverageBracket',{symbol}),e=>e.code===400&&e.backendUpdateRequired&&e.source==='local-backend'&&e.requestMethod==='GET'&&!e.uncertain&&/Local backend/.test(e.message));
+ api.relayToken='';api.fetcher=async()=>Response.json({code:500},{status:500});await assert.rejects(()=>api.call('GET','/fapi/v3/account'),e=>e.requestMethod==='GET'&&!e.uncertain);
+ await assert.rejects(()=>api.call('POST','/fapi/v1/order',{symbol}),e=>e.requestMethod==='POST'&&e.uncertain);
+});
+
+test('trial keeps a later qualified timeframe when the primary candle was already traded',async()=>{
+ const f=fixture(),signal=trialSignal(f);await f.e.enter(symbol,signal);const later={...signal,close:signal.close-1000,intervalMs:180000};
+ await f.e.enter(symbol,{...signal,alternatives:[later]});assert.equal(entryPosts(f).length,2);assert.equal(f.e.state.records[1].signal.intervalMs,180000);
 });

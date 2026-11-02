@@ -4,7 +4,7 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.56</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.57</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for USDT cross-margin trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="pairMobile" type="button">Pair Mobile</button><button id="copyScanDiagnostics">Copy scan diagnostics</button><button id="copyTradeReport">Copy trade report</button><button id="resetDemo" disabled>Reset from Binance</button><button id="again" hidden disabled>New $100 session</button></div>
 
@@ -29,7 +29,7 @@ body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2
 <div class="actions"><button id="makeQr" type="button" class="primary">Generate mobile QR</button><button id="revokePhones" type="button">Revoke all phones</button></div>
 <div id="pairQr" hidden><img id="pairQrImage" alt="One-time mobile pairing QR code" style="display:block;width:min(300px,100%);height:auto;background:white;margin:16px 0"><p id="pairQrNote"></p><a id="pairLink" target="_blank" rel="noopener noreferrer">Open mobile controller</a></div>
 </section><p id="backgroundNote" hidden role="status"></p>
-<textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><section id="trialPanel"><h2>One-hour Demo experiment</h2><p>New trades only · directional candles from 1m through 4h · up to $300 margin · maximum exchange-allowed leverage, capped at 150×.</p><p class="bad">Any negative estimated net, including fees, triggers a full close when detected. Fees alone can cause immediate closures and repeated losses. There is no 30-second waiting period and no guaranteed $1 maximum loss.</p><p>Net profit pullback floors: $2 → $4 → $8 → $10 → $15 → $20 → +$5. The normal $100 net session stop still applies.</p><div class="actions"><button id="startTrial" type="button">Start 1-hour experiment</button><button id="endTrial" type="button">Return to normal entries</button></div><p id="trialStatus" role="status">Not started. The hour begins only after you click Start 1-hour experiment and connection checks pass.</p><small>Existing positions keep their exits. At expiry, new entries return to normal automatically; experiment positions retain their recorded exits. Keep the engine online. Network delays, cooldowns and fills can exceed the intended exit amount.</small></section>
+<textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><section id="trialPanel"><h2>One-hour Demo experiment</h2><p>New trades only · confirmed momentum/breakout setups from 1m through 4h · up to $300 margin · maximum exchange-allowed leverage, capped at 150×.</p><p class="bad">Any negative estimated net, including fees, triggers a full close when detected. Fees alone can cause immediate closures and repeated losses. There is no 30-second waiting period and no guaranteed $1 maximum loss.</p><p>Net profit pullback floors: $2 → $4 → $8 → $10 → $15 → $20 → +$5. The normal $100 net session stop still applies. Leverage-read failures skip or use a confirmed Binance fallback; temporary read failures retry automatically. Stop Auto remains stopped.</p><div class="actions"><button id="startTrial" type="button">Start 1-hour experiment</button><button id="endTrial" type="button">Return to normal entries</button></div><p id="trialStatus" role="status">Not started. The hour begins only after you click Start 1-hour experiment and connection checks pass.</p><small>Existing positions keep their exits. At expiry, new entries return to normal automatically; experiment positions retain their recorded exits. Keep the engine online. Network delays, cooldowns and fills can exceed the intended exit amount.</small></section>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
 <section aria-labelledby="entryStatusHeading"><h2 id="entryStatusHeading">Entry status — works with zero trades</h2><p id="entryStatus" role="status">Connect Binance Demo to load scanning status.</p><small>Shows whether Auto is stopped, data is delayed, candle setups fail, or entry checks reject them. Copy scan diagnostics works without trades and without an account refresh.</small><textarea id="scanDiagnosticsText" hidden readonly aria-label="Scan diagnostics" style="width:100%;height:220px"></textarea></section><p id="leverageWindow">$300 margin · adaptive leverage up to 10× · Cross · 1–5m / 10m / 15m / 20m / 30m / 60m entries</p><small>Up to $5,000 demo USDT margin budget · $300 target margin per new trade; Profit pullback floors: $2 / $4 / $6 / $8 / $10 / then +$5, after fees · At -$3 reduce 25% once; at -$5 close that trade · $100 net session target: close all bot-managed positions and stop new entries · Manual close remains available.</small>
 <section><h2>Available USDT · margin allocation</h2><b id="budgetValue">Awaiting account</b><small>Uses USDT collateral only; no BTC or USDC conversions. Cross positions share available USDT. Exit thresholds use total trade net after paid commissions, partial-close results, funding and estimated closing fees. A -$5 exit is a target, not a guaranteed maximum: market gaps, slippage and fees can change the fill. At $100 estimated net after closing fees, all bot positions close and new entries stop.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>Binance unrealized P&amp;L · USDT positions</small><b id="unrealized">—</b><small id="unrealizedNote">Open positions only · before commissions and funding</small></div></div>
@@ -47,7 +47,7 @@ body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2
 </details>
 </main><script>
 'use strict';
-const APP_VERSION='1.56';
+const APP_VERSION='1.57';
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
 const LEVERAGE_OVERRIDE_UNTIL=1793406469000; // 31 Oct 2026, 04:27:49 Asia/Dubai
@@ -58,8 +58,8 @@ const PRIVATE = {
   POST: new Set(['/fapi/v1/order','/fapi/v1/algoOrder','/fapi/v1/leverage','/fapi/v1/marginType']),
   DELETE: new Set(['/fapi/v1/algoOrder','/fapi/v1/order'])
 };
-const ENTRY_REJECTIONS=new Set([-2010,-2019,-2020,-2025,-2026,-2027,-2028,-1111,-1121,-4004,-4005,-4014,-4016,-4023,-4024,-4028,-4067,-4068,-4131,-4164,-4202,-4203,-4205,-4206,-4208,-4209,-4403]);
-const ENTRY_READ_PATHS=new Set(['/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/klines','/fapi/v1/premiumIndex','/fapi/v1/ticker/bookTicker','/fapi/v1/commissionRate','/fapi/v1/leverageBracket']);
+const ENTRY_REJECTIONS=new Set([400,-2010,-2019,-2020,-2025,-2026,-2027,-2028,-1111,-1121,-4004,-4005,-4014,-4016,-4023,-4024,-4028,-4067,-4068,-4131,-4164,-4202,-4203,-4205,-4206,-4208,-4209,-4403]);
+const ENTRY_READ_PATHS=new Set(['/fapi/v1/userTrades','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/klines','/fapi/v1/premiumIndex','/fapi/v1/ticker/bookTicker','/fapi/v1/commissionRate','/fapi/v1/leverageBracket']);
 const ENTRY_READ_TRANSIENT=new Set([0,-1000,-1001,-1006,-1007,408,500,502,503,504]);
 const ACCOUNT_BLOCKS=new Set([401,403,418,429,451,-1002,-1003,-1011,-1015,-1021,-1022,-2014,-2015]);
 class DemoError extends Error { constructor(message, code=0, uncertain=false){super(message);this.code=code;this.uncertain=uncertain;} }
@@ -68,7 +68,7 @@ class DemoAPI {
   async call(method,path,params={},signed=true,options={}){
     const started=Date.now();let ok=false,code=0;
     try{const result=await this.request(method,path,params,signed,options);ok=true;return result;}
-    catch(error){code=Number(error.code)||0;throw error;}
+    catch(error){code=Number(error.code)||0;error.requestMethod??=method;error.requestPath??=path;if(error.requestMethod==='GET')error.uncertain=false;throw error;}
     finally{this.timings??=[];this.timings.push({at:Date.now(),method,path,signed,ms:Date.now()-started,ok,code});this.timings=this.timings.slice(-60);}
   }
   async request(method,path,params={},signed=true,options={}){
@@ -104,9 +104,10 @@ class DemoAPI {
       let data;try{data=await r.json();}catch{throw new DemoError('Unreadable Binance response; reconcile order status.',0,method!=='GET');}
       if(r.status===429||r.status===418){
         this.limitSource=data.error==='Backend rate limit; no request forwarded'?'Local backend':data.error==='Binance cooldown; no request forwarded'||Number(data.code)<0?'Binance':this.relayToken?'Backend or Binance':'Binance';
-        throw new DemoError(this.limitSource+' rate limit (HTTP '+r.status+'). Wait '+Math.ceil((this.blockUntil-Date.now())/1000)+' seconds before Retry connection or Start / Resume. No automatic order retry.',r.status,method!=='GET');
+        throw new DemoError(this.limitSource+' rate limit (HTTP '+r.status+'). Wait '+Math.ceil((this.blockUntil-Date.now())/1000)+' seconds. Auto waits for read recovery; uncertain orders are never blindly retried.',r.status,method!=='GET');
       }
       if(signed&&this.relayToken&&data.error==='Backend access token rejected')throw new DemoError('Local connection token rejected. Unlock saved keys and replace the token with the one from the running Windows backend.',401);
+      if(signed&&this.relayToken&&data.error==='Unsupported demo request'){const error=new DemoError('Local backend does not support '+path+'. Update and restart the laptop connector.',400);error.backendUpdateRequired=true;error.source='local-backend';throw error;}
       if(!r.ok||Number(data.code)<0){const c=Number(data.code)||r.status;const messages={[-2027]:'Position size exceeds Binance limit at the selected leverage.',[-2015]:'Demo API permission or IP restriction rejected. Enable Futures trading on the demo key.',[-1022]:'Demo signature rejected. Check the HMAC secret.',[-1021]:'Timestamp rejected. Reconnect to synchronize time.',[-2019]:'Insufficient demo margin.',[-4067]:'Open orders prevent changing margin mode.',[-4168]:'Isolated margin requires Single-Asset Mode.'};throw new DemoError(messages[c]||'Binance Demo rejected request ('+c+').',c,r.status>=500||[-1006,-1007,-4116].includes(c));}
       return data;
     }catch(e){
@@ -236,13 +237,13 @@ function signalLeverageCeiling(signal,market,now){
   const fresh=market&&Number.isFinite(market.closedAt)&&now>=market.closedAt&&now-market.closedAt<=315000;
   return fresh&&market.side===signal.side?base:Math.min(3,base);
 }
-function selectEntryCandidate(primary,{price,fee,now,traded=()=>false}){
+function selectEntryCandidate(primary,{price,fee,now,traded=()=>false,intervals=[1,2,3,4,5,10,15,20,30,60]}){
   const choices=[primary,...(Array.isArray(primary.alternatives)?primary.alternatives:[])].slice(0,10),checks=[];
   for(const candidate of choices){
     const {alternatives,...signal}=candidate,intervalMs=signal.intervalMs||300000;
     let reason;
     if(signal.side!==primary.side||!signal.qualityConfirmed||!(signal.strength>=1)||![3,5,8].includes(signal.leverage)||!(signal.stopDistance>0&&Number.isFinite(signal.stopDistance))||!(signal.atr>0&&Number.isFinite(signal.atr))||!Number.isFinite(signal.price))reason='Invalid or opposite-direction candidate';
-    else if(![1,2,3,4,5,10,15,20,30,60].includes(intervalMs/60000)||!Number.isFinite(signal.close)||signal.close>=now||now-signal.close>intervalMs+15000)reason='Signal became stale';
+    else if(!intervals.includes(intervalMs/60000)||!Number.isFinite(signal.close)||signal.close>=now||now-signal.close>intervalMs+15000)reason='Signal became stale';
     else if(traded(signal))reason='Already traded this candle';
     else reason=entryPriceReason(price,signal,{tolerant:true});
     if(!reason&&2*signal.atr<=3*(2*price*fee))reason='Estimated candle movement too small relative to round-trip commission';
@@ -352,8 +353,8 @@ class DemoEngine {
     const epoch=this.stopEpoch;await this.start();
     if(!this.auto||epoch!==this.stopEpoch)return false;
     const at=Date.now()+this.api.offset;
-    this.state.oneHourTrial={id:'trial_'+at,startedAt:at,until:at+3600000,scope:'new-positions',lossExit:'any-negative-net',maxMargin:300,maxLeverage:150,profitFloors:[2,4,8,10],profitStep:5};
-    this.save();this.event('One-hour Demo experiment started. Maximum exchange-allowed leverage up to 150×; up to $300 margin. Any negative estimated net triggers closure, including fees. New entries revert at '+new Date(at+3600000).toISOString()+'. Existing positions keep their recorded exits.');return true;
+    this.state.oneHourTrial={id:'trial_'+at,startedAt:at,until:at+3600000,scope:'new-positions',lossExit:'any-negative-net',maxMargin:300,maxLeverage:150,entryStrategy:'confirmed-momentum-v1',profitFloors:[2,4,8,10],profitStep:5};
+    this.save();this.event('One-hour Demo experiment started. Confirmed momentum/breakout setups only. Maximum exchange-allowed leverage up to 150×; up to $300 margin. Any negative estimated net triggers closure, including fees. New entries revert at '+new Date(at+3600000).toISOString()+'. Existing positions keep their recorded exits.');return true;
   }
   endTrial(){
     const t=this.state.oneHourTrial;if(!t||t.endedAt)return;
@@ -371,7 +372,7 @@ class DemoEngine {
   }
   save(){this.persist(this.state);}
   event(text){this.events.unshift({at:Date.now(),text});this.events=this.events.slice(0,60);this.notify();}
-  pause(reason){this.auto=false;this.stopEpoch++;this.scanController?.abort();if(reason)this.event(reason);}
+  pause(reason){this.retryAt=0;this.retryAttempt=0;this.auto=false;this.stopEpoch++;this.scanController?.abort();if(reason)this.event(reason);}
   active(){return this.state.records.filter(r=>!r.closedAt&&!r.rejected);}
   owned(symbol){return this.active().find(r=>r.symbol===symbol);}
   position(symbol){return this.positions.find(p=>p.symbol===symbol&&number(p.positionAmt)!==0);}
@@ -496,11 +497,12 @@ class DemoEngine {
     else if(this.state.goalStopAt)status='$100 session stop is locked. Start a new session while flat to resume.';
     else if(!this.tradingReady)status='Balance connected; trading checks are incomplete. '+(this.block||'Use Retry connection.');
     else if(!this.auto)status='Auto is stopped. '+(this.block||'Use Start / Resume Demo to scan and enter.');
+    else if(this.retryAt>Date.now())status='Auto enabled; temporary connection delay. Retrying in '+Math.ceil((this.retryAt-Date.now())/1000)+' seconds. '+(this.block||'');
     else if(this.controlPending)status='A manual action is queued or running; new entries wait for it.';
     else if(!this.symbols.length)status='No eligible markets have been loaded.';
     else if(elapsed!==null&&elapsed>90)status='No completed coin check for '+elapsed+' seconds. '+(this.block||this.entryOutcome||'Check connection and last scan times.');
     else status='Auto scanning. '+(audit?audit.checked+' completed coin checks; '+audit.qualified+' candle setups; '+audit.submitted+' confirmed order submissions; '+audit.skipped+' entry skips; '+(audit.entryErrors||0)+' entry errors; '+audit.dataErrors+' data errors.':'Detailed counters unavailable from this engine.')+(audit?.lastResult?' Latest: '+audit.lastResult.symbol+' — '+audit.lastResult.reason:' Waiting for first completed check.');
-    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
+    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,retryAt:this.retryAt||null,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
   }
   tradeReport(){
     const now=Date.now(),incomeReady=!!this.lastIncome&&this.incomeWindowStart===this.state.startedAt;
@@ -579,7 +581,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.block='';this.event(this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -637,9 +639,41 @@ class DemoEngine {
     catch(error){
       // Only a read performed before any entry dispatch may be skipped. Account,
       // position, reconciliation and protection calls deliberately do not use this.
-      if(error instanceof DemoError&&ENTRY_READ_TRANSIENT.has(error.code))error.candidateRead=path;
+      if(error instanceof DemoError&&(ENTRY_READ_TRANSIENT.has(error.code)||[400,404].includes(error.code)))error.candidateRead=path;
       throw error;
     }
+  }
+  async checkEntryAccounting(symbol){
+    if(Date.now()-(this.entryAccountingReadyAt||0)<300000)return;
+    if(Date.now()<(this.accountingRetryAt||0)){const error=new DemoError(this.accountingBlock||'Waiting to recheck Binance fee history',400);error.candidateRead='/fapi/v1/userTrades';throw error;}
+    try{
+      const rows=await this.entryRead('/fapi/v1/userTrades',{symbol,limit:1});
+      if(!Array.isArray(rows)){const error=new DemoError('Binance fee history is unreadable; entry deferred',0);error.candidateRead='/fapi/v1/userTrades';throw error;}
+      this.entryAccountingReadyAt=Date.now();this.accountingBlock='';this.accountingRetryAt=0;
+    }catch(error){
+      if([400,404].includes(error.code)){
+        this.accountingBlock=error.backendUpdateRequired?'Update and restart the laptop connector: fee-history reads are not supported. No entry submitted.':'Binance fee-history read unavailable ('+error.code+'); no entry submitted. Checking again in 30 seconds.';
+        this.accountingRetryAt=Date.now()+30000;error.message=this.accountingBlock;error.candidateRead='/fapi/v1/userTrades';
+      }
+      throw error;
+    }
+  }
+  async trialLeverageCeiling(symbol){
+    // A missing bracket route is not an order rejection. Validate a fallback
+    // through leverage-setting responses, without ever placing a test order.
+    if(Date.now()<(this.bracketUnavailableUntil||0))return 150;
+    let data;
+    try{data=await this.entryRead('/fapi/v1/leverageBracket',{symbol});}
+    catch(error){
+      if(error.uncertain||![400,404].includes(error.code))throw error;
+      this.bracketUnavailableUntil=Date.now()+300000;
+      this.event('Leverage bracket read unavailable ('+error.code+'). Checking leverage through Binance settings; Auto remains enabled.');return 150;
+    }
+    const row=Array.isArray(data)?data.find(x=>x.symbol===symbol):data,values=row?.brackets?.map(b=>Number(b.initialLeverage));
+    if(row?.symbol!==symbol||!values?.length||values.some(v=>!Number.isInteger(v)||v<1||v>150)){
+      const error=new DemoError('Invalid Binance leverage brackets; skipping this symbol',0);error.candidateRead='/fapi/v1/leverageBracket';throw error;
+    }
+    return Math.max(...values);
   }
   async enter(symbol,signal){
     const timing={symbol,startedAt:Date.now(),stages:[]};this.entryTiming=timing;
@@ -666,7 +700,7 @@ class DemoEngine {
     const experimental=this.experimentActive()&&signal.experimental===true;
     if(signal.experimental&&!experimental)return skip('Experiment expired; waiting for a normal signal');
     const lossLimit=trial?null:this.newRules?5:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
-    if(trial?this.state.records.some(r=>r.symbol===symbol&&r.signalClose===signal.close):this.state.records.some(r=>r.symbol===symbol&&((!this.newRules&&r.signalClose===signal.close)||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip(trial?'This candle already has an entry; waiting for a new candle':'Already traded this candle or re-entry cooldown (10 minutes after close)');
+    if(!trial&&this.state.records.some(r=>r.symbol===symbol&&((!this.newRules&&r.signalClose===signal.close)||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip('Already traded this candle or re-entry cooldown (10 minutes after close)');
     progress('Checking Binance balance, positions and open orders');
     await this.refresh({inventory:!this.newRules,valuation:false});
     if(this.newRules&&await this.enforceSessionGoal())return skip('$100 net session target reached');
@@ -679,7 +713,7 @@ class DemoEngine {
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return skip('Market-order filters unavailable');
     let momentum;
-    if(this.newRules&&!trial){
+    if(this.newRules){
       progress('Rechecking current 1m momentum before entry');
       try{momentum=entryMomentum(await this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false),signal.side,Date.now()+this.api.offset);}
       catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skip('1m entry check unavailable; scanning continues: '+error.message);}
@@ -693,12 +727,13 @@ class DemoEngine {
     const feeInfo=await this.entryRead('/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
     if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
     let candidateChecks;
-    if(this.newRules&&!trial){
-      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,traded:candidate=>this.state.records.some(r=>r.symbol===symbol&&r.signalClose===candidate.close)});
+    if(this.newRules){
+      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,...(trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),traded:candidate=>this.state.records.some(r=>r.symbol===symbol&&r.signalClose===candidate.close)});
       candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
       if(!selection.signal)return skip('No entry-ready timeframe: '+candidateChecks.map(c=>c.minutes+'m '+c.reason).join(' | '));
       signal=selection.signal;progress('Selected '+signal.intervalMs/60000+'m '+(signal.setupType||'breakout')+' after price and commission checks');
     }
+    if(this.newRules){progress('Checking fee history before entry');await this.checkEntryAccounting(symbol);}
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
     if(this.state.budgetWalletBaseline===undefined){this.state.budgetWalletBaseline=number(usdt.walletBalance);this.save();}
     const capital=this.budgetStatus();
@@ -720,14 +755,7 @@ class DemoEngine {
     };
     if(this.newRules&&!trial&&(available<ENTRY_MARGIN||marginRoom<ENTRY_MARGIN))return skip('Waiting for at least $300 free margin plus fees; scanning continues');
     if(this.newRules&&!trial&&signal.intervalMs===60000&&2*momentum.atr<=3*(2*price*fee))return skip('Recent 1m movement is too small relative to round-trip fees; scanning continues');
-    let trialCeiling;
-    if(trial){
-      const data=await this.entryRead('/fapi/v1/leverageBracket',{symbol}),bracket=Array.isArray(data)?data.find(x=>x.symbol===symbol):data;
-      if(bracket?.symbol!==symbol||!Array.isArray(bracket.brackets)||!bracket.brackets.length)return skip('Binance leverage brackets unavailable; continuing other symbols');
-      const values=bracket.brackets.map(b=>Number(b.initialLeverage));
-      if(values.some(v=>!Number.isInteger(v)||v<1||v>150))return skip('Invalid Binance leverage bracket; continuing other symbols');
-      trialCeiling=Math.max(...values);
-    }
+    const trialCeiling=trial?await this.trialLeverageCeiling(symbol):null;
     const leverageCeiling=trial?trialCeiling:this.newRules?signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset):preferredLeverage;
     const adaptive=this.newRules&&!trial?adaptiveLeveragePlan({price,atr:momentum.atr,fee,lossLimit:ENTRY_VOLATILITY_ALLOWANCE,side:signal.side,tick:priceFilter.tickSize,plan:minimumPlan,maxLeverage:leverageCeiling,requireStop:false}):null;
     if(this.newRules&&!trial&&!adaptive)return skip('$300 margin exceeds the entry volatility and fee allowance, even at 1×; scanning continues');
@@ -741,14 +769,14 @@ class DemoEngine {
         if(!this.auto||epoch!==this.stopEpoch)return false;
         try{
           const response=await this.api.call('POST','/fapi/v1/leverage',{symbol,leverage:candidate});
-          if(number(response.leverage)!==candidate)throw new DemoError('Selected leverage not accepted');
+          if(number(response.leverage)!==candidate||(response.symbol!==undefined&&response.symbol!==symbol))throw new DemoError('Selected leverage not accepted for this symbol');
           if(trial&&!(number(response.maxNotionalValue)>0))return false;
           const size=minimumPlan(candidate,price,trial?number(response.maxNotionalValue):Infinity);
           if(trial&&(size.qty<Math.max(number(lot.minQty),number(normal.minQty))||size.notional<minNotional))return false;
           if(size.notional>number(response.maxNotionalValue))return false;
           leverage=response;selectedLeverage=candidate;minimumSize=size;return true;
         }catch(e){
-          if(e.uncertain||![-4028,-4202,-4203,-4205,-4206,-4208,-4209,-4403].includes(e.code))throw e;
+          if(e.uncertain||![-4028,-1130,-4202,-4203,-4205,-4206,-4208,-4209,-4403].includes(e.code))throw e;
           return false;
         }
       };
@@ -806,7 +834,7 @@ class DemoEngine {
         if(quoteEvidence.reason)return skip(quoteEvidence.reason+'; scanning continues');
         quoteEvidence.estimatedLossAtOneAtr=Math.max(0,-quoteEvidence.estimatedImmediateExitNet,-quoteEvidence.estimatedMarkNet)+qty*(momentum?.atr||0)*(1+fee);
         if(!trial&&quoteEvidence.estimatedLossAtOneAtr>ENTRY_VOLATILITY_ALLOWANCE+1e-8)return skip('Fresh spread, mark movement and one recent 1m ATR exceed the entry sizing allowance; scanning continues');
-        const quoteReason=trial?null:entryPriceReason(quotedPrice,signal,{tolerant:true});if(quoteReason)return skip('Executable quote: '+quoteReason+'; scanning continues');
+        const quoteReason=entryPriceReason(quotedPrice,signal,{tolerant:true});if(quoteReason)return skip('Executable quote: '+quoteReason+'; scanning continues');
         if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||qty>number(lot.maxQty)||qty>number(normal.maxQty)||notional>number(leverage.maxNotionalValue))return skip('Fresh quote size exceeds Binance order limits; scanning continues');
         const units=qty/number(normal.stepSize);if(!Number.isFinite(units)||Math.abs(units-Math.round(units))>1e-7)return skip('Quantity is not valid for Binance lot step; scanning continues');
         const margin=notional/selectedLeverage;
@@ -815,7 +843,7 @@ class DemoEngine {
     }
     if(!this.auto||epoch!==this.stopEpoch||this.controlPending||this.shouldScan?.()===false)return skip(this.controlPending?'Manual action queued before entry dispatch':'Auto stopped before entry dispatch');
     if(this.newRules&&!trial&&selectedLeverage>signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset))return skip('Market context became stale during checks; rechecking before higher leverage');
-    if(this.newRules&&!trial&&(Date.now()+this.api.offset-momentum.closedAt>75000||Date.now()+this.api.offset-signal.close>(signal.intervalMs||300000)+15000))return skip('Entry confirmation became stale during checks; rechecking next scan');
+    if(this.newRules&&(Date.now()+this.api.offset-momentum.closedAt>75000||Date.now()+this.api.offset-signal.close>(signal.intervalMs||300000)+15000))return skip('Entry confirmation became stale during checks; rechecking next scan');
     if(trial&&(!this.trialActive()||signal.oneHourTrial!==this.state.oneHourTrial.id||Date.now()+this.api.offset-signal.close>(signal.intervalMs||60000)+15000))return skip('Experiment expired or candle became stale before entry dispatch');
     if(experimental&&!this.experimentActive())return skip('Experiment expired before order submission');
     if(this.entryLeverage(signal)!==preferredLeverage)return skip('50× window expired during checks; next scan uses adaptive leverage');
@@ -1188,21 +1216,19 @@ class DemoEngine {
     return {symbol,mover,signal,reason,foundCandidate,intervalMs:signal?.intervalMs||60000,scanMs:Date.now()-startedAt,candleClosedAt,checks};
   }
   async trialCandidate(symbol,mover,epoch,controller){
-    const startedAt=Date.now(),trialId=this.state.oneHourTrial.id,checks=[];
-    // First fresh directional closed candle wins. No volume, breakout, trend,
-    // mover-direction or commission-profitability filter in this experiment.
+    const startedAt=Date.now(),trialId=this.state.oneHourTrial.id,checks=[],candidates=[];
+    const trend=await this.scanTrendBars(symbol,controller);
     for(const [interval,minutes] of [['1m',1],['3m',3],['5m',5],['15m',15],['30m',30],['1h',60],['2h',120],['4h',240]]){
       if(!this.auto||epoch!==this.stopEpoch||!this.trialActive()||this.state.oneHourTrial.id!==trialId||controller?.signal.aborted)break;
-      const raw=await this.scanBars(symbol,interval,30,controller),now=Date.now()+this.api.offset,ms=minutes*60000;
-      const bars=raw.filter(b=>number(b[6])<now),b=bars.at(-1);let signal=null;
-      if(bars.length>=21&&now-number(b[6])<=ms+15000&&number(b[1])>0&&number(b[1])>=number(b[3])&&number(b[1])<=number(b[2])&&number(b[4])!==number(b[1])){
-        const atr=bars.slice(-20).reduce((sum,x)=>sum+number(x[2])-number(x[3]),0)/20;
-        if(atr>0)signal={side:number(b[4])>number(b[1])?'BUY':'SELL',price:number(b[4]),close:number(b[6]),high:number(b[2]),low:number(b[3]),atr,stopDistance:atr,qualityConfirmed:true,strength:1,leverage:3,intervalMs:ms,setupType:'experiment candle direction',oneHourTrial:trialId};
-      }
-      checks.push({minutes,side:signal?.side||'WAIT',reason:signal?'Directional closed candle':'No fresh directional closed candle'});
-      if(signal)return {symbol,mover,signal,foundCandidate:true,intervalMs:ms,scanMs:Date.now()-startedAt,candleClosedAt:signal.close,checks};
+      const raw=interval==='5m'?trend:await this.scanBars(symbol,interval,60,controller),now=Date.now()+this.api.offset,ms=minutes*60000;
+      let reason='No confirmed setup',signal=momentumSetup(raw,trend,now,ms,r=>reason=r);
+      if(!signal){const candidate=breakout(raw,now,ms);if(candidate)signal=qualifySetup(candidate,raw,trend,now,r=>reason=r,300000);}
+      if(signal&&mover&&signal.side!==mover.side){reason='Mover direction and candle setup disagree';signal=null;}
+      checks.push({minutes,side:signal?.side||'WAIT',reason:signal?'Momentum/breakout setup confirmed':reason});
+      if(signal)candidates.push({...signal,intervalMs:ms,oneHourTrial:trialId,marketSource:mover?{type:mover.side==='BUY'?'gainer':'loser',change24h:mover.change}:{type:'full-market'}});
     }
-    return {symbol,mover,signal:null,foundCandidate:false,reason:'Experiment: no fresh directional closed candle, or hour ended',scanMs:Date.now()-startedAt,checks};
+    const first=candidates[0],signal=first?{...first,alternatives:candidates.slice(1).filter(s=>s.side===first.side)}:null;
+    return {symbol,mover,signal,foundCandidate:!!signal,intervalMs:signal?.intervalMs||60000,reason:checks.slice(0,3).map(c=>c.minutes+'m: '+c.reason).join(' | ')||'Experiment hour ended',scanMs:Date.now()-startedAt,candleClosedAt:signal?.close||null,checks};
   }
   async scan(){
     if(!this.auto||!this.symbols.length||this.shouldScan?.()===false)return;
@@ -1284,8 +1310,18 @@ class DemoEngine {
     }catch(e){r.continuation='Trend review unavailable: '+e.message;}
     this.save();this.notify();
   }
+  scheduleReadRecovery(error){
+    if(!this.auto||error.requestMethod!=='GET'||error.uncertain||!(ENTRY_READ_TRANSIENT.has(error.code)||[418,429,-1003,-1015].includes(error.code)))return false;
+    if(this.active().some(r=>r.pendingClose||r.lossReduction?.status==='PENDING'||!r.entryStatus||!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(r.entryStatus)))return false;
+    const limited=[418,429,-1003,-1015].includes(error.code);
+    const delay=limited?60000:Math.min(60000,5000*2**Math.min(this.retryAttempt||0,4));
+    this.retryAttempt=(this.retryAttempt||0)+1;this.retryAt=Math.max(Date.now()+delay,this.api.blockUntil||0);
+    this.block='Temporary read failure: '+error.message+' Auto will recheck connection and positions before resuming entries.';
+    this.event(this.block);return true;
+  }
   async tick(){
-    if(!this.connected||this.busy||this.controlPending)return;this.busy=true;
+    if(!this.connected||this.busy||this.controlPending)return;
+    this.expireTrial();if(this.retryAt>Date.now()){this.notify();return;}this.busy=true;
     try{
       this.expireTrial();this.syncDaily();
       if(!this.tradingReady){await this.refreshBalance();return;}
@@ -1301,8 +1337,8 @@ class DemoEngine {
       if(this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId||r.pendingClose===o.clientOrderId||r.lossReduction?.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))this.pause('Unmanaged orders detected; auto entries stopped.');
       if(this.auto&&Date.now()-this.lastScan>=1000)await this.scan();
       await this.scanRiskCheck();await this.reviewContinuation();
-      this.block='';
-    }catch(e){this.block=e.message;this.pause(e.message);}finally{this.busy=false;this.notify();}
+      this.block='';this.retryAt=0;this.retryAttempt=0;
+    }catch(e){if(!this.scheduleReadRecovery(e)){this.block=e.message;this.pause(e.message);}}finally{this.busy=false;this.notify();}
   }
 }
 if(typeof module!=='undefined')module.exports={trialProfitFloor,netProfitFloor,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
@@ -1355,12 +1391,12 @@ function render(){
   $('startTrial').disabled=!connected||!!e.controlPending||trialActive||!!e.state.goalStopAt||(e.remote&&e.appVersion!==APP_VERSION);
   $('endTrial').disabled=!connected||!!e.controlPending||!trialActive;
   const remaining=trialActive?Math.max(0,Math.ceil((trial.until-(Date.now()+(e.api.offset||0)))/1000)):0;
-  $('trialStatus').textContent=trialActive?'EXPERIMENT '+(e.auto?'RUNNING':'PAUSED')+' · '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0')+' remaining · ends '+new Date(trial.until).toLocaleTimeString()+' · maximum leverage; any negative after-fee estimate closes':trial?'Experiment entry window ended. Normal entries restored; experiment positions retain their recorded exits.':'Not started. Click Start 1-hour experiment when connected.';
+  $('trialStatus').textContent=trialActive?'EXPERIMENT '+(e.auto?'RUNNING':'PAUSED')+' · '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0')+' remaining · ends '+new Date(trial.until).toLocaleTimeString()+' · confirmed setups; Binance-accepted leverage; any negative after-fee estimate closes':trial?'Experiment entry window ended. Normal entries restored; experiment positions retain their recorded exits.':'Not started. Click Start 1-hour experiment when connected.';
   if(!connected)return;
-  status((e.auto?'AUTO RUNNING · scanning for qualifying signals':e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  status((e.auto?(e.retryAt>Date.now()?'AUTO WAITING · automatic retry in '+Math.ceil((e.retryAt-Date.now())/1000)+'s':'AUTO RUNNING · scanning for qualifying signals'):e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   const policy=e.entryPolicy;
   $('leverageWindow').textContent=policy?'$'+policy.margin+' margin · adaptive leverage up to '+policy.maxLeverage+'× · Cross · 1–60m signals · '+(policy.lossLimit===null?'no stop loss':(policy.lossLimit?'$'+policy.lossLimit:'Recorded')+' planned loss stop')+' · '+(policy.profitExit==='net-trailing'?'net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · 25% trim at -$3, full close at -$5':policy.profitExit==='positive-estimate'?'close positive estimated net · reduce 25% once when negative':policy.profitExit==='fixed'?'$'+policy.takeProfit+' net take-profit':policy.profitExit==='manual'?'manual profit close':'previous profit rules'):'Laptop engine '+(e.appVersion?'V'+e.appVersion:'version unavailable')+' uses previous settings. Update and restart it to apply $300 margin / up to 10×.';
-  if(trialActive)$('leverageWindow').textContent='ONE-HOUR EXPERIMENT · up to $300 margin · maximum allowed leverage up to 150× · first directional candle · close any negative after-fee estimate · net pullback $2 / $4 / $8 / $10 / +$5 · $100 net session stop';
+  if(trialActive)$('leverageWindow').textContent='ONE-HOUR EXPERIMENT · up to $300 margin · maximum allowed leverage up to 150× · confirmed momentum/breakout setups · close any negative after-fee estimate · net pullback $2 / $4 / $8 / $10 / +$5 · $100 net session stop';
   const capital=e.budgetStatus();$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · no position-count cap · '+(policy?'$'+policy.margin+' target margin/entry':'Previous engine entry settings; update required')+' · '+(policy?.profitExit==='net-trailing'?'paid commissions + partial results + funding + expected closing fee included':policy?.profitExit==='positive-estimate'?'closing estimates include fees · one 25% loss reduction · no stop loss':policy?.profitExit==='fixed'?'$'+policy.takeProfit+' net profit target includes estimated fees · no stop loss':'fees included in '+(policy?.lossLimit?'$'+policy.lossLimit:'recorded')+' loss target');
   if(trialActive)$('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Current position margin: $'+money(capital.reserved)+' · $5,000 margin budget · up to $300 per experiment entry · fees can exceed $1 before the price moves';
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
