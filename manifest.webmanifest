@@ -1,23 +1,14 @@
 {
-  "name": "BTC Futures Virtual Trader V17",
-  "short_name": "BTC Paper V17",
+  "name": "Trading Dashboard · Paper & Binance Demo",
+  "short_name": "Binance Demo",
+  "description": "Paper trading and Binance Demo controls. The dashboard shows the active engine version.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#081626",
   "theme_color": "#081626",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }

@@ -132,7 +132,7 @@ autoEpoch++;autoCoins.clear();lastAutoEntry={};
 account={cash:snapshot.value,realized:0,open:[],history:[],autoStopped:true,autoPortfolio:false,capital1500Applied:true,capital5000Applied:true,reset191Applied:true,startingCapital:snapshot.value,autoExcluded:[]};save();render()
 };$('exportaudit').onclick=exportAudit;$('export').onclick=()=>{let lines=['pair,side,entry,exit,net_pnl,reason,time',...account.history.map(x=>[x.symbol,x.side,x.entry,x.exit,x.result,x.reason,x.time].join(','))];let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'}));a.download='V17_paper_history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)};setInterval(async()=>{await refresh()},5000);setInterval(autoCycle,30000);setInterval(()=>{if(!document.hidden&&!busy)scan()},60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});paper();refresh();scan();
 let deferredInstall;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;$('install').style.display='inline-block'});$('install').onclick=async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;$('install').style.display='none'};
-if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).catch(()=>{});
 window.addEventListener('online',()=>{refresh()});
 </script><script>
 function selectTradingMode(mode){

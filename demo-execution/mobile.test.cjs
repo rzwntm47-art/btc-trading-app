@@ -9,7 +9,7 @@ function fixture({phone=false,fail=false}={}){
  const context=vm.createContext({DemoEngine,console,crypto:webcrypto,Response,URLSearchParams,AbortSignal,setTimeout,clearTimeout,setInterval(fn){timers.push(fn);},fetch:fetcher,document:{getElementById:node,querySelector(){return null;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(type,fn){events[type]=fn;}},location:{origin:phone?'https://test.test.ts.net':'https://rzwntm47-art.github.io',pathname:phone?'/mobile':'/',hash:phone?'#pair=test-pairing-code':''},history:{replaceState(...args){context.cleanedUrl=args[2];}},localStorage:{getItem(){return null;}},parent:{},navigator:{},TextEncoder,TextDecoder});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);vm.runInContext('render=()=>{};',context);vm.runInContext(fs.readFileSync(__dirname+'/mobile.js','utf8'),context);
  const ready=()=>vm.runInContext("remoteTransport={base:'http://127.0.0.1:10000',prefix:'/host',token:'test-admin-token'};engine=new RemoteDemo(remoteTransport);engine.connected=true;engine.tradingReady=true;",context);
- return {node,events,requests,context,ready,timers};
+ return {node,events,requests,context,ready,timers,payload,setOffline(value){fail=value;}};
 }
 test('Pair Mobile opens and missing connector credentials produce a visible setup message',async()=>{
  const f=fixture();f.node('pairPanel').hidden=true;f.node('pairMobile').onclick();assert.equal(f.node('pairPanel').hidden,false);
@@ -25,6 +25,16 @@ test('remote Start and Close send explicit idempotent commands without Binance c
 });
 test('losing the network disables controls without claiming or sending a Stop',async()=>{
  const f=fixture({fail:true});f.ready();await vm.runInContext('pollRemote()',f.context);assert.equal(vm.runInContext('engine.connected',f.context),false);assert.match(f.node('status').textContent,/may still be trading/);assert.ok(f.requests.every(x=>!x.url.includes('/command')));
+});
+test('returning to the mobile controller reconnects immediately and restores laptop Auto intent',async()=>{
+ const f=fixture({fail:true});f.ready();await vm.runInContext('pollRemote()',f.context);assert.equal(vm.runInContext('engine.connected',f.context),false);
+ f.setOffline(false);f.payload.engine.auto=true;f.payload.engine.appVersion='1.65';f.payload.engine.entryHold='Order still settling';
+ await f.events.visibilitychange();assert.equal(vm.runInContext('engine.connected',f.context),true);assert.equal(vm.runInContext('engine.auto',f.context),true);assert.equal(vm.runInContext('engine.entryHold',f.context),'Order still settling');assert.equal(vm.runInContext('engine.appVersion',f.context),'1.65');
+ assert.ok(f.requests.every(x=>x.url.endsWith('/status')));
+});
+test('network restoration refreshes a visible remote controller without sending trading commands',async()=>{
+ const f=fixture();f.ready();vm.runInContext('engine.connected=false;document.hidden=true;',f.context);await f.events.online();assert.equal(f.requests.length,0);
+ vm.runInContext('document.hidden=false;',f.context);await f.events.online();assert.equal(f.requests.length,1);assert.ok(f.requests[0].url.endsWith('/status'));assert.equal(vm.runInContext('engine.connected',f.context),true);
 });
 test('phone pairing removes fragment, exchanges once, hides key fields and uses same-origin session cookies',async()=>{
  const f=fixture({phone:true});await new Promise(r=>setTimeout(r,10));assert.equal(f.context.cleanedUrl,'/mobile');assert.equal(f.node('credentials').hidden,true);assert.equal(f.node('pairMobile').hidden,true);

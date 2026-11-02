@@ -1910,7 +1910,9 @@ $('disconnect').onclick=()=>{
   for(const id of ['positions','openOrders','trades','assets','setups','log'])$(id).replaceChildren();for(const id of ['combined','available','session','wallet','unrealized','pnlEquation','incomeAudit','incomeDiagnosis','sessionNote','unrealizedNote'])$(id).textContent='—';status('Disconnected. Accepted exchange exits remain on Binance Demo.');render();
 };
 setInterval(()=>{if(engine?.connected&&!engine.remote)engine.tick();},1000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&engine?.connected)engine.tick();});
+function resumeDashboard(){if(!document.hidden&&engine&&(engine.connected||engine.remote))return engine.tick();}
+document.addEventListener('visibilitychange',resumeDashboard);
+window.addEventListener('online',resumeDashboard);
 window.addEventListener('beforeunload',event=>{if(engine?.busy&&!engine.remote){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',()=>{if(!engine?.remote){engine?.pause();engine?.api.clear();releaseLock?.();}});
 render();
