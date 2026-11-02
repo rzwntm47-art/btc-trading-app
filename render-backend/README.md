@@ -10,6 +10,12 @@ The existing dashboard is not yet wired to this service: its assigned URL is nee
 
 The free service can sleep/restart and has no durable storage. No unattended 24-hour trading guarantee. Exchange order reconciliation must precede any retry after an ambiguous write failure. Do not use live account credentials.
 
+## V1.64 commission checks and retry update
+
+Update both `demo-execution` and `render-backend`, then restart `START-LAPTOP.cmd` and refresh the dashboard. The engine must show V1.64; a website refresh alone does not update a running laptop process. Keep the existing journal and saved credentials; do not reset positions to install the update.
+
+Commission-rate failures now use per-symbol automatic retry delays (5–60 seconds), while other coins keep scanning. Verified same-symbol fees are reused for up to five minutes within the same connection. Missing or expired fees never authorize entries. New entries keep $300 margin but lower leverage to fit a $1 estimated opening-plus-closing commission cap, rechecked at the final quote. If no leverage fits, the coin is skipped. This applies to all coins, not only BLESSUSDT. Existing profit/loss exits are unchanged. Closed symbols retain the ten-minute cooldown, and definitive rejected orders can be evaluated again after 60 seconds with fresh checks. No uncertain order is blindly retried.
+
 ## V1.63 strategy and connector update
 
 Update this folder and `demo-execution` together, then restart the Windows connector with `START-LAPTOP.cmd`. Keep the existing laptop journal data. Refreshing only the website cannot replace the loaded backend or background engine.

@@ -506,7 +506,7 @@ test('below $300 available margin never submits a smaller trade and keeps scanni
  await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.match(f.e.entryOutcome,/at least \$300/);assert.equal(f.e.auto,true);assert.ok(!f.calls.some(c=>c.method==='POST'));
 });
 test('entry is skipped when fees already consume the $5 loss allowance',async()=>{
- const f=fixture();f.e.newRules=true;f.signal.strength=3;const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.002'}:base(m,p,q,s);await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/loss|stop|fees/i);
+ const f=fixture();f.e.newRules=true;f.signal.strength=3;const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.002'}:base(m,p,q,s);await f.e.enter(symbol,f.signal);assert.equal(f.e.active().length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/loss|stop|fees/i);
 });
 test('five-minute fallback has enough complete candles and ignores partial groups',()=>{
  const {aggregateMinutes}=require('./engine.js'),t=Math.floor(Date.now()/300000)*300000-9000000;
@@ -626,7 +626,7 @@ test('loser priority does not execute a BUY signal',async()=>{
 
 test('lower fees allow higher adaptive leverage at the same $300 margin',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.strength=3;f.signal.stopDistance=.1;const original=f.api.call;
- f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.00005'}:p==='/fapi/v1/klines'?entryBars(f.signal.side,Date.now(),2):original(m,p,q,s);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.00005'}:p==='/fapi/v1/klines'?entryBars(f.signal.side,Date.now(),2):original(m,p,q,s);
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  assert.equal(r.leverage,8);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.lossLimit,5);assert.equal(r.exitsReady,true);
 });
@@ -730,7 +730,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.63');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.64');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -762,7 +762,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.63');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.64');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(Number.isFinite(r.entryEvidence.plannedStopPrice));
 });

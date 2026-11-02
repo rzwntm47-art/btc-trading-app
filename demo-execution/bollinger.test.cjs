@@ -10,12 +10,43 @@ function bandBars(side='BUY',at=Date.now(),minutes=5){
 }
 function bandFixture(side='BUY'){
  const f=fixture();f.e.newRules=true;f.e.bandRules=true;f.signal.side=side;const base=f.api.call;
- f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.00001'}:p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:20,notionalCap:1000000,notionalFloor:0}]}:p==='/fapi/v1/klines'?(q.interval==='5m'?bandBars(side):entryBars(side)):base(m,p,q,s);
+ f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.00001'}:p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:20,notionalCap:1000000,notionalFloor:0}]}:p==='/fapi/v1/klines'?(q.interval==='5m'?bandBars(side):entryBars(side)):base(m,p,q,s);
  f.signal=bollingerSetup(bandBars(side),side,Date.now());assert.ok(f.signal,'synthetic band rebound');return f;
 }
 async function opened(side='BUY'){const f=bandFixture(side);await f.e.enter(symbol,f.signal);assert.ok(f.e.owned(symbol),'entry remains open after fees');return f;}
 function entries(f){return f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);}
 function atPrice(f,price){closingQuote(f,price);f.position.markPrice=String(price);f.position.unRealizedProfit=String((price-100)*Math.abs(Number(f.position.positionAmt))*(f.signal.side==='BUY'?1:-1));}
+
+for(const side of ['BUY','SELL'])test(side+' entries reduce leverage for commission while retaining margin and exit policy',async()=>{
+ const f=bandFixture(side),base=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.0005'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);
+ assert.equal(r.leverage,3);assert.equal(r.estimatedEntryMargin,300);assert.ok(r.entryEvidence.estimatedRoundTripFees<=1);
+ assert.equal(r.exitPolicy,'stepped-net-trailing');assert.equal(r.lossLimit,6);assert.equal(r.maxLossLimit,12);
+ assert.equal(r.entryEvidence.adaptiveSizing.maxEntryCommission,1);assert.ok(r.entryEvidence.commission.verifiedAt);
+});
+test('excessive commission at 1x skips any symbol before leverage or order writes',async()=>{
+ const f=bandFixture(),base=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.002'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.equal(f.e.auto,true);
+ assert.match(f.e.entryOutcome,/commission \$1\.20 exceeds the \$1\.00 limit even at 1×/);
+ assert.equal(f.calls.filter(c=>c.method!=='GET').length,0);
+});
+test('the $1 estimated commission boundary is allowed without increasing margin or loosening signals',async()=>{
+ const f=bandFixture(),base=f.api.call;
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:String(1/3000)}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);
+ assert.equal(r.leverage,5);assert.equal(r.estimatedEntryMargin,300);assert.ok(Math.abs(r.entryEvidence.estimatedRoundTripFees-1)<1e-8);
+});
+for(const side of ['BUY','SELL'])test(side+' final quote rounding cannot bypass the commission limit',async()=>{
+ const f=bandFixture(side),base=f.api.call;let quotes=0;
+ f.api.call=async(m,p,q,s)=>{
+  if(p==='/fapi/v1/commissionRate')return {symbol:q.symbol,takerCommissionRate:String(1/3000)};
+  if(p==='/fapi/v1/ticker/bookTicker'&&++quotes===2){const price=side==='BUY'?'100.001':'99.999';return {symbol,bidPrice:price,askPrice:price,bidQty:'1000',askQty:'1000',time:Date.now()};}
+  return base(m,p,q,s);
+ };
+ await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/Fresh quote exceeds the \$1/);
+});
 test('defaults select stepped after-fee exits and supersede the old one-hour experiment',async()=>{
  const e=new DemoEngine({offset:0},null,()=>{});assert.equal(e.entryPolicy.lossLimit,6);assert.equal(e.entryPolicy.profitExit,'stepped-net-trailing');assert.equal(e.entryPolicy.maxLeverage,150);
  e.state.oneHourTrial={startedAt:Date.now(),until:Date.now()+3600000};assert.equal(e.trialActive(),false);await assert.rejects(()=>e.startTrial(),/replaced/);
@@ -128,10 +159,10 @@ test('quantity capacity reduces leverage rather than sending a smaller-margin or
  f.api.call=async(m,p,q,s)=>p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:50}]}:base(m,p,q,s);
  await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,40);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);assert.equal(Number(entries(f)[0].p.quantity),120);
 });
-test('fees consuming $6 lower leverage to the highest setting with an untriggered stop',async()=>{
- const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0005'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.leverage,18);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.entryEvidence.adaptiveSizing.exchangeCeiling,20);assert.equal(f.e.auto,true);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
- assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[18]);
+test('ordinary taker fees lower leverage to fit the $1 round-trip cap without shrinking margin',async()=>{
+ const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.0005'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.leverage,3);assert.equal(r.estimatedEntryMargin,300);assert.equal(r.entryEvidence.adaptiveSizing.exchangeCeiling,20);assert.equal(f.e.auto,true);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
+ assert.deepEqual(f.calls.filter(c=>c.path==='/fapi/v1/leverage').map(c=>c.p.leverage),[3]);
 });
 for(const available of [250,300.001])test('available '+available+' cannot shrink the requested $300 plus fees order',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v3/account')r.assets[0].availableBalance=String(available);return r;};
@@ -151,9 +182,9 @@ test('an old cancelled $2 close does not reapply the old loss target',async()=>{
  const f=await opened(),r=f.e.owned(symbol);r.pendingClose='bd1_old_loss_c';r.closeReason='$2 net trade loss';f.orders.set(r.pendingClose,{status:'CANCELED',executedQty:'0'});setTradeNet(f,-2.5);
  await f.e.reconcile();assert.ok(f.position);assert.ok(!r.pendingClose);assert.ok(!r.closedAt);
 });
-test('the revised $6 target permits an otherwise valid entry with fees above the obsolete $3 target',async()=>{
- const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0004'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.lossLimit,6);assert.equal(r.leverage,20);assert.equal(r.estimatedEntryMargin,300);assert.ok(r.entryEvidence.estimatedRoundTripFees>3&&r.entryEvidence.estimatedRoundTripFees<6);assert.ok(!r.closedAt);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
+test('the $1 commission cap takes precedence over otherwise affordable $6 stop fees',async()=>{
+ const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.0004'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.equal(r.lossLimit,6);assert.equal(r.leverage,4);assert.equal(r.estimatedEntryMargin,300);assert.ok(r.entryEvidence.estimatedRoundTripFees<=1);assert.ok(!r.closedAt);assert.ok(r.exits.some(x=>x.kind==='sl12'&&x.confirmed));
 });
 
 function expandBars(rows,baseMs){
@@ -214,10 +245,10 @@ test('profit monitoring does not need obsolete band targets or candle reads belo
  const f=await opened(),r=f.e.owned(symbol);delete r.bandTargets.intervalMs;delete r.signal.intervalMs;f.e.candleCache=new Map();const base=f.api.call,reads=[];
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')reads.push(q.interval);return base(m,p,q,s);};await f.e.reconcile();assert.deepEqual(reads,[]);assert.ok(!r.closedAt);
 });
-test('finer ticks permit the next higher fee-compatible leverage without shrinking margin',async()=>{
+test('finer ticks cannot bypass the commission cap',async()=>{
  const f=bandFixture(),base=f.api.call;f.e.meta.get(symbol).filters.find(x=>x.filterType==='PRICE_FILTER').tickSize='.00001';
- f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.0005'}:base(m,p,q,s);
- await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,19);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.0005'}:base(m,p,q,s);
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.owned(symbol).leverage,3);assert.equal(f.e.owned(symbol).estimatedEntryMargin,300);
 });
 test('lower leverage can fit available fees while retaining the full $300 margin',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{const r=await base(m,p,q,s);if(p==='/fapi/v3/account')r.assets[0].availableBalance='300.05';return r;};
@@ -225,7 +256,7 @@ test('lower leverage can fit available fees while retaining the full $300 margin
 });
 test('when even 1x fees reach the stop, no leverage write or order is sent and Auto remains on',async()=>{
  const f=bandFixture(),base=f.api.call;f.signal.bands.middle=150;f.signal.bands.upper=160;f.signal.bands.outerTarget=159;
- f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.01'}:base(m,p,q,s);
+ f.api.call=async(m,p,q,s)=>p==='/fapi/v1/commissionRate'?{symbol:q.symbol,takerCommissionRate:'.01'}:base(m,p,q,s);
  await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/No fee-compatible leverage/);assert.equal(f.calls.filter(c=>c.path==='/fapi/v1/leverage').length,0);assert.equal(f.e.auto,true);
 });
 test('a worsening final quote after leverage selection cannot submit an unsafe entry',async()=>{

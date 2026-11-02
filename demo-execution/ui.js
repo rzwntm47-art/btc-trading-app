@@ -69,8 +69,8 @@ function render(){
   }
   if(policy?.profitExit==='stepped-net-trailing'){
     const frames=policy.timeframes.map(m=>m+'m').join(' / ');
-    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
-    $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · $300 per entry; no smaller orders · $12 Binance backup loss target; $6 exit and recovery checks need the engine running';
+    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit'+(policy.maxEntryCommission?' and $'+money(policy.maxEntryCommission)+' estimated round-trip commission limit':'')+' · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
+    $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · $300 per entry; no smaller orders'+(policy.maxEntryCommission?' · opening + closing commission estimate ≤ $'+money(policy.maxEntryCommission):'')+' · $12 Binance backup loss target; $6 exit and recovery checks need the engine running';
   }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
   if(Number.isFinite(e.balance)&&e.balance>0){try{localStorage.setItem('btc_demo_balance_snapshot_v1',JSON.stringify({value:e.balance,at:e.accountAt,source:'Binance Demo combined margin value',usdtAvailable:Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance)}));}catch{/* Display remains usable if browser storage is unavailable. */}}
