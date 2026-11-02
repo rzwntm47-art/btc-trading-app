@@ -1,4 +1,4 @@
-# Binance Demo execution module — V1.61
+# Binance Demo execution module — V1.62
 
 USDⓈ-M orders go exclusively to `https://demo-fapi.binance.com`. No live endpoint, withdrawals or transfers.
 
@@ -6,7 +6,7 @@ Build: `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.h
 
 ## Strategy
 
-The user selected Bollinger profit targets. V1.61 replaces the one-hour experiment and earlier dollar trailing/partial-loss policies with a permanent multi-timeframe Bollinger / Williams %R strategy. Defaults are Bollinger 20-close SMA ± 2 population standard deviations and Williams %R 14, because the provided transcript omitted settings.
+The user selected Bollinger profit targets. V1.62 replaces the one-hour experiment and earlier dollar trailing/partial-loss policies with a permanent multi-timeframe Bollinger / Williams %R strategy. Defaults are Bollinger 20-close SMA ± 2 population standard deviations and Williams %R 14, because the provided transcript omitted settings.
 
 - Refresh eligible demo Futures 24h rankings once per minute. Check up to 20 gainers for LONG and 20 losers for SHORT, rotating eight slots plus recent candidates with three public workers. Recheck continuously; do not enter unrelated full-market coins. Rank is historical movement, not a forecast.
 - LONG: last or previous completed candle on that timeframe touches the lower band, one of their WR values is ≤ -80, then the latest candle closes bullish, above the previous close and lower band, with rising WR, still below the middle. SHORT mirrors this at the upper band with WR ≥ -20. Validate candle continuity, OHLC, freshness and positive ATR. Williams %R is a price-range oscillator, not buyer/seller percentages.
@@ -33,6 +33,18 @@ Current records use `rulesVersion: 11`, `lossLimit: 6`, `exitPolicy: 'bollinger-
 - The $100 estimated account-wide after-cost session goal remains: close bot positions, including losers, then stop new entries. Unmanaged positions are not closed. The goal latches through unresolved orders. Manual close remains available.
 
 Legacy exit/entry branches remain for historical compatibility regression tests, but the default browser and desktop engine uses `bandRules: true`. Both engine policy and version are included in remote snapshots. Profit targets and session exits need the engine online; accepted exchange loss stops persist independently. No live-account trading or profitability backtest has been performed.
+
+## V1.62 continuous Auto and conditional-order recovery
+
+The reported `GET /fapi/v1/algoOrder` error `-4015` indicates an invalid client-order identifier. Earlier code discarded the exchange `algoId`, built exit IDs by appending to the entry ID, and repeatedly queried/cancelled failed references during flat-position cleanup. A screenshot cannot identify the exact saved ID or prove it was overlength.
+
+New protective IDs are independent 28-character values journaled before submission. Retain Binance's `algoId` as a precision-safe string and prefer it for lookup/cancellation. Validate returned order identity. For old `-4015` references, read fresh symbol-scoped open algo orders and match the full saved ID exactly; never truncate IDs or guess ownership from symbol/price. A matched open order supplies its numeric ID. A definite identifier rejection permits one cancellation retry using that recovered ID; ambiguous writes never get blind retries.
+
+Retire an absent stale stop only after fresh Binance position data confirms an already-observed, settled trade is flat, or a replacement close-all STOP_MARKET is freshly verified. Preserve unrelated/manual orders, history, balances and credentials. Unknown or live exposure is not labeled flat. Failed inventory reads defer recovery. Missing/unconfirmed live protection remains a blocking condition.
+
+An explicit Start survives temporary GET failures with backoff and reruns the complete startup checks before any entry. Manual Stop cancels the pending start/retry. Temporary Sync read failures also preserve running Auto in browser and laptop modes. Authentication failures, uncertain writes, missing protection and the $100 session goal retain their blocking behavior. Refreshing or restarting does not automatically enable a previously stopped bot.
+
+References: [Binance conditional-order API](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade). Client IDs are limited to 36 supported characters; query/cancel can use the exchange `algoId`.
 
 ## Recovery and connector compatibility
 

@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.61';
+const APP_VERSION='1.62';
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
@@ -72,6 +72,11 @@ class DemoAPI {
   clear(){this.key='';this.signingKey=null;this.relayToken='';}
 }
 function number(value){if(value===null||value===undefined||value==='')throw new DemoError('Missing Binance numeric value');const n=Number(value);if(!Number.isFinite(n))throw new DemoError('Invalid Binance numeric value');return n;}
+function validAlgoClientId(value){return typeof value==='string'&&/^[.A-Z:/a-z0-9_-]{1,36}$/.test(value);}
+function algoExchangeId(value){
+  if(typeof value==='number')return Number.isSafeInteger(value)&&value>0?String(value):null;
+  return typeof value==='string'&&/^[1-9][0-9]{0,18}$/.test(value)&&BigInt(value)<=9223372036854775807n?value:null;
+}
 function rounded(value,step,up=false){const n=number(step);if(n<=0||value<=0)throw new DemoError('Invalid quantity or tick size');const decimals=Math.min(12,(String(step).split('.')[1]||'').replace(/0+$/,'').length);return ((up?Math.ceil(value/n-1e-9):Math.floor(value/n+1e-9))*n).toFixed(decimals);}
 function breakout(raw,now,intervalMs=300000){
   if(!Array.isArray(raw))throw new DemoError('Invalid candle response');
@@ -386,7 +391,7 @@ class DemoEngine {
   }
   save(){this.persist(this.state);}
   event(text){this.events.unshift({at:Date.now(),text});this.events=this.events.slice(0,60);this.notify();}
-  pause(reason){this.retryAt=0;this.retryAttempt=0;this.auto=false;this.stopEpoch++;this.scanController?.abort();if(reason)this.event(reason);}
+  pause(reason){this.retryAt=0;this.retryAttempt=0;this.startPending=false;this.auto=false;this.stopEpoch++;this.scanController?.abort();if(reason)this.event(reason);}
   active(){return this.state.records.filter(r=>!r.closedAt&&!r.rejected);}
   owned(symbol){return this.active().find(r=>r.symbol===symbol);}
   position(symbol){return this.positions.find(p=>p.symbol===symbol&&number(p.positionAmt)!==0);}
@@ -511,6 +516,7 @@ class DemoEngine {
     if(!this.connected)status='Disconnected: no new entries can be sent.';
     else if(this.state.goalStopAt)status='$100 session stop is locked. Start a new session while flat to resume.';
     else if(this.accountingUpdateRequired)status='LAPTOP CONNECTOR UPDATE REQUIRED: fee-history requests are unsupported. No new entries can be sent. Download the current files and restart START-LAPTOP.cmd; refreshing this page is not enough.';
+    else if(this.startPending&&this.auto)status='Start requested; verifying connection and order protection before scanning. '+(this.retryAt>Date.now()?'Retrying automatically in '+Math.ceil((this.retryAt-Date.now())/1000)+' seconds. ':'')+(this.block||'');
     else if(!this.tradingReady)status='Balance connected; trading checks are incomplete. '+(this.block||'Use Retry connection.');
     else if(!this.auto)status='Auto is stopped. '+(this.block||'Use Start / Resume Demo to scan and enter.');
     else if(this.retryAt>Date.now())status='Auto enabled; temporary connection delay. Retrying in '+Math.ceil((this.retryAt-Date.now())/1000)+' seconds. '+(this.block||'');
@@ -518,7 +524,7 @@ class DemoEngine {
     else if(!this.symbols.length)status='No eligible markets have been loaded.';
     else if(elapsed!==null&&elapsed>90)status='No completed coin check for '+elapsed+' seconds. '+(this.block||this.entryOutcome||'Check connection and last scan times.');
     else status='Auto scanning. '+(audit?audit.checked+' completed coin checks; '+audit.qualified+' candle setups; '+audit.submitted+' confirmed order submissions; '+audit.skipped+' entry skips; '+(audit.entryErrors||0)+' entry errors; '+audit.dataErrors+' data errors.':'Detailed counters unavailable from this engine.')+(audit?.lastResult?' Latest: '+audit.lastResult.symbol+' — '+audit.lastResult.reason:' Waiting for first completed check.');
-    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
+    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
   }
   tradeReport(){
     const now=Date.now(),incomeReady=!!this.lastIncome&&this.incomeWindowStart===this.state.startedAt;
@@ -585,6 +591,19 @@ class DemoEngine {
   }
   async start(){
     const epoch=this.stopEpoch;
+    try{await this.startChecked(epoch);}
+    catch(error){
+      // Preserve an explicit Start through a temporary read outage. The retry
+      // must complete every startup check before tick can scan or place orders.
+      if(epoch===this.stopEpoch&&this.connected){
+        const wasAuto=this.auto;this.auto=true;
+        if(this.scheduleReadRecovery(error)){this.startPending=true;return;}
+        this.auto=wasAuto;
+      }
+      this.startPending=false;throw error;
+    }
+  }
+  async startChecked(epoch){
     if(!this.connected)throw new DemoError('Connect demo credentials first');
     this.syncDaily();
     if(!this.tradingReady||Date.now()-this.metaAt>600000)await this.prepareTrading();else await this.refresh();
@@ -597,7 +616,7 @@ class DemoEngine {
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 after-fee loss target · Bollinger profit targets · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.startPending=false;this.auto=true;this.retryAt=0;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 after-fee loss target · Bollinger profit targets · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -632,9 +651,50 @@ class DemoEngine {
   }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.syncDaily();this.state.startedAt=Date.now()+this.api.offset;this.state.resetAt=this.state.startedAt;this.state.dayOpenPnl=0;this.state.goal=false;delete this.state.goalStopAt;delete this.state.goalNet;this.income=[];this.lastIncome=0;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
-  async queryExit(e){return this.api.call('GET','/fapi/v1/algoOrder',{clientAlgoId:e.id});}
+  exitOwner(e){return this.state.records.find(r=>(r.exits||[]).includes(e));}
+  exitReference(e){
+    const algoId=algoExchangeId(e.algoId);if(algoId)return {algoId};
+    if(validAlgoClientId(e.id))return {clientAlgoId:e.id};
+    throw new DemoError('Saved conditional-order client ID is invalid; reconciling with Binance.',-4015);
+  }
+  rememberExit(e,result){
+    const r=this.exitOwner(e),id=algoExchangeId(result?.algoId);
+    if(!result||typeof result!=='object'||(result.clientAlgoId!==undefined&&result.clientAlgoId!==e.id)||(r&&result.symbol!==undefined&&result.symbol!==r.symbol)||(id&&algoExchangeId(e.algoId)&&id!==algoExchangeId(e.algoId)))throw new DemoError('Conditional-order identity does not match the saved bot exit');
+    if(id&&e.algoId!==id){e.algoId=id;this.save();}return result;
+  }
+  async recoverExitReference(e){
+    const r=this.exitOwner(e);if(!r)throw new DemoError('Conditional order has no matching bot record');
+    const rows=await this.api.call('GET','/fapi/v1/openAlgoOrders',{symbol:r.symbol});
+    if(!Array.isArray(rows)||rows.some(a=>!a||typeof a.symbol!=='string'||typeof a.clientAlgoId!=='string'||!algoExchangeId(a.algoId)||typeof a.algoStatus!=='string'))throw new DemoError('Incomplete conditional-order inventory; recovery deferred');
+    const id=algoExchangeId(e.algoId),matches=rows.filter(a=>a.symbol===r.symbol&&(a.clientAlgoId===e.id||(id&&algoExchangeId(a.algoId)===id)));
+    if(matches.length>1)throw new DemoError('Ambiguous conditional-order identity; recovery deferred');
+    if(matches.length)return this.rememberExit(e,matches[0]);
+    const error=new DemoError('Saved stop is absent from fresh Binance open orders; checking position before cleanup.',-4015);
+    error.exitNotOpen=true;error.openAlgos=rows;error.inventoryAt=Date.now();throw error;
+  }
+  async queryExit(e){
+    try{return this.rememberExit(e,await this.api.call('GET','/fapi/v1/algoOrder',this.exitReference(e)));}
+    catch(error){if(error.code!==-4015||error.uncertain)throw error;return this.recoverExitReference(e);}
+  }
+  async retireAbsentExit(r,e,proof,keepId){
+    if(!proof.exitNotOpen||Date.now()-proof.inventoryAt>15000)return false;
+    const keep=(r.exits||[]).find(x=>x.id===keepId&&!x.cancelled);
+    const replacement=keep&&proof.openAlgos.find(a=>a.symbol===r.symbol&&a.clientAlgoId===keep.id&&a.algoStatus==='NEW'&&(a.orderType||a.type)==='STOP_MARKET'&&(a.closePosition===true||a.closePosition==='true')&&a.side===(r.side==='BUY'?'SELL':'BUY'));
+    if(replacement){this.rememberExit(keep,replacement);keep.confirmed=true;keep.verifiedAt=Date.now();}
+    else{
+      if(keepId||!r.observedOpen||r.entryStatus!=='FILLED'||r.pendingClose||r.lossReduction?.status==='PENDING')return false;
+      const positions=await this.api.call('GET','/fapi/v3/positionRisk',{symbol:r.symbol});
+      if(!Array.isArray(positions)||positions.some(p=>!p||typeof p.symbol!=='string'||!Number.isFinite(Number(p.positionAmt))||p.positionAmt===null||p.positionAmt===undefined||p.positionAmt===''))throw new DemoError('Fresh position check incomplete; stop cleanup deferred');
+      if(positions.some(p=>p.symbol===r.symbol&&number(p.positionAmt)!==0))return false;
+      this.positions=[...this.positions.filter(p=>p.symbol!==r.symbol),...positions.filter(p=>p.symbol===r.symbol)];this.positionAt=Date.now();
+    }
+    if(Date.now()-proof.inventoryAt>15000)return false;
+    e.cancelled=true;e.confirmed=false;e.reconciledAt=Date.now();e.recoveryReason=keepId?'Absent old exit; replacement verified on Binance':'Absent old exit; Binance position confirmed flat';this.save();
+    this.event(r.symbol+' stale stop record reconciled; '+(keepId?'replacement protection verified.':'position is flat.'));return true;
+  }
   async sendOnce(path,params,query){
     try{return await this.api.call('POST',path,params);}catch(e){
+      if(path==='/fapi/v1/algoOrder'&&e.code===-4015&&!e.uncertain)throw e;
       // A transport error or timeout does NOT mean the order failed.
       try{return await query();}catch(q){if(!e.uncertain&&[-2013,-2011].includes(q.code))throw e;throw new DemoError('Order result unknown. Entries paused; reconciling the saved client ID.',0,true);}
     }
@@ -712,7 +772,7 @@ class DemoEngine {
     const band=this.newRules&&this.bandRules,flexible=band||this.trialActive();
     const trial=this.trialActive()&&signal.oneHourTrial===this.state.oneHourTrial.id;
     if(signal.oneHourTrial&&!trial)return skip('One-hour experiment expired or changed; rechecking normal signals');
-    if(!this.auto||this.state.goalStopAt||(!this.newRules&&this.state.goal&&!this.experimentActive())||this.owned(symbol))return skip('Auto paused, session goal reached, or already owned');
+    if(!this.auto||this.startPending||this.state.goalStopAt||(!this.newRules&&this.state.goal&&!this.experimentActive())||this.owned(symbol))return skip('Auto paused, startup checks pending, session goal reached, or already owned');
     if(!signal.qualityConfirmed||![3,5,8].includes(signal.leverage)||!Number.isFinite(signal.stopDistance)||signal.stopDistance<=0)return skip('Signal validation failed');
     if(this.newRules&&!(signal.strength>=1))return skip('Candle momentum agreement is missing');
     const experimental=this.experimentActive()&&signal.experimental===true;
@@ -932,18 +992,43 @@ class DemoEngine {
     await this.refresh();await this.reconcile();this.entryOutcome=r.closedAt?'Entry closed during exit checks':'Entry submitted; status '+r.entryStatus;this.event(symbol+(this.exitsSuspended(r)?' demo entry submitted; automatic exits SUSPENDED until experiment expiry.':' demo entry submitted; confirmed fills and automatic exit policy shown below.'));
   }
   async cancelExits(r,keepId=null){
-    for(const e of r.exits||[]){if(e.cancelled||e.id===keepId)continue;try{await this.api.call('DELETE','/fapi/v1/algoOrder',{clientAlgoId:e.id});e.cancelled=true;this.save();}catch(err){const found=await this.queryExit(e).catch(q=>{if([-2011,-2013].includes(q.code))return {algoStatus:'NOT_FOUND'};throw q;});if(['CANCELED','CANCELLED','FINISHED','EXPIRED','REJECTED','NOT_FOUND'].includes(found.algoStatus)){e.cancelled=true;this.save();}else throw err;}}
+    for(const e of r.exits||[]){
+      if(e.cancelled||e.id===keepId)continue;
+      for(let attempt=0;attempt<2;attempt++){
+        try{await this.api.call('DELETE','/fapi/v1/algoOrder',this.exitReference(e));e.cancelled=true;e.confirmed=false;this.save();break;}
+        catch(error){
+          let found;
+          try{found=await this.queryExit(e);}
+          catch(queryError){
+            if([-2011,-2013].includes(queryError.code)&&!queryError.uncertain)found={algoStatus:'NOT_FOUND'};
+            else if(await this.retireAbsentExit(r,e,queryError,keepId))break;
+            else throw queryError;
+          }
+          if(['CANCELED','CANCELLED','FINISHED','EXPIRED','REJECTED','NOT_FOUND'].includes(found.algoStatus)){e.cancelled=true;e.confirmed=false;this.save();break;}
+          // Retry only this definite identifier rejection, using the exchange ID
+          // recovered by an exact match. Never repeat an ambiguous cancel write.
+          if(attempt===0&&error.code===-4015&&!error.uncertain&&algoExchangeId(e.algoId))continue;
+          throw error;
+        }
+      }
+    }
   }
   async ensureExit(r,p,kind,target,replace=false){
     let e=replace?null:r.exits.findLast(e=>e.kind===kind&&!e.cancelled);
-    if(e){if(this.newRules&&e.confirmed&&Date.now()-(e.verifiedAt||0)<15000)return;const q=await this.queryExit(e);if(q.algoStatus==='NEW'){e.confirmed=true;e.verifiedAt=Date.now();return;}e.confirmed=false;if(['CANCELED','CANCELLED','EXPIRED','REJECTED'].includes(q.algoStatus))e.cancelled=true;this.save();throw new DemoError(r.symbol+' protective '+kind+' is '+q.algoStatus+'; checking position.');}
+    if(e){
+      if(this.newRules&&e.confirmed&&Date.now()-(e.verifiedAt||0)<15000)return;
+      let q;try{q=await this.queryExit(e);}catch(error){if([-4015,-2011,-2013].includes(error.code)&&!error.uncertain){e.confirmed=false;this.save();}throw error;}
+      if(q.algoStatus==='NEW'){e.confirmed=true;e.verifiedAt=Date.now();this.save();return;}
+      e.confirmed=false;if(['CANCELED','CANCELLED','EXPIRED','REJECTED'].includes(q.algoStatus))e.cancelled=true;this.save();throw new DemoError(r.symbol+' protective '+kind+' is '+q.algoStatus+'; checking position.');
+    }
     const triggerPrice=exitPrice(number(p.entryPrice),Math.abs(number(p.positionAmt)),r.fee,target,r.side,r.tick);
     const takeProfit=kind==='tp'||kind==='tp20';
     const mark=number(p.markPrice);if(takeProfit?(r.side==='BUY'?mark>=+triggerPrice:mark<=+triggerPrice):(r.side==='BUY'?mark<=+triggerPrice:mark>=+triggerPrice)){await this.close(r.symbol,kind+' threshold reached');return;}
-    const prior=r.exits.filter(x=>x.kind===kind).length;
-    e={id:r.id+'_'+kind+(prior?'_'+prior:''),kind,triggerPrice,confirmed:false};r.exits.push(e);this.save();
+    // A fixed-length, independently journaled ID cannot overflow Binance's
+    // 36-character limit after long legacy IDs or repeated stop replacements.
+    e={id:'bdx_'+crypto.randomUUID().replaceAll('-','').slice(0,24),kind,triggerPrice,confirmed:false};r.exits.push(e);this.save();
     let result;try{result=await this.sendOnce('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:r.symbol,side:r.side==='BUY'?'SELL':'BUY',positionSide:'BOTH',type:takeProfit?'TAKE_PROFIT_MARKET':'STOP_MARKET',closePosition:'true',triggerPrice,workingType:'MARK_PRICE',priceProtect:'false',clientAlgoId:e.id},()=>this.queryExit(e));}catch(error){if(!error.uncertain){e.cancelled=true;this.save();}throw error;}
-    if(result.algoStatus!=='NEW')throw new DemoError('Protection was not confirmed NEW');
+    this.rememberExit(e,result);if(result.algoStatus!=='NEW')throw new DemoError('Protection was not confirmed NEW');
     e.confirmed=true;e.verifiedAt=Date.now();this.save();
   }
   async tradeAccounting(r,p,{force=false}={}){
@@ -1454,6 +1539,7 @@ class DemoEngine {
     if(!this.connected||this.busy||this.controlPending)return;
     this.expireTrial();if(this.retryAt>Date.now()){this.notify();return;}this.busy=true;
     try{
+      if(this.startPending){await this.start();if(this.startPending||!this.auto)return;}
       this.expireTrial();this.syncDaily();
       if(!this.tradingReady){await this.refreshBalance();return;}
       if(Date.now()-(this.lastFullCheck||0)>=this.exitPollMs()||this.state.dayOpenPnl===null){await this.refresh();this.lastFullCheck=Date.now();}

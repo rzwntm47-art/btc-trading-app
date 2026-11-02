@@ -81,7 +81,7 @@ test('migration replaces a legacy stop before cancellation and retains a fee-onl
  const f=await opened(),r=f.e.owned(symbol),old=r.exits.at(-1),base=f.api.call;
  const oldAlgo=f.algos.get(old.id);f.algos.delete(old.id);old.id=old.id.replace('_sl6','_sl1');oldAlgo.clientAlgoId=old.id;f.algos.set(old.id,oldAlgo);old.kind='sl1';r.rulesVersion=9;r.exitPolicy='trial-net-trailing';r.oneHourTrial={id:'old'};r.lossLimit=1;setTradeNet(f,-.1);
  const writes=[];f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/algoOrder'&&['POST','DELETE'].includes(m))writes.push({m,q});return base(m,p,q,s);};
- await f.e.reconcile();assert.equal(r.rulesVersion,11);assert.equal(r.lossLimit,6);assert.ok(!r.closedAt);assert.equal(writes[0].m,'POST');assert.ok(writes.some(x=>x.m==='DELETE'&&x.q.clientAlgoId===old.id));assert.ok(r.exits.some(x=>x.kind==='sl6'&&x.confirmed&&!x.cancelled));assert.equal(reductionPosts(f).length,0);
+ await f.e.reconcile();assert.equal(r.rulesVersion,11);assert.equal(r.lossLimit,6);assert.ok(!r.closedAt);assert.equal(writes[0].m,'POST');assert.ok(writes.some(x=>x.m==='DELETE'&&String(x.q.algoId)===old.algoId));assert.ok(r.exits.some(x=>x.kind==='sl6'&&x.confirmed&&!x.cancelled));assert.equal(reductionPosts(f).length,0);
 });
 test('booked manual partial losses count toward the same $6 limit',async()=>{
  const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,-1.8);await f.api.call('POST','/fapi/v1/order',{symbol,side:'SELL',quantity:String(Number(f.position.positionAmt)/2),reduceOnly:'true',newClientOrderId:'manual-partial'});r.tradeAccounting=null;
@@ -156,7 +156,7 @@ test('migration changes $2 backup to $6 without adding margin or changing profit
  const f=await opened(),r=f.e.owned(symbol),old=r.exits.at(-1),base=f.api.call;
  const algo=f.algos.get(old.id);f.algos.delete(old.id);old.id=old.id.replace('_sl6','_sl2');algo.clientAlgoId=old.id;f.algos.set(old.id,algo);old.kind='sl2';r.rulesVersion=10;r.lossLimit=2;r.bandTargets.stage='outer';const targets={...r.bandTargets},qty=f.position.positionAmt;
  const before=f.calls.length;await f.e.reconcile();assert.equal(r.rulesVersion,11);assert.equal(r.lossLimit,6);assert.equal(f.position.positionAmt,qty);assert.deepEqual(r.bandTargets,targets);
- const writes=f.calls.slice(before).filter(c=>c.method==='POST'||c.method==='DELETE');assert.equal(writes[0].path,'/fapi/v1/algoOrder');assert.equal(writes[0].method,'POST');assert.ok(writes.some(c=>c.method==='DELETE'&&c.p.clientAlgoId===old.id));assert.ok(!writes.some(c=>['/fapi/v1/order','/fapi/v1/leverage'].includes(c.path)));
+ const writes=f.calls.slice(before).filter(c=>c.method==='POST'||c.method==='DELETE');assert.equal(writes[0].path,'/fapi/v1/algoOrder');assert.equal(writes[0].method,'POST');assert.ok(writes.some(c=>c.method==='DELETE'&&String(c.p.algoId)===old.algoId));assert.ok(!writes.some(c=>['/fapi/v1/order','/fapi/v1/leverage'].includes(c.path)));
 });
 test('an old cancelled $2 close does not reapply the old loss target',async()=>{
  const f=await opened(),r=f.e.owned(symbol);r.pendingClose='bd1_old_loss_c';r.closeReason='$2 net trade loss';f.orders.set(r.pendingClose,{status:'CANCELED',executedQty:'0'});setTradeNet(f,-2.5);

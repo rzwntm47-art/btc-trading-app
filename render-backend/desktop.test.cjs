@@ -85,7 +85,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.61');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.62');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,takeProfit:null,profitExit:'bollinger-targets',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{
@@ -100,4 +100,11 @@ test('current laptop engine rejects obsolete experiment activation and keeps sto
  await connect();assert.equal(app.snapshot().engine.bandRules,true);
  await request('/host/command',{id:'obsolete-trial-0123456789',action:'startTrial'});await delay(15);
  const result=await request('/host/command?id=obsolete-trial-0123456789');assert.equal(result.json.status,'error');assert.match(result.json.error,/replaced/);assert.equal(app.snapshot().engine.auto,false);assert.equal(FakeEngine.last.starts,0);
+}));
+
+test('temporary remote Sync read failure preserves Auto and remote Stop cancels retries',()=>fixture(async({app,request,connect})=>{
+ await connect();const e=FakeEngine.last;e.auto=true;e.refresh=async()=>{throw Object.assign(new Error('temporary read'),{code:503,requestMethod:'GET',requestPath:'/fapi/v3/account',uncertain:false});};
+ const result=await request('/host/command',{id:'sync-error-recovery-12345',action:'refresh'});assert.equal(result.status,202);
+ for(let i=0;i<50&&e.controlPending;i++)await delay(2);assert.equal(e.auto,true);assert.ok(e.retryAt>Date.now());
+ await request('/host/command',{id:'stop-after-sync-error-123',action:'stop'});assert.equal(e.auto,false);assert.equal(e.retryAt,0);
 }));

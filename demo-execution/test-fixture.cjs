@@ -49,8 +49,10 @@ function fixture(){
       return o;
     }
     if(path==='/fapi/v1/algoOrder'){
-      if(method==='GET'){if(!algos.has(p.clientAlgoId))throw new DemoError('missing',-2013);return algos.get(p.clientAlgoId);}
-      if(method==='DELETE'){if(!algos.has(p.clientAlgoId))throw new DemoError('missing',-2013);algos.get(p.clientAlgoId).algoStatus='CANCELED';return {};}
+      if(p.clientAlgoId!==undefined&&!/^[.A-Z:/a-z0-9_-]{1,36}$/.test(p.clientAlgoId))throw new DemoError('invalid client order ID',-4015);
+      const found=p.algoId!==undefined?[...algos.values()].find(a=>String(a.algoId)===String(p.algoId)):algos.get(p.clientAlgoId);
+      if(method==='GET'){if(!found)throw new DemoError('missing',-2013);return found;}
+      if(method==='DELETE'){if(!found)throw new DemoError('missing',-2013);found.algoStatus='CANCELED';return {algoId:found.algoId,clientAlgoId:found.clientAlgoId,code:200};}
       if(failProtection)throw new DemoError('unsupported',-1111);
       assert.equal(p.closePosition,'true');assert.equal(p.reduceOnly,undefined);assert.equal(p.quantity,undefined);
       const a={...p,algoStatus:'NEW',algoId:algos.size+1};algos.set(p.clientAlgoId,a);return a;

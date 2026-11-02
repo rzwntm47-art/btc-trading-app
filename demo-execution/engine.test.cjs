@@ -32,7 +32,7 @@ test('protective rejection stops auto and closes reduce-only',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));assert.equal(f.e.auto,false);assert.equal(f.position,null);assert(f.calls.some(c=>c.path==='/fapi/v1/order'&&c.p.reduceOnly==='true'));
 });
 test('profit floor is an additional exchange stop; manual close cleans protective orders',async()=>{
- const f=fixture();await f.e.enter(symbol,f.signal);f.position.markPrice='108';f.position.unRealizedProfit='22.5';await f.e.refresh();await f.e.reconcile();assert([...f.algos.values()].some(a=>a.clientAlgoId.endsWith('_floor')));assert.equal(f.algos.size,3);
+ const f=fixture();await f.e.enter(symbol,f.signal);f.position.markPrice='108';f.position.unRealizedProfit='22.5';await f.e.refresh();await f.e.reconcile();assert(f.e.owned(symbol).exits.some(e=>e.kind==='floor'&&f.algos.has(e.id)));assert.equal(f.algos.size,3);
  await f.e.close(symbol);assert.equal(f.position,null);assert.equal(f.e.active().length,0);assert([...f.algos.values()].every(a=>a.algoStatus==='CANCELED'));
 });
 test('Stop Auto during configuration prevents entry dispatch',async()=>{
@@ -730,7 +730,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.61');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.62');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -762,7 +762,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.61');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.62');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(Number.isFinite(r.entryEvidence.plannedStopPrice));
 });
@@ -1159,7 +1159,7 @@ test('new entry has a fee-aware exchange $5 stop and no premature fee-only trim'
 test('after a trim, updated stop accounts for booked losses and is accepted before old stop is cancelled',async()=>{
  const f=await currentTrade(),r=f.e.owned(symbol),old=r.exits.find(e=>!e.cancelled),start=f.calls.length;
  setTradeNet(f,-3.2);await f.e.reconcile();const latest=r.exits.find(e=>!e.cancelled);assert.notEqual(latest.id,old.id);assert.ok(latest.id.length<=36);
- const calls=f.calls.slice(start),add=calls.findIndex(c=>c.method==='POST'&&c.p.clientAlgoId===latest.id),remove=calls.findIndex(c=>c.method==='DELETE'&&c.p.clientAlgoId===old.id);assert.ok(add>=0&&remove>add);
+ const calls=f.calls.slice(start),add=calls.findIndex(c=>c.method==='POST'&&c.p.clientAlgoId===latest.id),remove=calls.findIndex(c=>c.method==='DELETE'&&String(c.p.algoId)===old.algoId);assert.ok(add>=0&&remove>add);
  const qty=Math.abs(Number(f.position.positionAmt)),px=Number(latest.triggerPrice),net=r.tradeAccounting.bookedNet+(px-r.entry)*qty-qty*px*r.fee;assert.ok(net>=-5-1e-6&&net<-4.7);
 });
 test('partial-close losses cannot disappear when the remaining position turns green',async()=>{

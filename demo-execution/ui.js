@@ -56,7 +56,7 @@ function render(){
   const remaining=trialActive?Math.max(0,Math.ceil((trial.until-(Date.now()+(e.api.offset||0)))/1000)):0;
   $('trialStatus').textContent=trialActive?'EXPERIMENT '+(e.auto?'RUNNING':'PAUSED')+' · '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0')+' remaining · ends '+new Date(trial.until).toLocaleTimeString()+' · confirmed setups; Binance-accepted leverage; any negative after-fee estimate closes':trial?'Experiment entry window ended. Normal entries restored; experiment positions retain their recorded exits.':'Not started. Click Start 1-hour experiment when connected.';
   if(!connected)return;
-  status((e.accountingUpdateRequired?'CONNECTOR UPDATE REQUIRED · new entries blocked':e.auto?(e.retryAt>Date.now()?'AUTO WAITING · automatic retry in '+Math.ceil((e.retryAt-Date.now())/1000)+'s':'AUTO RUNNING · scanning for qualifying signals'):e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
+  status((e.accountingUpdateRequired?'CONNECTOR UPDATE REQUIRED · new entries blocked':e.auto?(e.retryAt>Date.now()?'AUTO WAITING · automatic retry in '+Math.ceil((e.retryAt-Date.now())/1000)+'s':e.startPending?'AUTO STARTING · verifying connection and protection':'AUTO RUNNING · scanning for qualifying signals'):e.tradingReady?'DEMO CONNECTED · AUTO STOPPED':'BALANCE CONNECTED · TRADING NOT READY')+(e.controlPending?' · requested action queued / running':e.busy?' · checking…':'')+(e.block?'\n'+e.block:'')+'\nLast account read: '+new Date(e.accountAt).toLocaleTimeString());
   const policy=e.entryPolicy;
   $('leverageWindow').textContent=policy?'$'+policy.margin+' margin · adaptive leverage up to '+policy.maxLeverage+'× · Cross · 1–60m signals · '+(policy.lossLimit===null?'no stop loss':(policy.lossLimit?'$'+policy.lossLimit:'Recorded')+' planned loss stop')+' · '+(policy.profitExit==='net-trailing'?'net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · 25% trim at -$3, full close at -$5':policy.profitExit==='positive-estimate'?'close positive estimated net · reduce 25% once when negative':policy.profitExit==='fixed'?'$'+policy.takeProfit+' net take-profit':policy.profitExit==='manual'?'manual profit close':'previous profit rules'):'Laptop engine '+(e.appVersion?'V'+e.appVersion:'version unavailable')+' uses previous settings. Update and restart it to apply $300 margin / up to 10×.';
   if(trialActive)$('leverageWindow').textContent='ONE-HOUR EXPERIMENT · up to $300 margin · adaptive 1–150× within Binance limits and fee allowance · confirmed momentum/breakout setups · close any negative after-fee estimate · net pullback $2 / $4 / $8 / $10 / +$5 · $100 net session stop';
@@ -152,7 +152,7 @@ function render(){
 async function run(fn,kind='action'){
  const target=engine;if(!target)return;
  try{await target.control(async()=>{if(engine===target)await fn();},kind);}
- catch(error){if(target.remote){target.block='Action not confirmed: '+error.message;status(target.block);return;}target.block=error.message;target.pause(error.message);}
+ catch(error){if(target.remote){target.block='Action not confirmed: '+error.message;status(target.block);return;}if(!target.scheduleReadRecovery(error)){target.block=error.message;target.pause(error.message);}}
  finally{render();}
 }
 async function acquireLock(){

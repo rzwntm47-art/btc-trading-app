@@ -7,7 +7,7 @@ function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,APP_VERSION:'1.61',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,APP_VERSION:'1.62',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.bandRules=false;engine.entryPolicy={margin:300,maxLeverage:10,lossLimit:5,profitExit:'net-trailing',sessionExit:'close-bot-positions'};engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -69,7 +69,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.61');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.62');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -98,7 +98,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.61');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.62');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();
@@ -133,4 +133,10 @@ test('Bollinger UI exposes current risk and target stages and hides the old expe
 test('an older V1.59 Bollinger laptop reports its actual $2 risk-sized policy rather than the new settings',()=>{
  const {node,context,e}=fixture();e.bandRules=true;e.remote=true;e.appVersion='1.59';e.entryPolicy={margin:300,maxLeverage:150,strategy:'bollinger-wr-5m',lossLimit:2,profitExit:'bollinger-targets'};
  vm.runInContext('renderActual()',context);assert.equal(node('connectorUpdate').hidden,false);assert.match(node('leverageWindow').textContent,/up to \$300 risk-sized margin/);assert.match(node('leverageWindow').textContent,/\$2 total after-fee loss/);assert.ok(!node('leverageWindow').textContent.includes('maximum Binance-accepted'));
+});
+
+test('Sync read failure keeps running Auto in retry mode and Stop cancels that intent',async()=>{
+ const {node,e,context}=fixture();e.auto=true;e.tradingReady=true;const error=Object.assign(new Error('temporary read'),{code:503,requestMethod:'GET',requestPath:'/fapi/v3/account',uncertain:false});
+ e.refresh=async()=>{throw error;};await node('refresh').onclick();assert.equal(e.auto,true);assert.ok(e.retryAt>Date.now());vm.runInContext('renderActual()',context);assert.match(node('status').textContent,/AUTO WAITING/);
+ node('stop').onclick();assert.equal(e.auto,false);assert.equal(e.retryAt,0);
 });

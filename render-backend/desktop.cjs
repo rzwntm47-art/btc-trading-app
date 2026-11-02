@@ -23,7 +23,7 @@ async function body(req){
   let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2*1024*1024)throw Error('Request too large');}
   return JSON.parse(raw);
 }
-const SNAPSHOT_FIELDS=['appVersion','bandRules','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','retryAt','retryAttempt','accountingUpdateRequired','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
+const SNAPSHOT_FIELDS=['appVersion','bandRules','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','startPending','retryAt','retryAttempt','accountingUpdateRequired','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
 function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=1000}={}){
   let engine=null,connecting=false,lastError='',pair=null,origin='',connectId='',generation=random();
   const sessions=new Map(),commands=new Map();
@@ -75,7 +75,7 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
         if(input.action==='disconnect'){e.pause();e.api.clear();engine=null;sessions.clear();pair=null;generation=random();}
       },['start','startTrial'].includes(input.action)?'start':'action');
       if(!ran)throw Error('Action cancelled by Stop or another pending action.');entry.status='done';
-    }catch(error){entry.status='error';entry.error=error.message;e.pause(error.message);}finally{entry.completedAt=now();}})();
+    }catch(error){entry.status='error';entry.error=error.message;if(!e.scheduleReadRecovery(error))e.pause(error.message);}finally{entry.completedAt=now();}})();
     return entry;
   }
   const timer=setInterval(()=>{if(engine?.connected&&!connecting)engine.tick().catch(error=>{lastError=error.message;engine?.pause(error.message);});},intervalMs);timer.unref();
