@@ -16,8 +16,9 @@ class FakeEngine extends DemoEngine{
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function fixture(fn){
   const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'btc-pair-test-'));let time=Date.now();
-  const app=createDesktop({token:TOKEN,dataDir,Engine:FakeEngine,now:()=>time,intervalMs:15,fetcher:()=>{throw Error('No exchange calls allowed');}});
-  await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+app.server.address().port;
+  const create=()=>createDesktop({token:TOKEN,dataDir,Engine:FakeEngine,now:()=>time,intervalMs:15,fetcher:()=>{throw Error('No exchange calls allowed');}});
+  let app=create();await new Promise(r=>app.server.listen(0,'127.0.0.1',r));let base='http://127.0.0.1:'+app.server.address().port;
+  const restart=async()=>{app.server.closeAllConnections();await new Promise(r=>app.server.close(r));app=create();await new Promise(r=>app.server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.server.address().port;return app;};
   const request=async(route,data,{mobile=false,cookie='',auth=TOKEN,origin,headers={}}={})=>{
     const h={...headers};if(mobile){h['X-Forwarded-Host']=new URL(ORIGIN).host;if(cookie)h.Cookie=cookie;if(data!==undefined)h.Origin=origin??ORIGIN;}
     else{h.Authorization='Bearer '+auth;h.Origin=origin??'https://rzwntm47-art.github.io';}
@@ -25,9 +26,9 @@ async function fixture(fn){
     const response=await fetch(base+route,{method:data===undefined?'GET':'POST',headers:h,body:data===undefined?undefined:JSON.stringify(data)});
     const text=await response.text();let json;try{json=JSON.parse(text);}catch{}return {status:response.status,json,text,headers:response.headers};
   };
-  const connect=async(state=null)=>{const result=await request('/host/connect',{requestId:'connect-test-0123456789',key:KEY,secret:SECRET,state,demoOnly:true});assert.equal(result.status,202);for(let i=0;i<100&&app.snapshot().connecting;i++)await delay(2);assert.equal(app.snapshot().engine.connected,true);};
+  const connect=async(state=null,key=KEY)=>{const result=await request('/host/connect',{requestId:'connect-test-0123456789',key,secret:SECRET,state,demoOnly:true});assert.equal(result.status,202);for(let i=0;i<100&&app.snapshot().connecting;i++)await delay(2);assert.equal(app.snapshot().engine.connected,true);};
   const pair=async()=>{const generated=await request('/host/pair',{origin:ORIGIN});assert.equal(generated.status,200);const code=new URLSearchParams(new URL(generated.json.url).hash.slice(1)).get('pair');const paired=await request('/mobile/pair',{code},{mobile:true});assert.equal(paired.status,200,JSON.stringify(paired.json));return {generated,code,csrf:paired.json.csrf,cookie:paired.headers.get('set-cookie').split(';')[0],headers:paired.headers};};
-  try{await fn({app,request,connect,pair,dataDir,advance:ms=>time+=ms});}finally{app.server.closeAllConnections();await new Promise(r=>app.server.close(r));fs.rmSync(dataDir,{recursive:true,force:true});}
+  try{await fn({app,request,connect,pair,dataDir,restart,advance:ms=>time+=ms});}finally{app.server.closeAllConnections();await new Promise(r=>app.server.close(r));fs.rmSync(dataDir,{recursive:true,force:true});}
 }
 test('private HTTPS address validation rejects public, credential-bearing and non-HTTPS destinations',()=>{
   assert.equal(remoteOrigin(ORIGIN),ORIGIN);
@@ -85,7 +86,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.65');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.66');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{
@@ -115,4 +116,34 @@ test('non-transient remote command errors hold entries without cancelling runnin
  for(let i=0;i<50&&e.controlPending;i++)await delay(2);
  const state=(await request('/host/status')).json.engine;assert.equal(state.auto,true);assert.match(state.entryHold,/Order status still settling/);assert.ok(state.retryAt>Date.now());
  await request('/host/command',{id:'stop-reconcile-hold-12345',action:'stop'});assert.equal(app.snapshot().engine.auto,false);assert.equal(app.snapshot().engine.entryHold,'');
+}));
+
+test('remembered phone survives restart, needs no repeated pairing, and sees the same engine snapshot',()=>fixture(async({request,connect,pair,restart,dataDir})=>{
+ await connect();const p=await pair(),options={mobile:true,cookie:p.cookie};
+ const saved=fs.readFileSync(path.join(dataDir,'trusted-phones.json'),'utf8');for(const secret of [KEY,SECRET,TOKEN,p.cookie.split('=')[1],p.code])assert.ok(!saved.includes(secret));
+ const app=await restart();let phone=(await request('/mobile/status',undefined,options));assert.equal(phone.status,200);assert.equal(phone.json.engine,null);assert.equal(phone.json.pairedDevices,1);
+ await connect();FakeEngine.last.auto=true;FakeEngine.last.entryHold='Order settling';FakeEngine.last.scanned=[{symbol:'BTCUSDT',phase:'Entry skipped',reason:'Fee check'}];
+ phone=(await request('/mobile/status',undefined,options));const laptop=(await request('/host/status')).json;assert.deepEqual(phone.json.engine,laptop.engine);assert.equal(phone.json.engine.auto,true);assert.equal(app.snapshot().pairedDevices,1);
+}));
+test('remembered phone access does not cross Binance accounts and revocation survives restart',()=>fixture(async({request,connect,pair,restart})=>{
+ await connect();const p=await pair(),options={mobile:true,cookie:p.cookie};await restart();await connect(null,'B'.repeat(64));assert.equal((await request('/mobile/status',undefined,options)).status,401);
+ const other=await pair();await request('/host/revoke',{});await restart();assert.equal((await request('/mobile/status',undefined,{mobile:true,cookie:other.cookie})).status,401);
+}));
+test('unused phone trust expires while active trust renews with secure cookies',()=>fixture(async({request,connect,pair,restart,advance})=>{
+ await connect();const p=await pair(),options={mobile:true,cookie:p.cookie};advance(16*86400000);const renewed=await request('/mobile/status',undefined,options);assert.equal(renewed.status,200);assert.match(renewed.headers.get('set-cookie'),/HttpOnly; SameSite=Strict; Max-Age=2592000/);
+ await restart();advance(15*86400000);assert.equal((await request('/mobile/status',undefined,options)).status,200);advance(31*86400000);assert.equal((await request('/mobile/status',undefined,options)).status,401);
+}));
+test('phone link remembers an address without exposing API keys or the laptop token',()=>fixture(async({request,connect})=>{
+ await connect();const result=await request('/host/pair',{origin:ORIGIN});const u=new URL(result.json.url),params=new URLSearchParams(u.hash.slice(1));assert.equal(u.origin,'https://rzwntm47-art.github.io');assert.equal(params.get('mobileOrigin'),ORIGIN);assert.equal(params.get('pair').length,43);
+ assert.ok(!result.json.url.includes(KEY));assert.ok(!result.json.url.includes(TOKEN));
+ const next=await request('/host/pair',{});assert.equal(next.status,200);assert.equal(new URLSearchParams(new URL(next.json.url).hash.slice(1)).get('mobileOrigin'),ORIGIN);
+}));
+test('private address configured after startup is picked up without copying it into the dashboard',()=>fixture(async({request,connect,dataDir})=>{
+ await connect();fs.writeFileSync(path.join(dataDir,'mobile-origin.json'),JSON.stringify({origin:ORIGIN}));assert.equal((await request('/host/status')).json.remoteOrigin,ORIGIN);assert.equal((await request('/host/pair',{})).status,200);
+}));
+test('private mobile app installs at its own controller address without caching account data',()=>fixture(async({request,connect,pair})=>{
+ await connect();await pair();const manifest=await request('/mobile/manifest.webmanifest',undefined,{mobile:true});assert.equal(manifest.status,200);assert.equal(manifest.json.start_url,'/mobile');assert.equal(manifest.json.display,'standalone');assert.ok(!manifest.text.includes(KEY));
+ const page=await request('/mobile',undefined,{mobile:true});assert.match(page.text,/rel="manifest" href="\/mobile\/manifest.webmanifest"/);assert.match(page.headers.get('cache-control'),/no-store/);assert.match(page.headers.get('content-security-policy'),/manifest-src 'self'/);
+ const icon=await request('/mobile/icon.svg',undefined,{mobile:true});assert.equal(icon.status,200);assert.match(icon.headers.get('content-type'),/image\/svg/);
+ assert.equal((await request('/mobile/status',undefined,{mobile:true})).status,401);
 }));

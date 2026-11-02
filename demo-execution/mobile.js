@@ -2,6 +2,26 @@
 // Remote views receive snapshots and explicit commands only. They never execute DemoAPI calls.
 const onPhoneController=location.pathname==='/mobile';
 let remoteTransport=null,remotePollBusy=false,pairExpiryTimer;
+const PHONE_ORIGIN_KEY='btc_demo_phone_origin';
+function phoneOrigin(value){
+  const u=new URL(value);
+  if(u.protocol!=='https:'||!/^[-a-z0-9]+\.[-a-z0-9]+\.ts\.net$/i.test(u.hostname)||u.port||u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('Invalid private laptop address');
+  return u.origin;
+}
+function restorePhoneDashboard(){
+  if(onPhoneController)return;
+  try{
+    const params=new URLSearchParams(location.hash.slice(1)),requested=params.get('mobileOrigin');
+    if(new URLSearchParams(location.search||'').get('local')==='1'){localStorage.removeItem(PHONE_ORIGIN_KEY);return;}
+    const saved=requested||localStorage.getItem(PHONE_ORIGIN_KEY);if(!saved)return;
+    const origin=phoneOrigin(saved),code=requested?params.get('pair'):null;
+    if(requested&&!/^[A-Za-z0-9_-]{43}$/.test(code||''))throw Error('Phone link is incomplete. Create a new phone link on the laptop.');
+    if(requested){localStorage.setItem(PHONE_ORIGIN_KEY,origin);history.replaceState(null,'',location.pathname);}
+    // Remember only the address. The phone's private HTTPS cookie authorizes access.
+    const target=origin+'/mobile'+(code?'#pair='+encodeURIComponent(code):'');
+    (window.top||window).location.replace(target);
+  }catch(error){status(error.message);}
+}
 function pairMessage(text){$('pairStatus').textContent=text;}
 async function remoteRequest(transport,path,data){
   const headers={},options={method:data===undefined?'GET':'POST',headers,cache:'no-store',credentials:transport.mobile?'same-origin':'omit',redirect:'error',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(15000)};
@@ -24,7 +44,7 @@ class RemoteDemo extends DemoEngine{
     if(!this.connected)status(snapshot.connecting?'Laptop is connecting to Binance Demo. Please wait…':snapshot.error||'Laptop bot is disconnected. Reconnect on the laptop.');
     else status('LAPTOP BACKGROUND BOT · '+$('status').textContent);
     $('backgroundNote').textContent='Laptop engine '+(this.appVersion?'V'+this.appVersion:'version unavailable — update the laptop connector for the latest fixes')+'. Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
-    if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.connecting?'Connecting in the background…':this.connected?'Laptop connected · '+snapshot.pairedDevices+' paired phone(s). Generate a QR below.':snapshot.error||'Reconnect Binance on the laptop.');}
+    if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.connecting?'Connecting in the background…':this.connected?'Same laptop bot connected · '+snapshot.pairedDevices+' remembered phone(s). Open the saved phone app, or create a one-time link for a new phone.':snapshot.error||'Reconnect Binance on the laptop.');}
   }
   async command(action,extra={}){
     const id=crypto.randomUUID();
@@ -125,17 +145,23 @@ $('makeQr').onclick=async()=>{
     if(!remoteTransport||remoteTransport.mobile||!engine?.remote||!engine.connected)throw Error('Connect the laptop background bot first using the button above.');
     const result=await remoteRequest(remoteTransport,'/pair',{origin:$('mobileOrigin').value.trim()});
     $('pairQrImage').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(result.svg);
-    $('pairLink').href=result.url;$('pairLink').textContent='Open mobile controller';$('pairQr').hidden=false;
-    $('pairQrNote').textContent='Scan with your phone camera. Open the link in Safari or Chrome with Tailscale on. Expires in 2 minutes and works once. Add the controller to your home screen after pairing.';
-    pairExpiryTimer=setTimeout(()=>{$('pairQr').hidden=true;$('pairQrImage').removeAttribute('src');$('pairLink').removeAttribute('href');pairMessage('QR expired. Generate a new one.');},Math.max(0,result.expires-Date.now()));
+    $('pairLink').href=result.url;$('pairLink').textContent='Open this link on your phone';$('phoneLinkText').value=result.url;$('pairQr').hidden=false;
+    $('pairQrNote').textContent='Copy this one-time link and open it on your phone with Tailscale connected. No API keys or typing on the phone. Link expires in 2 minutes. Then use the same saved app; phone access survives laptop restarts and renews while used. QR is optional.';
+    pairExpiryTimer=setTimeout(()=>{$('pairQr').hidden=true;$('phoneLinkText').value='';$('pairQrImage').removeAttribute('src');$('pairLink').removeAttribute('href');pairMessage('Link expired. Create a new one-time phone link.');},Math.max(0,result.expires-Date.now()));
   }catch(error){pairMessage(error.message);}
   finally{$('makeQr').disabled=false;}
 };
+$('copyPhoneLink').onclick=async()=>{
+  const value=$('phoneLinkText').value;if(!value)return;
+  try{await navigator.clipboard.writeText(value);pairMessage('Phone link copied. Open it only on your phone within 2 minutes.');}
+  catch{$('phoneLinkText').hidden=false;$('phoneLinkText').focus();$('phoneLinkText').select();pairMessage('Select and copy the phone link below.');}
+};
 $('revokePhones').onclick=async()=>{
-  try{if(!remoteTransport||remoteTransport.mobile)throw Error('Connect the laptop controls first.');await remoteRequest(remoteTransport,'/revoke',{});$('pairQr').hidden=true;clearTimeout(pairExpiryTimer);await pollRemote();pairMessage('All phone access revoked. Laptop trading state is unchanged.');}
+  try{if(!remoteTransport||remoteTransport.mobile)throw Error('Connect the laptop controls first.');await remoteRequest(remoteTransport,'/revoke',{});$('pairQr').hidden=true;$('phoneLinkText').value='';clearTimeout(pairExpiryTimer);await pollRemote();pairMessage('All phone access revoked. Laptop trading state is unchanged.');}
   catch(error){pairMessage(error.message);}
 };
 setInterval(()=>{if(remoteTransport)pollRemote();},3000);
+restorePhoneDashboard();
 if(onPhoneController){
   $('credentials').hidden=true;$('pairMobile').hidden=true;$('pairPanel').hidden=true;$('resetDemo').hidden=true;
   const paper=document.querySelector('a[href="./"]');if(paper)paper.hidden=true;

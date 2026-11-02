@@ -1,8 +1,18 @@
-# Binance Demo execution module — V1.65
+# Binance Demo execution module — V1.66
 
 USDⓈ-M orders go exclusively to `https://demo-fapi.binance.com`. No live endpoint, withdrawals or transfers.
 
 Build: `node demo-execution/build.cjs`, then copy `demo-execution/demo-connect.html` to the repository root. Verify with `node --test --test-timeout=10000 demo-execution/*.test.cjs render-backend/*.test.cjs`.
+
+## V1.66 mobile continuity and skipped-entry fixes
+
+Phone access is established once using **Mobile — same account → Create phone link → Copy phone link**. Opening that link on the phone remembers only its validated private `.ts.net` origin on the public app origin, then navigates to the laptop controller. Subsequent launches of the same public app/browser storage open that private controller. No Binance API key or pairing code is saved in public local storage; a Secure/HttpOnly/SameSite cookie authorizes the private session. Different browsers or a separately stored home-screen installation may require opening the link in that context once. `demo-connect.html?local=1` forgets the saved phone address for that public browser.
+
+The laptop persists only hashed phone session IDs, CSRF secrets, expiry, private origin and an API-key fingerprint, under its restricted data directory. Existing trusted phones reconnect after a restart once the laptop account reconnects. Trust is revoked by explicit disconnect, Revoke all phones, changing the Binance key or changing the private origin. Unused trust expires after 30 days; active trust renews. API signing secrets remain in process memory, so this does not auto-login or auto-start the laptop after a shutdown. The private connection (Tailscale on both devices) is still required; there is no public trading relay or cloud account.
+
+Entry fixes retain V1.65 thresholds and strategy. A definitely rejected order no longer marks its candle as traded or consumes the filled-trade cooldown. A 30-second per-symbol rejection delay precedes fresh balance/order/signal/quote checks. Filled or uncertain orders still block duplicates. Full local fee/sizing checks try subsequent qualified timeframes before skipping the symbol. Actual commission is cached for at most 60 seconds per account/symbol; failures defer that symbol for 30 seconds, never substitute zero or an expired value, and authentication/rate-limit failures remain account-wide. Scan rows explicitly label app filters, unavailable entry data, exchange-setting rejections and Binance order rejections. Counts and detailed timeframe reasons are included in diagnostics.
+
+Validated with mocked exchange requests and restart/reconnection tests; this is not live profitability validation or a diagnosis of any unseen laptop log.
 
 ## V1.65 continuous management and entry costs
 

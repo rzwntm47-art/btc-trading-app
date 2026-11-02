@@ -10,6 +10,14 @@ The existing dashboard is not yet wired to this service: its assigned URL is nee
 
 The free service can sleep/restart and has no durable storage. No unattended 24-hour trading guarantee. Exchange order reconciliation must precede any retry after an ambiguous write failure. Do not use live account credentials.
 
+## V1.66 remembered mobile access
+
+Update both code folders together and restart the connector once. Reconnect Binance on the laptop, then use **Mobile — same account → Create phone link → Copy phone link** once for the phone. No phone API keys or mandatory QR scan. The private address is read automatically after ENABLE-MOBILE setup. The saved app then shows the laptop's same account, positions and scan results. Tailscale must remain connected on both devices.
+
+Phone trust now survives ordinary connector/Windows restarts, with a 30-day renewable cookie and a restricted server file containing hashed session IDs, CSRF secrets and an account fingerprint. Reconnect the same Binance account on the laptop after restart; phone pairing need not repeat. Revocation, explicit disconnect, account changes and expiry still remove phone access. API credentials are not persisted by this change. See MOBILE-SETUP.md for the one-time flow and recovery.
+
+V1.66 also fixes rejected candles being treated as traded, tries other qualified timeframes after a sizing failure, caches confirmed fee reads briefly, and labels the source of skipped entries. Trading thresholds remain V1.65's.
+
 ## V1.65 Auto continuity and fee checks
 
 Update `demo-execution` and `render-backend` together, then restart `START-LAPTOP.cmd`. Refreshing the website alone does not update a running laptop engine. Preserve journals and saved credentials. Reconnect and Start once after installation; later recoverable errors retain that Start intent.

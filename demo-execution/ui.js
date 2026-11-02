@@ -94,7 +94,8 @@ function render(){
   $('scanTiming').textContent=stats?'Last batch: '+stats.completed+'/'+stats.planned+' checks · '+(stats.elapsedMs/1000).toFixed(2)+'s · up to 3 coins checked concurrently · '+stats.dataErrors+' data errors':'Waiting for scan timings';
   $('scanTitle').textContent='Setups · '+e.symbols.length+' markets · '+(e.scanChecked||0)+' checks completed · repeats continuously · cycle '+(Math.floor(e.cursor/Math.max(1,e.symbols.length))+1);$('setups').replaceChildren();
   if(e.bandRules)$('scanTitle').textContent='Setups · futures gainers / losers · '+(e.scanChecked||0)+' checks · repeats continuously';
-  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),setupCell(s),new Date(s.at).toLocaleTimeString(),(s.phase||'Check')+' · scan '+((s.scanMs||0)/1000).toFixed(2)+'s'+(Number.isFinite(s.entryMs)?' · entry '+(s.entryMs/1000).toFixed(2)+'s':'')+(s.candleClosedAt?' · candle closed '+new Date(s.candleClosedAt).toLocaleTimeString():'')]);
+  const entryLabels={'app-filter':'App filter — no order sent','data-unavailable':'Data unavailable — no order sent','exchange-settings':'Binance settings rejected — no order sent','exchange-rejected':'Binance order rejected','order-submitted':'Order submitted'};
+  for(const s of e.scanned)line($('setups'),[s.symbol+(s.source?' · '+s.source:''),setupCell(s),new Date(s.at).toLocaleTimeString(),(entryLabels[s.entryResult?.kind]||s.phase||'Check')+(s.entryResult?.code?' ('+s.entryResult.code+')':'')+' · scan '+((s.scanMs||0)/1000).toFixed(2)+'s'+(Number.isFinite(s.entryMs)?' · entry '+(s.entryMs/1000).toFixed(2)+'s':'')+(s.candleClosedAt?' · candle closed '+new Date(s.candleClosedAt).toLocaleTimeString():'')]);
   if(!e.scanned.length)line($('setups'),[e.auto?'Scanning markets…':'Click Start / Resume Demo to scan','—','—','—']);
   $('positions').replaceChildren();
   const positions=e.positions.filter(p=>Number(p.positionAmt)!==0);

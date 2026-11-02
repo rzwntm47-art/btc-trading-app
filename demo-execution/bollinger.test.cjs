@@ -15,6 +15,17 @@ function bandFixture(side='BUY'){
 }
 async function opened(side='BUY'){const f=bandFixture(side);await f.e.enter(symbol,f.signal);assert.ok(f.e.owned(symbol),'entry remains open after fees');return f;}
 function entries(f){return f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);}
+test('a later timeframe can qualify when the first setup fails net target headroom',async()=>{
+ const f=bandFixture();const primary={...f.signal,bands:{...f.signal.bands,middle:100.05}},later={...f.signal,intervalMs:900000,bands:{...f.signal.bands,middle:101}};
+ await f.e.enter(symbol,{...primary,alternatives:[later]});const r=f.e.owned(symbol);assert.ok(r,'later timeframe should enter');assert.equal(r.signal.intervalMs,900000);assert.match(r.entryEvidence.candidateChecks[0].reason,/less than \$5/);assert.equal(r.entryEvidence.candidateChecks.at(-1).reason,'Entry candidate selected');assert.equal(entries(f).length,1);
+});
+test('definitely rejected entry does not consume a candle; retry waits and rechecks before dispatch',async()=>{
+ const f=bandFixture(),base=f.api.call;let rejected=false;
+ f.api.call=async(m,p,q,s)=>{if(!rejected&&m==='POST'&&p==='/fapi/v1/order'&&!q.reduceOnly){rejected=true;throw new DemoError('definite rejection',-2010);}return base(m,p,q,s);};
+ await f.e.enter(symbol,f.signal);assert.equal(f.e.entryResult.kind,'exchange-rejected');assert.equal(f.e.auto,true);const r=f.e.state.records[0];assert.equal(r.rejected,true);assert.equal(f.e.active().length,0);
+ const calls=f.calls.length;await f.e.enter(symbol,f.signal);assert.match(f.e.entryOutcome,/waiting 30 seconds/);assert.equal(f.calls.length,calls);
+ r.retryAfter=Date.now()-1;await f.e.enter(symbol,f.signal);assert.ok(f.e.owned(symbol));assert.equal(entries(f).length,1);assert.equal(f.e.state.records.length,2);
+});
 function atPrice(f,price){closingQuote(f,price);f.position.markPrice=String(price);f.position.unRealizedProfit=String((price-100)*Math.abs(Number(f.position.positionAmt))*(f.signal.side==='BUY'?1:-1));}
 test('defaults select stepped after-fee exits and supersede the old one-hour experiment',async()=>{
  const e=new DemoEngine({offset:0},null,()=>{});assert.equal(e.entryPolicy.lossLimit,6);assert.equal(e.entryPolicy.profitExit,'stepped-net-trailing');assert.equal(e.entryPolicy.maxLeverage,150);

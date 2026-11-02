@@ -28,13 +28,27 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
   let engine=null,connecting=false,lastError='',pair=null,origin='',connectId='',generation=random();
   const sessions=new Map(),commands=new Map();
   try{origin=remoteOrigin(JSON.parse(fs.readFileSync(path.join(dataDir,'mobile-origin.json'),'utf8')).origin);}catch{}
-  const snapshot=()=>({version:2,generation,connecting,error:lastError,remoteOrigin:origin,pairedDevices:sessions.size,serverAt:now(),engine:engine?Object.fromEntries(SNAPSHOT_FIELDS.map(k=>[k,engine[k]])):null});
+  const phoneFile=path.join(dataDir,'trusted-phones.json');let phoneAccount='';
+  try{
+    const saved=JSON.parse(fs.readFileSync(phoneFile,'utf8'));
+    if(saved.version===1&&saved.origin===origin&&/^[a-f0-9]{64}$/.test(saved.account)&&Array.isArray(saved.sessions)){
+      phoneAccount=saved.account;
+      for(const s of saved.sessions.slice(0,5))if(/^[a-f0-9]{64}$/.test(s.id)&&/^[A-Za-z0-9_-]{43}$/.test(s.csrf)&&Number.isFinite(s.expires)&&s.expires>now()&&s.expires<=now()+30*86400000)sessions.set(s.id,{csrf:s.csrf,expires:s.expires});
+    }
+  }catch{}
+  function savePhones(){writeJson(phoneFile,{version:1,origin,account:phoneAccount,sessions:[...sessions].map(([id,s])=>({id,...s}))});}
+  function revokePhones(){sessions.clear();pair=null;phoneAccount='';savePhones();}
+  const snapshot=()=>{
+    if(!origin)try{origin=remoteOrigin(JSON.parse(fs.readFileSync(path.join(dataDir,'mobile-origin.json'),'utf8')).origin);}catch{}
+    return {version:2,generation,connecting,error:lastError,remoteOrigin:origin,pairedDevices:sessions.size,serverAt:now(),engine:engine?Object.fromEntries(SNAPSHOT_FIELDS.map(k=>[k,engine[k]])):null};
+  };
   const locked=()=>connecting||!!engine?.api?.key;
   function persistFor(key){const file=path.join(dataDir,'journal-'+hash(key)+'.json');return {file,save:state=>writeJson(file,state)};}
   function startConnect(input){
     if(locked())throw Error('A background connection already exists. Reconnect to its controls instead.');
     if(!/^[A-Za-z0-9]{16,256}$/.test(input.key||'')||typeof input.secret!=='string'||input.secret.length<16||input.secret.length>512)throw Error('Enter your Binance Demo API key and HMAC secret on the laptop.');
     if(input.demoOnly!==true)throw Error('Confirm this is a Binance Demo key.');
+    if(phoneAccount&&phoneAccount!==hash(input.key))revokePhones();
     const journal=persistFor(input.key);
     const state=fs.existsSync(journal.file)?JSON.parse(fs.readFileSync(journal.file,'utf8')):input.state||null;
     // Validate before replacing a browser session. The server never auto-starts entries.
@@ -72,7 +86,7 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
         if(input.action==='again')await e.again();
         if(input.action==='reset')await e.resetFromBinance();
         if(input.action==='report')entry.report=await e.freshTradeReport();
-        if(input.action==='disconnect'){e.pause();e.api.clear();engine=null;sessions.clear();pair=null;generation=random();}
+        if(input.action==='disconnect'){e.pause();e.api.clear();engine=null;revokePhones();generation=random();}
       },['start','startTrial'].includes(input.action)?'start':'action');
       if(!ran)throw Error('Action cancelled by Stop or another pending action.');entry.status='done';
     }catch(error){entry.status='error';entry.error=error.message;e.handleRunError(error);}finally{entry.completedAt=now();}})();
@@ -101,23 +115,30 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
         if(host!==new URL(origin).host){send(403,{error:'Use the private HTTPS mobile address.'});return true;}
         if(req.method!=='GET'&&req.headers.origin!==origin){send(403,{error:'Same-origin request required'});return true;}
       }
+      if(req.method==='GET'&&pathname==='/mobile/manifest.webmanifest'){
+        send(200,{id:'/mobile',name:'Binance Demo — laptop account',short_name:'Binance Demo',start_url:'/mobile',scope:'/mobile',display:'standalone',background_color:'#181a20',theme_color:'#181a20',icons:[{src:'/mobile/icon.svg',sizes:'any',type:'image/svg+xml',purpose:'any'}]});return true;
+      }
+      if(req.method==='GET'&&pathname==='/mobile/icon.svg'){
+        res.writeHead(200,{'Content-Type':'image/svg+xml'});res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="40" fill="#181a20"/><path d="M40 125L77 88L106 108L151 59M121 59H151V89" fill="none" stroke="#fcd535" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></svg>');return true;
+      }
       if(req.method==='GET'&&pathname==='/mobile'){
-        const html=fs.readFileSync(path.join(__dirname,'../demo-execution/demo-connect.html'),'utf8');
-        res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+        const html=fs.readFileSync(path.join(__dirname,'../demo-execution/demo-connect.html'),'utf8').replace('</head>','<link rel="manifest" href="/mobile/manifest.webmanifest"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Binance Demo"></head>');
+        res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
         res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(html);return true;
       }
       if(req.method==='POST'&&pathname==='/mobile/pair'){
         if(now()-attemptWindow>60000){attemptWindow=now();attempts=0;}if(++attempts>20){send(429,{error:'Too many pairing attempts. Wait one minute.'});return true;}
         const input=await body(req);
-        if(!pair||pair.expires<=now()||typeof input.code!=='string'||!equal(hash(input.code),pair.hash)){send(401,{error:'Pairing code expired or already used. Generate another QR on the laptop.'});return true;}
-        pair=null;const value=random(),csrf=random(),sid=hash(value);sessions.set(sid,{csrf,expires:now()+30*86400000});
+        if(!pair||pair.expires<=now()||typeof input.code!=='string'||!equal(hash(input.code),pair.hash)){send(401,{error:'Phone link expired or already used. Create a new phone link on the laptop.'});return true;}
+        pair=null;const value=random(),csrf=random(),sid=hash(value);sessions.set(sid,{csrf,expires:now()+30*86400000});savePhones();
         res.setHeader('Set-Cookie','__Host-btc-mobile='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000');send(200,{csrf,...snapshot()});return true;
       }
       let sid='host',session;
       if(!isHost){
         const value=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('__Host-btc-mobile='))?.split('=')[1]||'';
         sid=hash(value);session=sessions.get(sid);
-        if(!session||session.expires<=now()){sessions.delete(sid);send(401,{error:'Phone is not paired. Scan a new QR from the laptop.'});return true;}
+        if(!session||session.expires<=now()){if(sessions.delete(sid))savePhones();send(401,{error:'Phone access expired or was revoked. Open a new one-time phone link from the laptop.'});return true;}
+        if(session.expires-now()<15*86400000){session.expires=now()+30*86400000;savePhones();res.setHeader('Set-Cookie','__Host-btc-mobile='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000');}
       }
       if(req.method==='GET'&&(pathname==='/host/status'||pathname==='/mobile/status')){send(200,{...snapshot(),...(session?{csrf:session.csrf}:{})});return true;}
       if(req.method==='GET'&&(pathname==='/host/command'||pathname==='/mobile/command')){
@@ -134,13 +155,15 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
       }
       if(pathname==='/host/pair'){
         if(!engine?.connected||connecting)throw Error('Connect the laptop background bot first.');
-        const nextOrigin=remoteOrigin(input.origin);if(origin&&origin!==nextOrigin)sessions.clear();origin=nextOrigin;writeJson(path.join(dataDir,'mobile-origin.json'),{origin});
+        const nextOrigin=remoteOrigin(input.origin||origin);if(origin&&origin!==nextOrigin)revokePhones();origin=nextOrigin;writeJson(path.join(dataDir,'mobile-origin.json'),{origin});
+        for(const [id,s] of sessions)if(s.expires<=now())sessions.delete(id);
+        phoneAccount=hash(engine.api.key);savePhones();
         if(sessions.size>=5)throw Error('Revoke paired phones before pairing more.');
-        const code=random(),url=origin+'/mobile#pair='+code;pair={hash:hash(code),expires:now()+120000};
+        const code=random(),url=DASHBOARD_ORIGIN+'/btc-trading-app/demo-connect.html#mobileOrigin='+encodeURIComponent(origin)+'&pair='+code;pair={hash:hash(code),expires:now()+120000};
         const qr=qrcode(0,'M');qr.addData(url);qr.make();
         send(200,{url,expires:pair.expires,svg:qr.createSvgTag({cellSize:5,margin:20,scalable:true})});return true;
       }
-      if(pathname==='/host/revoke'){pair=null;sessions.clear();send(200,{ok:true});return true;}
+      if(pathname==='/host/revoke'){revokePhones();send(200,{ok:true});return true;}
       if(pathname==='/host/command'||pathname==='/mobile/command'){
         if(session&&['disconnect','reset'].includes(input.action)){send(403,{error:'This action is available on the laptop only.'});return true;}
         send(202,command(input,sid));return true;

@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.65';
+const APP_VERSION='1.66';
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
@@ -530,6 +530,9 @@ class DemoEngine {
     if(row.phase==='Entry skipped')audit.skipped++;
     if(row.phase==='Entry error')audit.entryErrors++;
     if(row.phase==='Data error')audit.dataErrors++;
+    if(row.entryResult?.kind==='exchange-rejected')audit.exchangeRejected=(audit.exchangeRejected||0)+1;
+    if(row.entryResult?.kind==='app-filter')audit.appFiltered=(audit.appFiltered||0)+1;
+    if(row.entryResult?.kind==='data-unavailable')audit.readUnavailable=(audit.readUnavailable||0)+1;
     audit.lastResult={symbol:row.symbol,phase:row.phase,reason:row.reason};
   }
   scanDiagnostics(){
@@ -548,8 +551,8 @@ class DemoEngine {
     else if(this.controlPending)status='A manual action is queued or running; new entries wait for it.';
     else if(!this.symbols.length)status='No eligible markets have been loaded.';
     else if(elapsed!==null&&elapsed>90)status='No completed coin check for '+elapsed+' seconds. '+(this.block||this.entryOutcome||'Check connection and last scan times.');
-    else status='Auto scanning. '+(audit?audit.checked+' completed coin checks; '+audit.qualified+' candle setups; '+audit.submitted+' confirmed order submissions; '+audit.skipped+' entry skips; '+(audit.entryErrors||0)+' entry errors; '+audit.dataErrors+' data errors.':'Detailed counters unavailable from this engine.')+(audit?.lastResult?' Latest: '+audit.lastResult.symbol+' — '+audit.lastResult.reason:' Waiting for first completed check.');
-    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,entryHold:this.entryHold||null,lastRiskCheck:this.lastRiskCheck||null,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
+    else status='Auto scanning. '+(audit?audit.checked+' completed coin checks; '+audit.qualified+' candle setups; '+audit.submitted+' confirmed order submissions; '+audit.skipped+' entry skips; '+(audit.entryErrors||0)+' entry errors; '+audit.dataErrors+' data errors. Reasons: '+(audit.appFiltered||0)+' app filters; '+(audit.readUnavailable||0)+' entry-data failures; '+(audit.exchangeRejected||0)+' Binance order rejections.':'Detailed counters unavailable from this engine.')+(audit?.lastResult?' Latest: '+audit.lastResult.symbol+' — '+audit.lastResult.reason:' Waiting for first completed check.');
+    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,entryHold:this.entryHold||null,lastRiskCheck:this.lastRiskCheck||null,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,entryResult:s.entryResult||null,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
   }
   tradeReport(){
     const now=Date.now(),incomeReady=!!this.lastIncome&&this.incomeWindowStart===this.state.startedAt;
@@ -565,7 +568,7 @@ class DemoEngine {
       totals:incomeReady?this.incomeBreakdown():null,unrealized:positionReady?this.unrealizedPnl():null,openingUnrealized:this.state.dayOpenPnl||0,netSession:complete?this.sessionNet():null,
       incomeRowsOmitted:incomeReady?Math.max(0,this.income.length-200):0,
       income:incomeReady?this.income.slice(-200).map(x=>({symbol:x.symbol,time:x.time,type:x.incomeType,income:x.income,asset:x.asset})):[],
-      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,oneHourTrial:r.oneHourTrial||null,bandTargets:r.bandTargets||null,lossRecovery:r.lossRecovery||null,maxLossLimit:r.maxLossLimit??null,indicatorSnapshot:r.signal?.bands||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,tradeAccounting:r.tradeAccounting||null,trailPeak:r.trailPeak??null,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
+      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,oneHourTrial:r.oneHourTrial||null,bandTargets:r.bandTargets||null,lossRecovery:r.lossRecovery||null,maxLossLimit:r.maxLossLimit??null,indicatorSnapshot:r.signal?.bands||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,rejectionCode:r.rejectionCode??null,retryAfter:r.retryAfter??null,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,tradeAccounting:r.tradeAccounting||null,trailPeak:r.trailPeak??null,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
     };
   }
   async freshTradeReport(){
@@ -762,6 +765,21 @@ class DemoEngine {
       throw error;
     }
   }
+  async entryCommissionRate(symbol){
+    if(this.feeCacheAccount!==this.api.key){this.feeCacheAccount=this.api.key;this.entryFeeCache=new Map();}
+    this.entryFeeCache??=new Map();const saved=this.entryFeeCache.get(symbol),now=Date.now();
+    if(saved?.expires>now)return saved.rate;
+    if(saved?.retryAt>now){const error=new DemoError('Commission read unavailable for '+symbol+'; retry in '+Math.ceil((saved.retryAt-now)/1000)+'s. No order submitted.',saved.code);error.candidateRead='/fapi/v1/commissionRate';throw error;}
+    try{
+      const data=await this.entryRead('/fapi/v1/commissionRate',{symbol}),rate=number(data.takerCommissionRate);
+      if(rate<0||rate>.01)throw new DemoError('Unsupported commission rate');
+      this.entryFeeCache.set(symbol,{rate,expires:Date.now()+60000});return rate;
+    }catch(error){
+      if(ACCOUNT_BLOCKS.has(error.code))throw error;
+      if(error instanceof DemoError){error.candidateRead='/fapi/v1/commissionRate';this.entryFeeCache.set(symbol,{code:error.code,retryAt:Date.now()+30000});}
+      throw error;
+    }
+  }
   async trialLeverageCeiling(symbol){
     // A missing bracket route is not an order rejection. Validate a fallback
     // through leverage-setting responses, without ever placing a test order.
@@ -781,10 +799,12 @@ class DemoEngine {
   }
   async enter(symbol,signal){
     const timing={symbol,startedAt:Date.now(),stages:[]};this.entryTiming=timing;
+    this.entryResult={kind:'checks'};
     const recordsBefore=this.state.records.length;
     try{return await this.enterChecked(symbol,signal);}catch(e){
       // Only skip pre-entry failures when no journaled/observed position can be at risk.
       if(this.state.records.length===recordsBefore&&!this.owned(symbol)&&!this.position(symbol)&&(e.candidateRead||(!e.uncertain&&ENTRY_REJECTIONS.has(e.code)))){
+        this.entryResult={kind:e.candidateRead?'data-unavailable':'exchange-settings',code:e.code,path:e.candidateRead||e.requestPath||null};
         this.entryOutcome=symbol+' skipped ('+e.code+'): '+e.message+' Scanning continues.';
         this.event(this.entryOutcome);return false;
       }
@@ -793,7 +813,8 @@ class DemoEngine {
   }
   async enterChecked(symbol,signal){
     const progress=reason=>{this.entryOutcome=reason;if(this.entryTiming){const stages=this.entryTiming.stages,previous=stages.at(-1);if(previous)previous.ms=Date.now()-previous.at;stages.push({label:reason,at:Date.now()});}const row=this.scanned.find(s=>s.symbol===symbol);if(row){row.reason=reason;row.entryMs=Date.now()-(this.entryTiming?.startedAt||Date.now());this.notify();}};
-    const skip=reason=>{progress(reason);return false;};
+    const skip=reason=>{if(this.entryResult?.kind==='checks')this.entryResult={kind:'app-filter'};progress(reason);return false;};
+    const skipRead=(reason,error)=>{this.entryResult={kind:'data-unavailable',code:error.code||0,path:error.candidateRead||error.requestPath||null};return skip(reason);};
     this.entryOutcome='Checking entry';
     const epoch=this.stopEpoch;
     const band=this.newRules&&this.bandRules,flexible=band||this.trialActive();
@@ -806,7 +827,8 @@ class DemoEngine {
     if(signal.experimental&&!experimental)return skip('Experiment expired; waiting for a normal signal');
     if(band&&signal.setupType!=='bollinger-wr')return skip('Old strategy candidate ignored; rechecking Bollinger / Williams %R');
     const lossLimit=band?6:trial?null:this.newRules?5:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
-    if(!trial&&this.state.records.some(r=>r.symbol===symbol&&((!this.newRules&&r.signalClose===signal.close)||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip('Already traded this candle or re-entry cooldown (10 minutes after close)');
+    if(this.state.records.some(r=>r.symbol===symbol&&r.rejected&&r.retryAfter>Date.now()))return skip('Definite Binance rejection: waiting 30 seconds before fresh checks; no filled trade on this attempt');
+    if(!trial&&this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&((!this.newRules&&r.signalClose===signal.close)||Date.now()-(r.closedAt||r.at)<(this.newRules&&r.closedAt?600000:60000))))return skip('Already traded this candle or re-entry cooldown (10 minutes after close)');
     if(this.newRules){progress('Checking fee-history support before entry');await this.checkEntryAccounting(symbol);}
     progress('Checking Binance balance, positions and open orders');
     await this.refresh({inventory:!this.newRules,valuation:false});
@@ -823,18 +845,18 @@ class DemoEngine {
     if(this.newRules){
       progress('Reading current 1m movement for timeframe-aware entry checks');
       try{minuteBars=await this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false);breakout(minuteBars,Date.now()+this.api.offset,60000);}
-      catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skip('1m entry check unavailable; scanning continues: '+error.message);}
+      catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skipRead('1m entry check unavailable; scanning continues: '+error.message,error);}
     }
     progress('Checking current entry price');
     const mark=await this.entryRead('/fapi/v1/premiumIndex',{symbol},false);const price=number(mark.markPrice);
     if(Math.abs(Date.now()+this.api.offset-number(mark.time))>15000||(!this.newRules&&Date.now()+this.api.offset-signal.close>(signal.intervalMs||300000)+15000))return skip('Signal or mark price became stale');
     if(!this.newRules&&!experimental){const reason=entryPriceReason(price,signal);if(reason)return skip(reason);}
     progress('Checking commission and position size');
-    const feeInfo=await this.entryRead('/fapi/v1/commissionRate',{symbol}),fee=number(feeInfo.takerCommissionRate);
-    if(fee<0||fee>.01)throw new DemoError('Unsupported commission rate');
+    const fee=await this.entryCommissionRate(symbol);
+    const originalCandidates=signal;
     let candidateChecks;
     if(this.newRules){
-      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,...(band?{intervals:BAND_TIMEFRAMES}:trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),confirm:candidate=>entryConfirmation(minuteBars,candidate,Date.now()+this.api.offset).reason,traded:candidate=>this.state.records.some(r=>r.symbol===symbol&&r.signalClose===candidate.close)});
+      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,...(band?{intervals:BAND_TIMEFRAMES}:trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),confirm:candidate=>entryConfirmation(minuteBars,candidate,Date.now()+this.api.offset).reason,traded:candidate=>this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&r.signalClose===candidate.close)});
       candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
       if(!selection.signal)return skip('No entry-ready timeframe: '+candidateChecks.map(c=>c.minutes+'m '+c.reason).join(' | '));
       signal=selection.signal;progress('Selected '+signal.intervalMs/60000+'m '+(signal.setupType||'breakout')+' after price and commission checks');
@@ -878,17 +900,25 @@ class DemoEngine {
       try{
         const [quote,currentMark]=await Promise.all([this.entryRead('/fapi/v1/ticker/bookTicker',{symbol},false),this.entryRead('/fapi/v1/premiumIndex',{symbol},false)]);
         const quotedPrice=number(signal.side==='BUY'?quote.askPrice:quote.bidPrice);
-        let reason='No leverage leaves room for the $6 after-fee stop';
-        for(let candidate=leverageCeiling;candidate>=1;candidate--){
-          const size=minimumPlan(candidate,quotedPrice),check=entryQuoteCheck(quote,currentMark,{symbol,side:signal.side,qty:size.qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
-          if(check.reason){reason=check.reason;continue;}
-          if(check.estimatedRoundTripFees>lossLimit*.5+1e-8){reason='Opening + closing commission would consume more than half the normal loss budget';continue;}
-          const targetCosts=bandEntryCosts(signal,quotedPrice,size.qty,fee);if(targetCosts.reason){reason=targetCosts.reason;continue;}
-          if(size.notional/candidate>marginRoom+1e-8||size.notional/candidate+check.estimatedRoundTripFees>available+1e-8){reason='Not enough margin plus fees for the full $300 entry';continue;}
-          adaptive={leverage:candidate,marginTarget:ENTRY_MARGIN,leverageMode:'highest-fee-compatible',maxLossTarget:6,commissionLossBudget:lossLimit*.5,targetCosts,exchangeCeiling:leverageCeiling,estimatedRoundTripFees:check.estimatedRoundTripFees,estimatedImmediateExitNet:check.estimatedImmediateExitNet};break;
-        }
-        if(!adaptive)return skip('No fee-compatible leverage for $300 margin: '+reason+'; scanning continues');
-      }catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skip('Leverage cost check unavailable; scanning continues: '+error.message);}
+        const selection=selectEntryCandidate(originalCandidates,{price:quotedPrice,fee,now:Date.now()+this.api.offset,intervals:BAND_TIMEFRAMES,traded:c=>this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&r.signalClose===c.close),confirm:choice=>{
+          const confirmation=entryConfirmation(minuteBars,choice,Date.now()+this.api.offset);if(confirmation.reason)return confirmation.reason;
+          let reason='No leverage leaves room for the $6 after-fee stop';
+          for(let candidate=leverageCeiling;candidate>=1;candidate--){
+            const size=minimumPlan(candidate,quotedPrice),check=entryQuoteCheck(quote,currentMark,{symbol,side:choice.side,qty:size.qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
+            if(check.reason){reason=check.reason;continue;}
+            if(check.estimatedRoundTripFees>lossLimit*.5+1e-8){reason='Opening + closing commission would consume more than half the normal loss budget';continue;}
+            const targetCosts=bandEntryCosts(choice,quotedPrice,size.qty,fee);if(targetCosts.reason){reason=targetCosts.reason;continue;}
+            if(size.notional/candidate>marginRoom+1e-8||size.notional/candidate+check.estimatedRoundTripFees>available+1e-8){reason='Not enough margin plus fees for the full $300 entry';continue;}
+            adaptive={leverage:candidate,marginTarget:ENTRY_MARGIN,leverageMode:'highest-fee-compatible',maxLossTarget:6,commissionLossBudget:lossLimit*.5,targetCosts,exchangeCeiling:leverageCeiling,estimatedRoundTripFees:check.estimatedRoundTripFees,estimatedImmediateExitNet:check.estimatedImmediateExitNet};return null;
+          }
+          return reason;
+        }});
+        candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
+        if(!selection.signal)return skip('No fee-compatible leverage for $300 margin: '+candidateChecks.map(c=>c.minutes+'m '+c.reason).join(' | ')+'; scanning continues');
+        signal=selection.signal;momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset);
+        if(row){row.intervalMs=signal.intervalMs;row.candleClosedAt=signal.close;}
+        progress('Selected '+signal.intervalMs/60000+'m after full cost and sizing checks');
+      }catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skipRead('Leverage cost check unavailable; scanning continues: '+error.message,error);}
     }else adaptive=this.newRules?adaptiveLeveragePlan({price,atr:momentum.atr,fee,lossLimit:ENTRY_VOLATILITY_ALLOWANCE,side:signal.side,tick:priceFilter.tickSize,plan:minimumPlan,maxLeverage:leverageCeiling,requireStop:false,...(trial?{leverageLimit:150,maxFees:2}:{})}):null;
     if(this.newRules&&!adaptive)return skip(trial?'Entry exceeds the volatility or $2 estimated commission allowance even at 1×; scanning continues':'$300 margin exceeds the entry volatility and fee allowance, even at 1×; scanning continues');
     const requestedLeverage=this.newRules?adaptive.leverage:preferredLeverage;
@@ -976,7 +1006,7 @@ class DemoEngine {
         const units=qty/number(normal.stepSize);if(!Number.isFinite(units)||Math.abs(units-Math.round(units))>1e-7)return skip('Quantity is not valid for Binance lot step; scanning continues');
         const margin=notional/selectedLeverage;
         if(margin>marginRoom+1e-8||margin+quoteEvidence.estimatedRoundTripFees>available+1e-8)return skip('Fresh quote needs more margin plus fees than available; scanning continues');
-      }catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skip('Entry quote check unavailable; scanning continues: '+error.message);}
+      }catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skipRead('Entry quote check unavailable; scanning continues: '+error.message,error);}
     }
     if(!this.auto||this.entryHold||epoch!==this.stopEpoch||this.controlPending||this.shouldScan?.()===false)return skip(this.controlPending?'Manual action queued before entry dispatch':'Auto stopped before entry dispatch');
     if(this.newRules&&!flexible&&selectedLeverage>signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset))return skip('Market context became stale during checks; rechecking before higher leverage');
@@ -992,7 +1022,7 @@ class DemoEngine {
     if(this.newRules)r.entryEvidence={oneMinute:momentum,candidateChecks,...quoteEvidence,requestedLeverage,selectedLeverage,adaptiveSizing:{...adaptive,leverageCeiling},marketContext:this.marketContext||null,marketSource:signal.marketSource||{type:'full-market'}};
     r.sizingNote='Entry margin ≈ $'+(notional/selectedLeverage).toFixed(2)+' · estimated round-trip commission $'+(notional*fee*2).toFixed(2)+' · $300 target margin; adaptive leverage up to 10× based on candle agreement, BTC market context, 1m volatility, fees and exchange limits; trailing net profit from $2; trim 25% at -$3; close at -$5; market fill margin may differ';
     if(trial)r.sizingNote='One-hour experiment · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · any negative estimated total net closes immediately when detected; fees alone can cause closure · net pullback floors $2 / $4 / $8 / $10 / +$5';
-    if(band)r.sizingNote=signal.intervalMs/60000+'m Bollinger / Williams %R · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · $300 margin target; highest fee-compatible Binance leverage · $6 after-fee loss target · middle band first; confirmed continuation targets before the outer band';
+    if(band)r.sizingNote=signal.intervalMs/60000+'m Bollinger / Williams %R · margin ≈ $'+r.estimatedEntryMargin.toFixed(2)+' · '+selectedLeverage+'× · $300 margin target; highest fee-compatible Binance leverage · $6 normal after-fee loss / $12 backup targets · after-fee profit pullbacks $5 / $8 / $11 / +$3';
     this.state.records.push(r);this.save(); // Journal before dispatch; never duplicate an uncertain entry.
     progress('Submitting demo order');
     try{const order=await this.sendOnce('/fapi/v1/order',{symbol,side:r.side,positionSide:'BOTH',type:'MARKET',quantity,newClientOrderId:id,newOrderRespType:'RESULT'},()=>this.queryEntry(r));r.orderId=order.orderId;r.entryStatus=order.status;this.save();
@@ -1011,7 +1041,7 @@ class DemoEngine {
     }
     catch(e){
       if(!e.uncertain&&!r.entryStatus){
-        r.rejected=true;this.save();
+        r.rejected=true;r.rejectionCode=e.code;r.retryAfter=Date.now()+30000;this.entryResult={kind:'exchange-rejected',code:e.code,path:'/fapi/v1/order'};this.save();
         if(ENTRY_REJECTIONS.has(e.code)){
           this.event(symbol+' entry rejected ('+e.code+'); scanning continues.');
           return skip('Binance rejected entry ('+e.code+'); continuing other coins');
@@ -1019,7 +1049,7 @@ class DemoEngine {
       }
       this.holdEntries(e.message);throw e;
     }
-    await this.refresh();await this.reconcile();this.entryOutcome=r.closedAt?'Entry closed during exit checks':'Entry submitted; status '+r.entryStatus;this.event(symbol+(this.exitsSuspended(r)?' demo entry submitted; automatic exits SUSPENDED until experiment expiry.':' demo entry submitted; confirmed fills and automatic exit policy shown below.'));
+    await this.refresh();await this.reconcile();this.entryResult={kind:'order-submitted',status:r.entryStatus};this.entryOutcome=r.closedAt?'Entry closed during exit checks':'Entry submitted; status '+r.entryStatus;this.event(symbol+(this.exitsSuspended(r)?' demo entry submitted; automatic exits SUSPENDED until experiment expiry.':' demo entry submitted; confirmed fills and automatic exit policy shown below.'));
   }
   async cancelExits(r,keepId=null){
     for(const e of r.exits||[]){
@@ -1550,7 +1580,7 @@ class DemoEngine {
           try{
             await this.ensureIncomeFresh();if(this.newRules&&await this.enforceSessionGoal())return;
             if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;row.reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}
-            await this.enter(symbol,signal);row.reason=this.entryOutcome;
+            await this.enter(symbol,signal);row.reason=this.entryOutcome;row.entryResult=this.entryResult;
             row.entryMs=this.entryTiming?.totalMs;row.phase=this.state.records.some(r=>r.symbol===symbol&&r.at>=row.at+(this.api.offset||0)&&!r.rejected)?'Order submitted':'Entry skipped';
           }catch(error){row.reason='Entry failed: '+error.message;row.phase='Entry error';throw error;}
           finally{this.recordScanResult(row);this.notify();}

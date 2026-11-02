@@ -12,16 +12,16 @@ function worker({offline=false}={}){
 }
 test('PWA update removes only old app static caches and activates without reloading clients',async()=>{
  const w=worker();w.stores.set('btc-paper-v17-static',new Map());w.stores.set('unrelated-app',new Map());w.stores.set('btc-dashboard-v1.63-static',new Map());
- await w.lifecycle('install');await w.lifecycle('activate');assert.equal(w.activated,1);assert.equal(w.claimed,1);assert.deepEqual(w.deleted,['btc-paper-v17-static','btc-dashboard-v1.63-static']);assert.ok(w.stores.has('unrelated-app'));assert.ok(w.stores.has('btc-dashboard-v1.65-static'));assert.ok(w.calls.every(r=>r.cache==='reload'));
+ await w.lifecycle('install');await w.lifecycle('activate');assert.equal(w.activated,1);assert.equal(w.claimed,1);assert.deepEqual(w.deleted,['btc-paper-v17-static','btc-dashboard-v1.63-static']);assert.ok(w.stores.has('unrelated-app'));assert.ok(w.stores.has('btc-dashboard-v1.66-static'));assert.ok(w.calls.every(r=>r.cache==='reload'));
 });
 test('PWA retrieves current version and refreshes only the public static cache',async()=>{
- const w=worker();await w.lifecycle('install');const response=await w.request(ROOT+'index.html?v=1.65');assert.equal(await response.text(),'fresh');assert.equal(w.calls.at(-1).options.cache,'no-store');
- w.setOffline(true);const fallback=await w.request(ROOT+'index.html?v=1.65');assert.equal(await fallback.text(),'fresh');
+ const w=worker();await w.lifecycle('install');const response=await w.request(ROOT+'index.html?v=1.66');assert.equal(await response.text(),'fresh');assert.equal(w.calls.at(-1).options.cache,'no-store');
+ w.setOffline(true);const fallback=await w.request(ROOT+'index.html?v=1.66');assert.equal(await fallback.text(),'fresh');
 });
 test('PWA never serves a cached execution page or intercepts commands and account reads',async()=>{
- const w=worker();await w.lifecycle('install');const old=w.stores.get('btc-dashboard-v1.65-static');old.set(ROOT+'demo-connect.html',new Response('stale engine'));
- assert.equal(await (await w.request(ROOT+'demo-connect.html?v=1.65')).text(),'fresh');assert.equal(await old.get(ROOT+'demo-connect.html').clone().text(),'stale engine');
- w.setOffline(true);const unavailable=await w.request(ROOT+'demo-connect.html?v=1.65');assert.equal(unavailable.status,503);assert.match(await unavailable.text(),/Offline/);
+ const w=worker();await w.lifecycle('install');const old=w.stores.get('btc-dashboard-v1.66-static');old.set(ROOT+'demo-connect.html',new Response('stale engine'));
+ assert.equal(await (await w.request(ROOT+'demo-connect.html?v=1.66')).text(),'fresh');assert.equal(await old.get(ROOT+'demo-connect.html').clone().text(),'stale engine');
+ w.setOffline(true);const unavailable=await w.request(ROOT+'demo-connect.html?v=1.66');assert.equal(unavailable.status,503);assert.match(await unavailable.text(),/Offline/);
  for(const url of [ROOT+'mobile/status',ROOT+'host/status','https://demo-fapi.binance.com/fapi/v3/account','http://127.0.0.1:10000/host/status'])assert.equal(await w.request(url),undefined);
  assert.equal(await w.request(ROOT+'host/command','POST'),undefined);
 });
