@@ -86,7 +86,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.66');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.67');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{
@@ -147,3 +147,4 @@ test('private mobile app installs at its own controller address without caching 
  const icon=await request('/mobile/icon.svg',undefined,{mobile:true});assert.equal(icon.status,200);assert.match(icon.headers.get('content-type'),/image\/svg/);
  assert.equal((await request('/mobile/status',undefined,{mobile:true})).status,401);
 }));
+
