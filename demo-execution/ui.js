@@ -69,7 +69,7 @@ function render(){
   }
   if(policy?.profitExit==='stepped-net-trailing'){
     const frames=policy.timeframes.map(m=>m+'m').join(' / ');
-    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit'+(policy.maxCommissionShare?' · commission ≤ '+(policy.maxCommissionShare*100)+'% of reference target move and ≤ half the normal loss budget; target net ≥ $'+policy.minimumNetAtTarget:'')+' · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
+    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit'+(policy.maxCommissionShare?' · commission ≤ '+(policy.maxCommissionShare*100)+'% of reference target move and ≤ half the normal loss budget; target net ≥ $'+policy.minimumNetAtTarget:'')+(policy.earlyLossExit?' · early loss exit on confirmed adverse movement':'')+' · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
     $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · $300 per entry; no smaller orders · $12 Binance backup loss target; $6 exit and recovery checks need the engine running';
   }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
@@ -128,6 +128,7 @@ function render(){
       field(grid,'Normal loss / Binance backup','$6 / $12 targets');
       const trail=document.createElement('p');trail.textContent='Floors $5 → $8 → $11 → $14 → $17 → $20 → +$3. A level arms only after net profit exceeds it. Hold while profit rises; close on return to or below the armed floor. Floors never move down.';card.append(trail);
       const recovery=document.createElement('p');recovery.textContent=r.lossRecovery?(r.lossRecovery.allowed?'Recovery extension active · ':'No recovery extension · ')+r.lossRecovery.reason+' · Checked '+new Date(r.lossRecovery.checkedAt).toLocaleTimeString():'At -$6, hold toward -$12 only with fresh supporting 1m/5m candles and an aligned current price. No timer or partial reduction.';card.append(recovery);
+      const early=document.createElement('p');early.textContent=e.entryPolicy?.earlyLossExit?(r.earlyLossReview?'Early loss check · '+r.earlyLossReview.reason+' · Checked '+new Date(r.earlyLossReview.checkedAt).toLocaleTimeString():'Early loss exit enabled: confirmed adverse movement can close a losing trade before -$6. No fixed -$2 stop; fees alone do not qualify.'):'Early loss exit unavailable on this engine; update/restart the laptop connector.';card.append(early);
       const note=document.createElement('small'),c=r.closingEstimate;note.textContent=(c?'Paid commission $'+money(c.paidCommission)+' · estimated closing fee $'+money(c.closingFee)+' · booked partial result '+money(c.realized)+' · funding '+money(c.funding)+'. ':'')+'Engine required for profit floors and $6 recovery decisions. Binance backup targets -$12; gaps, fees and slippage can exceed exit targets.'+(r.estimateError?' · '+r.estimateError:'');card.append(note);
     }
     if(['net-trailing','trial-net-trailing'].includes(r?.exitPolicy)){
@@ -283,3 +284,4 @@ $('copyScanDiagnostics').onclick=async()=>{
   try{await navigator.clipboard.writeText(text);$('entryStatus').textContent='Scan diagnostics copied — no trades or account refresh required.';}
   catch{$('scanDiagnosticsText').value=text;$('scanDiagnosticsText').hidden=false;$('scanDiagnosticsText').focus();$('scanDiagnosticsText').select();$('entryStatus').textContent='Select and copy the scan diagnostics shown below. No trades are required.';}
 };
+

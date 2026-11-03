@@ -1,3 +1,18 @@
+## V1.67 — additional early loss exit
+
+V1.66 entries, margin/leverage sizing, fee filters, $6 normal loss/recovery rules, $12 exchange backup, stepped profit floors and $100 session stop are unchanged. Existing bot-owned open positions receive this extra check when the updated engine reconciles them; their quantity, leverage, journal and armed profit floors are preserved.
+
+A trade with negative total net **and** negative price P&L can close before -$6 when one of these conditions is confirmed:
+
+- Three independent executable-price observations at least 1 second apart, all within 15 seconds, move strictly against the position. The latest observation must be within 5 seconds. Both the move from entry and the observed deterioration must reach the greater of two price ticks or 5% of the entry signal ATR. The final quote must still be at least as adverse as the last observation.
+- A completed 1-minute candle **after entry**, no older than 75 seconds, shows either a sharp opposing body (at least 0.6 ATR and a close at least 0.3 ATR against the prior close), or sustained opposing momentum (opposing 5/20-close averages and a three-candle move of at least 0.8 ATR). The executable quote must not have recovered more than 0.1 ATR from that candle close; the same entry/noise allowance applies.
+
+There is no fixed $2 stop and no minimum loss in dollars. Fees alone, a single tick, stale evidence and unavailable candle data do not trigger this additional exit. These are unvalidated deterioration heuristics, not forecasts or a guarantee of smaller losses. Spread changes, latency and market fills can affect outcomes. Existing normal/hard loss and armed-profit rules take precedence. Quote/position/fee checks run again before a reduce-only close; ambiguous writes retain the existing journal/reconciliation behavior. Evidence is shown per position and in the trade report under `earlyLossReview`; the close reason is `Early adverse-move exit`.
+
+Activation: browser mode needs the refreshed V1.67 execution page and reconnection. Laptop/background mode needs updated `demo-execution` and `render-backend` folders, keeping the existing data/journals, followed by restarting `START-LAPTOP.cmd` and reconnecting. Mobile reflects the actual laptop engine version. A website refresh cannot change a running laptop process. No running account is remotely restarted by this code update.
+
+Validation: `node demo-execution/build.cjs` and `node --test demo-execution/*.test.cjs render-backend/*.test.cjs`. Mocked tests check behavior and regression coverage; they are not a trading-performance backtest or a Binance execution test.
+
 # Binance Demo execution module — V1.66
 
 USDⓈ-M orders go exclusively to `https://demo-fapi.binance.com`. No live endpoint, withdrawals or transfers.
@@ -94,3 +109,4 @@ The current `render-backend/server.cjs` allows the signed Demo-only `GET /fapi/v
 Deterministic tests cover mirrored LONG/SHORT qualification, fixed-margin maximum-leverage sizing, stepped profit exits, fresh recovery checks, $6/$12 loss exits, migration, paid fees, manual controls, leverage/capacity errors, read recovery, unknown writes, mobile snapshots and old-connector detection. These verify execution behavior, not profitability.
 
 Indicator references: [John Bollinger's rules](https://www.bollingerbands.com/bollinger-band-rules), [Bollinger Bands calculation](https://www.bollingerbands.com/bollinger-bands), [Williams %R](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/williams-r).
+

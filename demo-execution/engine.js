@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.66';
+const APP_VERSION='1.67';
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
@@ -262,6 +262,31 @@ function entryMomentum(raw,side,now){
   if(range<=0||Math.abs(close-open)/range<.4||(buy?(close-low)/range:(high-close)/range)<.65)return {...evidence,reason:'Latest 1m candle body/close does not confirm '+side};
   return evidence;
 }
+// An additional exit only: observed deterioration is evidence, not a price forecast.
+// No fixed dollar trigger; fees alone and a single adverse tick are insufficient.
+function earlyLossDecision(r,quote,now,observations=[],momentum=null){
+  const hold=reason=>({exit:false,reason});
+  if(!quote||![quote.net,quote.gross,quote.price,quote.at,quote.quantity,now].every(Number.isFinite)||quote.price<=0||quote.quantity<=0||now-quote.at>5000||quote.at>now)return hold('Fresh executable closing estimate required');
+  if(quote.net>=0||quote.gross>=0)return hold('No losing price move; fees alone do not trigger an early exit');
+  const sign=r.side==='BUY'?1:r.side==='SELL'?-1:0,entry=Number(r.entry),tick=Number(r.tick),atr=Number(r.signal?.atr);
+  if(!sign||!(entry>0&&tick>0&&atr>0))return hold('Entry price, tick size and volatility evidence required');
+  const adverseDistance=sign*(entry-quote.price),noise=Math.max(2*tick,.05*atr);
+  if(adverseDistance+1e-10<noise)return hold('Adverse price movement is still within the noise allowance');
+  const samples=observations.filter(q=>q&&Number.isFinite(q.at)&&Number.isFinite(q.price)&&q.price>0&&q.at<=now&&now-q.at<=15000&&q.entry===entry&&q.quantity===quote.quantity).slice(-3);
+  if(samples.length===3){
+    const [a,b,c]=samples;
+    if(b.at-a.at>=1000&&c.at-b.at>=1000&&now-c.at<=5000&&sign*(b.price-a.price)<-1e-10&&sign*(c.price-b.price)<-1e-10&&sign*(quote.price-c.price)<=1e-10&&sign*(a.price-quote.price)+1e-10>=noise)
+      return {exit:true,mode:'prices',reason:'Three fresh executable prices moved against the trade; the latest quote still confirms deterioration',adverseDistance,noise,samples};
+  }
+  const m=momentum,openedAt=Number(r.openedAt||r.at);
+  if(m&&[m.closedAt,m.atr,m.close,m.open,m.previousClose,m.fast,m.slow,m.threeBarsAgo,openedAt].every(Number.isFinite)&&m.atr>0&&m.closedAt>=openedAt&&m.closedAt<now&&now-m.closedAt<=75000){
+    const sharp=sign*(m.close-m.open)<=-.6*m.atr&&sign*(m.close-m.previousClose)<=-.3*m.atr;
+    const sustained=sign*(m.close-m.fast)<0&&sign*(m.fast-m.slow)<0&&sign*(m.close-m.threeBarsAgo)<=-.8*m.atr;
+    if((sharp||sustained)&&sign*(quote.price-m.close)<=.1*m.atr)
+      return {exit:true,mode:'candle',reason:'Strong opposing 1m movement after entry remains confirmed by the executable price',adverseDistance,noise,momentum:m};
+  }
+  return hold('No confirmed deterioration; existing exits remain active');
+}
 function entryConfirmation(raw,signal,now){
   const current=entryMomentum(raw,signal.side,now),minutes=(signal.intervalMs||300000)/60000;
   if(signal.setupType==='bollinger-wr'&&minutes===1){
@@ -361,7 +386,7 @@ function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
-    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -568,7 +593,7 @@ class DemoEngine {
       totals:incomeReady?this.incomeBreakdown():null,unrealized:positionReady?this.unrealizedPnl():null,openingUnrealized:this.state.dayOpenPnl||0,netSession:complete?this.sessionNet():null,
       incomeRowsOmitted:incomeReady?Math.max(0,this.income.length-200):0,
       income:incomeReady?this.income.slice(-200).map(x=>({symbol:x.symbol,time:x.time,type:x.incomeType,income:x.income,asset:x.asset})):[],
-      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,oneHourTrial:r.oneHourTrial||null,bandTargets:r.bandTargets||null,lossRecovery:r.lossRecovery||null,maxLossLimit:r.maxLossLimit??null,indicatorSnapshot:r.signal?.bands||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,rejectionCode:r.rejectionCode??null,retryAfter:r.retryAfter??null,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,tradeAccounting:r.tradeAccounting||null,trailPeak:r.trailPeak??null,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
+      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,oneHourTrial:r.oneHourTrial||null,bandTargets:r.bandTargets||null,lossRecovery:r.lossRecovery||null,earlyLossReview:r.earlyLossReview||null,maxLossLimit:r.maxLossLimit??null,indicatorSnapshot:r.signal?.bands||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,rejectionCode:r.rejectionCode??null,retryAfter:r.retryAfter??null,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,tradeAccounting:r.tradeAccounting||null,trailPeak:r.trailPeak??null,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
     };
   }
   async freshTradeReport(){
@@ -1255,14 +1280,38 @@ class DemoEngine {
       return record(true,'Fresh 1m/5m trend and strong 1m candle support recovery; not a guarantee',evidence);
     }catch(error){return record(false,'Recovery evidence unavailable: '+error.message);}
   }
+  async reviewEarlyLoss(r){
+    const now=()=>Date.now()+this.api.offset,quote=r.closingEstimate;
+    const record=(decision,momentum=null)=>{r.earlyLossReview={...decision,momentum,checkedAt:now(),net:quote?.net,price:quote?.price};this.save();return decision.exit;};
+    if(!quote)return record({exit:false,reason:'Closing estimate unavailable'});
+    // Keep independent observations; a second read in the same second cannot
+    // fabricate three ticks. Restarted or resized positions cannot reuse old data.
+    const samples=(r.earlyLossQuotes||[]).filter(q=>q.at<=now()&&now()-q.at<=15000&&q.entry===Number(r.entry)&&q.quantity===quote.quantity);
+    if(!samples.length||quote.at-samples.at(-1).at>=1000)samples.push({at:quote.at,price:quote.price,entry:Number(r.entry),quantity:quote.quantity});
+    r.earlyLossQuotes=samples.slice(-3);
+    let decision=earlyLossDecision(r,quote,now(),r.earlyLossQuotes);
+    if(decision.exit||quote.net>=0||quote.gross>=0)return record(decision);
+    let momentum=null;
+    try{
+      const raw=await this.scanBars(r.symbol,'1m',30);
+      momentum=entryMomentum(raw,r.side,now());
+      decision=earlyLossDecision(r,quote,now(),r.earlyLossQuotes,momentum);
+    }catch(error){
+      record({exit:false,reason:'Early-exit evidence unavailable: '+error.message});
+      if(ACCOUNT_BLOCKS.has(error.code)||error.uncertain)throw error;
+      return false;
+    }
+    return record(decision,momentum);
+  }
   async reconcileBandExits(r,p){
     this.migrateStepExits(r);
-    r.sizingNote='Net profit pullbacks $5 / $8 / $11 / +$3 · normal after-fee loss exit $6; fresh recovery evidence required to hold toward $12 · $12 Binance backup · no loss timer or partial reduction';
+    r.sizingNote='Net profit pullbacks $5 / $8 / $11 / +$3 · early loss exit on confirmed adverse movement · normal after-fee loss exit $6; fresh recovery evidence required to hold toward $12 · $12 Binance backup · no loss timer or partial reduction';
     try{
       const net=await this.closingEstimate(r,p),pullback=this.updateStepTrail(r,net);
       if(pullback||net<=-6){await this.close(r.symbol,pullback?'Stepped net profit pullback':'Adaptive net loss',{stepProfit:pullback,adaptiveLoss:!pullback});if(r.closedAt||r.pendingClose)return;}
       else if(r.lossRecovery){r.lossRecovery=null;this.save();}
       await this.ensureLossStop(r,p);
+      if(!r.closedAt&&!r.pendingClose&&net<0&&net>-6&&!pullback&&await this.reviewEarlyLoss(r))await this.close(r.symbol,'Early adverse-move exit',{earlyLoss:true});
     }catch(error){
       r.estimateError=error.message;r.netEstimate=null;r.closingEstimate=null;this.save();
       if(!r.closedAt&&!r.pendingClose&&!r.exits?.some(e=>e.kind==='sl12'&&e.confirmed&&!e.cancelled)){
@@ -1299,7 +1348,8 @@ class DemoEngine {
     if(!p){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();return;}
     if((number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot. Inspect Binance.');
     const oldAutomaticReason=['Experiment negative net','Experiment profit pullback','$5 net trade loss','Net profit trailing pullback','$2 net trade loss','sl2 threshold reached','$3 net trade loss','sl3 threshold reached','$6 net trade loss','sl6 threshold reached','Bollinger middle target','Bollinger outer target','Bollinger middle-band pullback'].includes(reason);
-    const stepAutomatic=this.bandRules&&(options.stepProfit||options.adaptiveLoss||options.bandLoss||options.bandProfit||oldAutomaticReason||['Stepped net profit pullback','Adaptive net loss','$12 net trade loss'].includes(reason));
+    const earlyRequested=options.earlyLoss||reason==='Early adverse-move exit';
+    const stepAutomatic=this.bandRules&&(earlyRequested||options.stepProfit||options.adaptiveLoss||options.bandLoss||options.bandProfit||oldAutomaticReason||['Stepped net profit pullback','Adaptive net loss','$12 net trade loss'].includes(reason));
     if(stepAutomatic){
       this.migrateStepExits(r);
       let net=await this.closingEstimate(r,p,{forceAccounting:true});
@@ -1319,6 +1369,14 @@ class DemoEngine {
           if(supported){evidence.allowed=false;evidence.reason='Fresh closing quote no longer supports recovery';this.save();}
           reason='$6 net trade loss';
         }
+      }else if(earlyRequested){
+        // Revalidate against fresh fees, position size and executable price.
+        // Normal $6/$12 and armed profit exits above always take precedence.
+        const review=r.earlyLossReview,now=Date.now()+this.api.offset;
+        const decision=review&&now-review.checkedAt>=0&&now-review.checkedAt<=10000?earlyLossDecision(r,r.closingEstimate,now,r.earlyLossQuotes,review.momentum):{exit:false,reason:'Early-exit evidence expired; wait for a fresh review'};
+        r.earlyLossReview={...review,...decision,checkedAt:now,net,price:r.closingEstimate.price};this.save();
+        if(!decision.exit)return false;
+        reason='Early adverse-move exit';
       }else return false;
     }else if(r.oneHourTrial&&(options.trialExit||['Experiment negative net','Experiment profit pullback'].includes(reason))){
       const net=await this.closingEstimate(r,p,{forceAccounting:true});
@@ -1661,5 +1719,6 @@ class DemoEngine {
     }catch(e){this.handleRunError(e);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={bandEntryCosts,steppedProfitFloor,APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={earlyLossDecision,bandEntryCosts,steppedProfitFloor,APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
+
 
