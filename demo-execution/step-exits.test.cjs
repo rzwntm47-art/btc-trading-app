@@ -87,7 +87,7 @@ test('migration resets obsolete peaks without changing quantity, fees, history o
 test('manual close bypasses automatic profit and recovery rules',async()=>{
  const f=await opened();setTradeNet(f,-1);await f.e.close(symbol);assert.equal(f.position,null);assert.equal(closes(f).length,1);
 });
-test('the $30 session stop remains authoritative',async()=>{
+test('the $25 session stop remains authoritative',async()=>{
  const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,31);f.e.sessionNet=()=>31;f.e.incomeWindowStart=f.e.state.startedAt;f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();assert.ok(f.e.state.goalStopAt);assert.equal(f.e.auto,false);assert.ok(r.closedAt);
 });
 test('a cancelled old $6 backup-close intent rechecks the new recovery rule',async()=>{

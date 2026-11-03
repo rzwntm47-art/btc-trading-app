@@ -1,3 +1,7 @@
+## V1.69 — $25 net session target
+
+The net trading result and automatic session close-and-stop target are now $25 after expected closing fees. Existing entry and exit strategies, $2–$6 early loss exits, session locks and history are unchanged. Refresh/reconnect browser mode; update the laptop files and restart START-LAPTOP.cmd for background mode. Older laptop connectors continue to show their actual target until updated.
+
 ## V1.68 — $30 net session target
 
 The net trading result target is now $30. Once estimated session net after closing fees reaches $30, close all bot-owned positions and stop new entries using the existing session latch. Keep fees, funding, partial-order reconciliation, the current P&L window and all $2–$6 early exit / $6 recovery / $12 backup rules unchanged. Existing session locks and history are preserved; no automatic restart or balance reset is performed.
