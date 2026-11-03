@@ -1,3 +1,7 @@
+## V1.70 — $20 net session target
+
+The net trading result and automatic session close-and-stop target are now $20 after expected closing fees. Entry and exit strategies, $2–$6 early loss exits, session locks and history are unchanged. Refresh/reconnect browser mode; update the laptop files and restart START-LAPTOP.cmd for background mode. Older laptop connectors continue to show their actual target until updated.
+
 ## V1.69 — $25 net session target
 
 The net trading result and automatic session close-and-stop target are now $25 after expected closing fees. Existing entry and exit strategies, $2–$6 early loss exits, session locks and history are unchanged. Refresh/reconnect browser mode; update the laptop files and restart START-LAPTOP.cmd for background mode. Older laptop connectors continue to show their actual target until updated.
