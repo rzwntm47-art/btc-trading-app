@@ -12,9 +12,10 @@ function inputs(side='BUY'){
  return {r,quote,samples,sign};
 }
 for(const side of ['BUY','SELL']){
- test(side+' closes on confirmed small-loss deterioration without a $2 or $6 trigger',()=>{
+ test(side+' closes only inside the $2 to $6 loss window with confirmed deterioration',()=>{
   const {r,quote,samples}=inputs(side);
-  for(const net of [-.5,-2,-4.5])assert.equal(earlyLossDecision(r,{...quote,net},now,samples).exit,true);
+  for(const net of [-2,-2.01,-4.5,-5.999])assert.equal(earlyLossDecision(r,{...quote,net},now,samples).exit,true);
+  for(const net of [-.5,-1.99,-1.999999,-6,-6.01,-12])assert.equal(earlyLossDecision(r,{...quote,net},now,samples).exit,false);
  });
  test(side+' holds a fee-only loss, positive net, and one noisy tick',()=>{
   const {r,quote,samples}=inputs(side);
@@ -30,6 +31,7 @@ for(const side of ['BUY','SELL']){
   const {r,quote,sign}=inputs(side);
   const m={closedAt:now-1000,atr:.2,close:quote.price,open:quote.price+sign*.15,previousClose:quote.price+sign*.1,fast:quote.price+sign*.02,slow:quote.price+sign*.04,threeBarsAgo:quote.price+sign*.2};
   assert.equal(earlyLossDecision(r,quote,now,[],m).mode,'candle');
+  assert.equal(earlyLossDecision(r,{...quote,net:-1.99},now,[],m).exit,false);
   assert.equal(earlyLossDecision(r,quote,now,[],{...m,closedAt:r.openedAt-1}).exit,false);
   assert.equal(earlyLossDecision(r,quote,now,[],{...m,close:quote.price-sign*.1}).exit,false);
  });
@@ -82,7 +84,7 @@ test('a gap to the backup loss threshold uses the existing hard loss exit',async
  await deteriorate(f,t);assert.ok(r.closedAt);assert.equal(r.closeReason,'$12 net trade loss');
 });
 test('missing early candle data does not close a small loser or remove its backup stop',async()=>{
- const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,-2);f.e.scanBars=async()=>{throw new DemoError('unavailable',503);};
+ const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,-2.01);f.e.scanBars=async()=>{throw new DemoError('unavailable',503);};
  await f.e.reconcile();assert.ok(f.position);assert.equal(closes(f).length,0);assert.match(r.earlyLossReview.reason,/unavailable/);
  assert.ok(r.exits.some(e=>e.kind==='sl12'&&e.confirmed&&!e.cancelled));
 });
@@ -103,7 +105,7 @@ test('restart preserves existing armed profit floors',async t=>{
 });
 test('a small stable loss is held and stale observations are discarded after restart',async t=>{
  t.mock.timers.enable({apis:['Date'],now:Date.now()});const f=await opened(),r=f.e.owned(symbol);
- setTradeNet(f,-2);await f.e.reconcile();t.mock.timers.tick(1100);await f.e.reconcile();t.mock.timers.tick(1100);await f.e.reconcile();
+ setTradeNet(f,-2.01);await f.e.reconcile();t.mock.timers.tick(1100);await f.e.reconcile();t.mock.timers.tick(1100);await f.e.reconcile();
  assert.ok(f.position);assert.equal(closes(f).length,0);
  t.mock.timers.tick(16000);const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.meta=f.e.meta;
  await restored.refresh();await restored.reconcile();assert.equal(restored.owned(symbol).earlyLossQuotes.length,1);assert.ok(f.position);
@@ -114,4 +116,18 @@ for(const side of ['BUY','SELL'])test(side+' opposing completed candle triggers 
  const raw=entryBars(side==='BUY'?'SELL':'BUY'),delta=Number(f.position.markPrice)-100;
  f.e.scanBars=async()=>raw.map(b=>[b[0],b[1]+delta,b[2]+delta,b[3]+delta,b[4]+delta,b[5],b[6]]);
  await f.e.reconcile();assert.ok(r.closedAt);assert.equal(r.closeReason,'Early adverse-move exit');assert.equal(r.earlyLossReview.mode,'candle');assert.equal(closes(f).length,1);
+});
+for(const side of ['BUY','SELL'])test(side+' confirmed deterioration below $2 net loss is held',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:Date.now()});const f=await opened(side),r=f.e.owned(symbol);
+ for(const net of [-.2,-.8,-1.99]){t.mock.timers.tick(1100);setTradeNet(f,net);await f.e.reconcile();}
+ assert.ok(f.position);assert.equal(closes(f).length,0);assert.match(r.earlyLossReview.reason,/at least \$2/);
+});
+test('final after-fee recovery above -$2 cancels an early close even when price still deteriorates',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:Date.now()});const f=await opened(),r=f.e.owned(symbol);
+ const estimate=f.e.closingEstimate.bind(f.e);f.e.closingEstimate=async(...args)=>{
+  const net=await estimate(...args);
+  if(args[2]?.forceAccounting&&r.earlyLossReview?.exit){r.closingEstimate.net=-1.99;return -1.99;}
+  return net;
+ };
+ await deteriorate(f,t);assert.ok(f.position);assert.equal(closes(f).length,0);assert.equal(r.earlyLossReview.exit,false);assert.match(r.earlyLossReview.reason,/at least \$2/);
 });

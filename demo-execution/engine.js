@@ -263,10 +263,13 @@ function entryMomentum(raw,side,now){
   return evidence;
 }
 // An additional exit only: observed deterioration is evidence, not a price forecast.
-// No fixed dollar trigger; fees alone and a single adverse tick are insufficient.
+// Eligible from $2 net loss until the existing $6 loss rules take over.
+// Reaching $2 alone, fees alone and a single adverse tick are insufficient.
 function earlyLossDecision(r,quote,now,observations=[],momentum=null){
   const hold=reason=>({exit:false,reason});
   if(!quote||![quote.net,quote.gross,quote.price,quote.at,quote.quantity,now].every(Number.isFinite)||quote.price<=0||quote.quantity<=0||now-quote.at>5000||quote.at>now)return hold('Fresh executable closing estimate required');
+  if(quote.net>-2)return hold('Early loss exit waits for at least $2 net loss and adverse movement');
+  if(quote.net<=-6)return hold('Existing $6 recovery and $12 backup loss rules take precedence');
   if(quote.net>=0||quote.gross>=0)return hold('No losing price move; fees alone do not trigger an early exit');
   const sign=r.side==='BUY'?1:r.side==='SELL'?-1:0,entry=Number(r.entry),tick=Number(r.tick),atr=Number(r.signal?.atr);
   if(!sign||!(entry>0&&tick>0&&atr>0))return hold('Entry price, tick size and volatility evidence required');
@@ -386,7 +389,7 @@ function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
-    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -1290,7 +1293,7 @@ class DemoEngine {
     if(!samples.length||quote.at-samples.at(-1).at>=1000)samples.push({at:quote.at,price:quote.price,entry:Number(r.entry),quantity:quote.quantity});
     r.earlyLossQuotes=samples.slice(-3);
     let decision=earlyLossDecision(r,quote,now(),r.earlyLossQuotes);
-    if(decision.exit||quote.net>=0||quote.gross>=0)return record(decision);
+    if(decision.exit||quote.net>-2||quote.net<=-6||quote.gross>=0)return record(decision);
     let momentum=null;
     try{
       const raw=await this.scanBars(r.symbol,'1m',30);
@@ -1305,7 +1308,7 @@ class DemoEngine {
   }
   async reconcileBandExits(r,p){
     this.migrateStepExits(r);
-    r.sizingNote='Net profit pullbacks $5 / $8 / $11 / +$3 · early loss exit on confirmed adverse movement · normal after-fee loss exit $6; fresh recovery evidence required to hold toward $12 · $12 Binance backup · no loss timer or partial reduction';
+    r.sizingNote='Net profit pullbacks $5 / $8 / $11 / +$3 · $2–$6 early loss exit on confirmed adverse movement · normal after-fee loss exit $6; fresh recovery evidence required to hold toward $12 · $12 Binance backup · no loss timer or partial reduction';
     try{
       const net=await this.closingEstimate(r,p),pullback=this.updateStepTrail(r,net);
       if(pullback||net<=-6){await this.close(r.symbol,pullback?'Stepped net profit pullback':'Adaptive net loss',{stepProfit:pullback,adaptiveLoss:!pullback});if(r.closedAt||r.pendingClose)return;}
