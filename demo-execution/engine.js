@@ -1,5 +1,6 @@
 'use strict';
-const APP_VERSION='1.67';
+const APP_VERSION='1.68';
+const SESSION_TARGET=30;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
 const ENTRY_VOLATILITY_ALLOWANCE=20;
@@ -389,7 +390,7 @@ function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
-    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -569,7 +570,7 @@ class DemoEngine {
     const elapsed=progressAt?Math.floor((now-progressAt)/1000):null;
     let status;
     if(!this.connected)status='Disconnected: no new entries can be sent.';
-    else if(this.state.goalStopAt)status='$100 session stop is locked. Start a new session while flat to resume.';
+    else if(this.state.goalStopAt)status='$'+SESSION_TARGET+' session stop is locked. Start a new session while flat to resume.';
     else if(this.accountingUpdateRequired)status='LAPTOP CONNECTOR UPDATE REQUIRED: fee-history requests are unsupported. No new entries can be sent. Download the current files and restart START-LAPTOP.cmd; refreshing this page is not enough.';
     else if(this.startPending&&this.auto)status='Start requested; verifying connection and order protection before scanning. '+(this.retryAt>Date.now()?'Retrying automatically in '+Math.ceil((this.retryAt-Date.now())/1000)+' seconds. ':'')+(this.block||'');
     else if(!this.tradingReady)status='Balance connected; trading checks are incomplete. '+(this.block||'Use Retry connection.');
@@ -587,7 +588,7 @@ class DemoEngine {
     const positionReady=!!this.positionAt;
     const complete=incomeReady&&positionReady&&now-this.lastIncome<=30000&&now-this.positionAt<=30000;
     return {
-      appVersion:APP_VERSION,generatedAt:new Date().toISOString(),strategyValidatedForProfit:false,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),
+      appVersion:APP_VERSION,sessionTarget:SESSION_TARGET,generatedAt:new Date().toISOString(),strategyValidatedForProfit:false,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),
       windowStart:this.state.startedAt??null,incomeSnapshotAt:this.lastIncome||null,positionSnapshotAt:this.positionAt||null,
       snapshotStatus:{complete,income:!incomeReady?'missing':now-this.lastIncome>30000?'stale':'loaded',positions:!positionReady?'missing':now-this.positionAt>30000?'stale':'loaded'},
       incomeWindowEnd:incomeReady?this.incomeWindowEnd:null,
@@ -620,11 +621,11 @@ class DemoEngine {
     net=Math.round(net*1e8)/1e8;this.sessionCloseEstimate={net,closingFees,at:Date.now()+this.api.offset};return net;
   }
   async enforceSessionGoal(){
-    if(!this.newRules||!this.state.startedAt||(!this.state.goalStopAt&&(!this.lastIncome||this.sessionNet()<100)))return false;
+    if(!this.newRules||!this.state.startedAt||(!this.state.goalStopAt&&(!this.lastIncome||this.sessionNet()<SESSION_TARGET)))return false;
     const closingNet=this.state.goalStopAt?this.state.goalNet:await this.estimateSessionClose();
-    if(!this.state.goalStopAt&&closingNet<100)return false;
+    if(!this.state.goalStopAt&&closingNet<SESSION_TARGET)return false;
     this.pause();
-    if(!this.state.goalStopAt){this.state.goal=true;this.state.goalStopAt=Date.now()+this.api.offset;this.state.goalNet=closingNet;this.save();this.event('$100 net session target reached. Closing all bot positions; new entries locked.');}
+    if(!this.state.goalStopAt){this.state.goal=true;this.state.goalStopAt=Date.now()+this.api.offset;this.state.goalNet=closingNet;this.save();this.event('$'+SESSION_TARGET+' net session target reached. Closing all bot positions; new entries locked.');}
     const failures=[];
     for(const r of [...this.active()]){
       try{
@@ -638,11 +639,11 @@ class DemoEngine {
           if(!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(entry.status))throw new DemoError('Entry cancellation or final status remains unresolved');
           r.entryStatus=entry.status;this.save();
         }
-        await this.close(r.symbol,'$100 net session target');
+        await this.close(r.symbol,'$'+SESSION_TARGET+' net session target');
       }catch(error){failures.push(r.symbol+': '+error.message);}
     }
     for(const r of this.active())if(!failures.some(message=>message.startsWith(r.symbol+': ')))failures.push(r.symbol+': awaiting flat position confirmation');
-    this.block=failures.length?'$100 target reached; closure needs reconciliation: '+failures.join('; '):'$100 target reached. Bot positions closed and new entries stopped. Use New $100 session when flat to restart.';
+    this.block=failures.length?'$'+SESSION_TARGET+' target reached; closure needs reconciliation: '+failures.join('; '):'$'+SESSION_TARGET+' target reached. Bot positions closed and new entries stopped. Use New $'+SESSION_TARGET+' session when flat to restart.';
     this.save();this.notify();if(failures.length)throw new DemoError(this.block);return true;
   }
   async start(){
@@ -670,11 +671,11 @@ class DemoEngine {
     await this.reconcile();
     if(this.active().some(r=>r.pendingClose||r.lossReduction?.status==='PENDING'||(!(this.newRules?r.exitsReady:r.protected)&&!this.exitsSuspended(r))))throw new DemoError('Resolve pending orders or unverified exits before starting.');
     if(this.positions.some(p=>number(p.positionAmt)!==0&&!this.owned(p.symbol))||this.orders.some(o=>!this.active().some(r=>r.id===o.clientOrderId))||this.algos.some(a=>!this.state.records.some(r=>(r.exits||[]).some(e=>e.id===a.clientAlgoId))))throw new DemoError('Unmanaged positions or orders exist in this demo account. Close/cancel them in Binance before starting this bot.');
-    if(!this.newRules&&this.state.goal&&!this.experimentActive())throw new DemoError('Session $100 goal reached. Use Earn $100 again when flat.');
+    if(!this.newRules&&this.state.goal&&!this.experimentActive())throw new DemoError('Session $'+SESSION_TARGET+' goal reached. Use Earn $'+SESSION_TARGET+' again when flat.');
     if(!this.state.startedAt){this.state.startedAt=Date.now()+this.api.offset;this.save();}
-    await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
+    await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=SESSION_TARGET){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
-    this.startPending=false;this.entryHold='';this.auto=true;this.retryAt=0;this.retryLimited=false;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 normal after-fee loss exit / $12 backup; fresh recovery evidence required beyond $6 · net profit pullbacks $5 / $8 / $11 / +$3 · $100 net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $100 net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+    this.startPending=false;this.entryHold='';this.auto=true;this.retryAt=0;this.retryLimited=false;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 normal after-fee loss exit / $12 backup; fresh recovery evidence required beyond $6 · net profit pullbacks $5 / $8 / $11 / +$3 · $'+SESSION_TARGET+' net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $'+SESSION_TARGET+' net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -860,7 +861,7 @@ class DemoEngine {
     if(this.newRules){progress('Checking fee-history support before entry');await this.checkEntryAccounting(symbol);}
     progress('Checking Binance balance, positions and open orders');
     await this.refresh({inventory:!this.newRules,valuation:false});
-    if(this.newRules&&await this.enforceSessionGoal())return skip('$100 net session target reached');
+    if(this.newRules&&await this.enforceSessionGoal())return skip('$'+SESSION_TARGET+' net session target reached');
     if(!this.auto||epoch!==this.stopEpoch||this.position(symbol)||(!this.newRules&&(this.orders.some(o=>o.symbol===symbol)||this.algos.some(o=>o.symbol===symbol))))return skip('Auto changed or existing position/order');
     // Candidate-specific reads prevent stale cached inventories admitting duplicates.
     progress('Checking this symbol for existing orders');
@@ -1640,7 +1641,7 @@ class DemoEngine {
         if(signal&&this.auto&&!this.entryHold&&epoch===this.stopEpoch&&!this.controlPending){
           try{
             await this.ensureIncomeFresh();if(this.newRules&&await this.enforceSessionGoal())return;
-            if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=100){this.state.goal=true;row.reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}
+            if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=SESSION_TARGET){this.state.goal=true;row.reason='Session goal reached; new entries paused';this.pause('Session goal reached');this.save();return;}
             await this.enter(symbol,signal);row.reason=this.entryOutcome;row.entryResult=this.entryResult;
             row.entryMs=this.entryTiming?.totalMs;row.phase=this.state.records.some(r=>r.symbol===symbol&&r.at>=row.at+(this.api.offset||0)&&!r.rejected)?'Order submitted':'Entry skipped';
           }catch(error){row.reason='Entry failed: '+error.message;row.phase='Entry error';throw error;}
@@ -1706,8 +1707,8 @@ class DemoEngine {
       if(this.newRules){await this.ensureIncomeFresh(5000);if(await this.enforceSessionGoal()){await this.updateIncome();return;}}
       else if(Date.now()-this.lastIncome>15000)await this.updateIncome();
       if(this.auto&&Date.now()-this.metaAt>600000){const info=await this.api.call('GET','/fapi/v1/exchangeInfo',{},false);if(!Array.isArray(info.symbols))throw new DemoError('Invalid exchange metadata');for(const symbol of [...this.meta.keys()]){const m=info.symbols.find(x=>x.symbol===symbol&&x.status==='TRADING');if(m)this.meta.set(symbol,m);else this.meta.delete(symbol);}this.symbols=[...this.meta.keys()].sort();this.metaAt=Date.now();}
-      if(!this.newRules&&!this.experimentActive()&&this.state.startedAt&&this.sessionNet()>=100){this.state.goal=true;this.pause('Session $100 goal reached; new entries paused. Manual-profit positions remain open.');this.save();}
-      if(!this.newRules&&!this.experimentActive()&&this.state.goal)for(const r of this.active().filter(r=>r.exitPolicy!=='manual-profit-60s-loss'))await this.close(r.symbol,'$100 session goal');
+      if(!this.newRules&&!this.experimentActive()&&this.state.startedAt&&this.sessionNet()>=SESSION_TARGET){this.state.goal=true;this.pause('Session $'+SESSION_TARGET+' goal reached; new entries paused. Manual-profit positions remain open.');this.save();}
+      if(!this.newRules&&!this.experimentActive()&&this.state.goal)for(const r of this.active().filter(r=>r.exitPolicy!=='manual-profit-60s-loss'))await this.close(r.symbol,'$'+SESSION_TARGET+' session goal');
       if(this.bandRules){
         const reason=this.entrySafetyReason();
         if(reason){this.holdEntries(reason);return;}
@@ -1722,6 +1723,6 @@ class DemoEngine {
     }catch(e){this.handleRunError(e);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={earlyLossDecision,bandEntryCosts,steppedProfitFloor,APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={SESSION_TARGET,earlyLossDecision,bandEntryCosts,steppedProfitFloor,APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
 
 

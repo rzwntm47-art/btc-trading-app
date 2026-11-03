@@ -2,12 +2,12 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
-const {DemoEngine}=require('./engine.js');
+const {DemoEngine,SESSION_TARGET}=require('./engine.js');
 function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,APP_VERSION:'1.67',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.68',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.bandRules=false;engine.entryPolicy={margin:300,maxLeverage:10,lossLimit:5,profitExit:'net-trailing',sessionExit:'close-bot-positions'};engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -16,6 +16,14 @@ test('unsupported connector shows an actionable update banner and clears after r
  const {node,context,e}=fixture();e.auto=true;e.accountingUpdateRequired=true;
  vm.runInContext('renderActual()',context);assert.equal(node('connectorUpdate').hidden,false);assert.match(node('status').textContent,/CONNECTOR UPDATE REQUIRED/);assert.match(node('entryStatus').textContent,/fee-history/);assert.equal(node('stop').disabled,false);
  e.accountingUpdateRequired=false;vm.runInContext('renderActual()',context);assert.equal(node('connectorUpdate').hidden,true);
+});
+test('session target heading and restart button show $30 for the updated engine',()=>{
+ const {node,context,e}=fixture();e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;
+ vm.runInContext('renderActual()',context);assert.equal(node('sessionHeading').textContent,'Net trading result · $30 target');assert.equal(node('again').textContent,'New $30 session');
+});
+test('an older connected laptop retains its actual $100 target until updated',()=>{
+ const {node,context,e}=fixture();e.remote=true;e.appVersion='1.67';delete e.entryPolicy.sessionTarget;
+ vm.runInContext('renderActual()',context);assert.equal(node('sessionHeading').textContent,'Net trading result · $100 target');assert.equal(node('again').textContent,'New $100 session');assert.equal(node('connectorUpdate').hidden,false);
 });
 test('scan rows expose every timeframe and per-candidate entry rejection',()=>{
  const {node,context,e}=fixture();e.scanned=[{symbol:'BTCUSDT',side:'BUY',reason:'Selected 15m',at:Date.now(),checks:[{minutes:1,side:'WAIT',reason:'No aligned momentum'},{minutes:15,side:'BUY',reason:'Qualified'},{minutes:240,side:'WAIT',reason:'Volume low'}],entryCandidates:[{minutes:1,reason:'1m rejected'},{minutes:15,reason:'Entry candidate selected'}]}];
@@ -69,7 +77,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.67');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.68');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -98,7 +106,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.67');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.68');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();

@@ -1,3 +1,9 @@
+## V1.68 — $30 net session target
+
+The net trading result target is now $30. Once estimated session net after closing fees reaches $30, close all bot-owned positions and stop new entries using the existing session latch. Keep fees, funding, partial-order reconciliation, the current P&L window and all $2–$6 early exit / $6 recovery / $12 backup rules unchanged. Existing session locks and history are preserved; no automatic restart or balance reset is performed.
+
+The heading, New $30 session button, diagnostics, reports and engine use the same target. A connected older laptop still displays its actual $100 target and the update banner until it is updated and restarted. Refresh/reconnect browser mode; replace the laptop folders and restart START-LAPTOP.cmd for background mode.
+
 ## V1.67 — additional early loss exit
 
 V1.66 entries, margin/leverage sizing, fee filters, $6 normal loss/recovery rules, $12 exchange backup, stepped profit floors and $100 session stop are unchanged. Existing bot-owned open positions receive this extra check when the updated engine reconciles them; their quantity, leverage, journal and armed profit floors are preserved.

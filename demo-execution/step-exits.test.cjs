@@ -87,8 +87,8 @@ test('migration resets obsolete peaks without changing quantity, fees, history o
 test('manual close bypasses automatic profit and recovery rules',async()=>{
  const f=await opened();setTradeNet(f,-1);await f.e.close(symbol);assert.equal(f.position,null);assert.equal(closes(f).length,1);
 });
-test('the $100 session stop remains authoritative',async()=>{
- const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,110);f.e.sessionNet=()=>110;f.e.incomeWindowStart=f.e.state.startedAt;f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();assert.ok(f.e.state.goalStopAt);assert.equal(f.e.auto,false);assert.ok(r.closedAt);
+test('the $30 session stop remains authoritative',async()=>{
+ const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,31);f.e.sessionNet=()=>31;f.e.incomeWindowStart=f.e.state.startedAt;f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();assert.ok(f.e.state.goalStopAt);assert.equal(f.e.auto,false);assert.ok(r.closedAt);
 });
 test('a cancelled old $6 backup-close intent rechecks the new recovery rule',async()=>{
  const f=await opened(),r=f.e.owned(symbol);r.pendingClose='bd1_old6_c';r.closeReason='sl6 threshold reached';f.orders.set(r.pendingClose,{status:'CANCELED',executedQty:'0'});setTradeNet(f,-7);recoveryCandles(f);await f.e.reconcile();assert.ok(f.position);assert.ok(!r.pendingClose);assert.equal(closes(f).length,0);assert.equal(r.lossRecovery.allowed,true);
@@ -101,3 +101,4 @@ test('an ambiguous profit close is journaled and never blindly submitted again',
 test('profit checks still close owned positions while Auto entries are manually stopped',async()=>{
  const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,9);await f.e.reconcile();f.e.pause('Manual Stop');setTradeNet(f,8);await f.e.reconcile();assert.ok(r.closedAt);assert.equal(f.e.auto,false);
 });
+

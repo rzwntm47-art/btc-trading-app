@@ -1,12 +1,12 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-const {webcrypto}=require('node:crypto');const {DemoEngine}=require('./engine.js');
+const {webcrypto}=require('node:crypto');const {DemoEngine,SESSION_TARGET}=require('./engine.js');
 function fixture({phone=false,fail=false}={}){
  const nodes=new Map(),events={},requests=[],timers=[],storage=new Map(),navigations=[];
  const node=id=>{if(!nodes.has(id))nodes.set(id,{disabled:false,hidden:false,value:'',textContent:'',classList:{add(){},remove(){}},replaceChildren(){},scrollIntoView(){},removeAttribute(){}});return nodes.get(id);};
  const payload={version:2,generation:'test',pairedDevices:1,serverAt:Date.now(),engine:{state:{version:1,records:[],startedAt:0},connected:true,auto:false,busy:false,controlPending:false,tradingReady:true,account:{assets:[]},positions:[],orders:[],algos:[],symbols:[],scanned:[],income:[],events:[]}};
  const fetcher=async(url,options={})=>{requests.push({url,options});if(fail)throw Error('offline');const body=options.body?JSON.parse(options.body):{};if(url.includes('/pair'))return Response.json({...payload,csrf:'test-csrf'});if(url.includes('/command'))return Response.json({id:body.id,status:'done'});return Response.json(payload);};
- const context=vm.createContext({DemoEngine,console,crypto:webcrypto,Response,URL,URLSearchParams,AbortSignal,setTimeout,clearTimeout,setInterval(fn){timers.push(fn);},fetch:fetcher,document:{getElementById:node,querySelector(){return null;},addEventListener(type,fn){events[type]=fn;}},window:{location:{replace(url){navigations.push(url);}},addEventListener(type,fn){events[type]=fn;}},location:{origin:phone?'https://test.test.ts.net':'https://rzwntm47-art.github.io',pathname:phone?'/mobile':'/',hash:phone?'#pair=test-pairing-code':''},history:{replaceState(...args){context.cleanedUrl=args[2];}},localStorage:{getItem(key){return storage.get(key)||null;},setItem(key,value){storage.set(key,value);},removeItem(key){storage.delete(key);}},parent:{},navigator:{},TextEncoder,TextDecoder});
+ const context=vm.createContext({DemoEngine,SESSION_TARGET,console,crypto:webcrypto,Response,URL,URLSearchParams,AbortSignal,setTimeout,clearTimeout,setInterval(fn){timers.push(fn);},fetch:fetcher,document:{getElementById:node,querySelector(){return null;},addEventListener(type,fn){events[type]=fn;}},window:{location:{replace(url){navigations.push(url);}},addEventListener(type,fn){events[type]=fn;}},location:{origin:phone?'https://test.test.ts.net':'https://rzwntm47-art.github.io',pathname:phone?'/mobile':'/',hash:phone?'#pair=test-pairing-code':''},history:{replaceState(...args){context.cleanedUrl=args[2];}},localStorage:{getItem(key){return storage.get(key)||null;},setItem(key,value){storage.set(key,value);},removeItem(key){storage.delete(key);}},parent:{},navigator:{},TextEncoder,TextDecoder});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);vm.runInContext('render=()=>{};',context);vm.runInContext(fs.readFileSync(__dirname+'/mobile.js','utf8'),context);
  const ready=()=>vm.runInContext("remoteTransport={base:'http://127.0.0.1:10000',prefix:'/host',token:'test-admin-token'};engine=new RemoteDemo(remoteTransport);engine.connected=true;engine.tradingReady=true;",context);
  return {node,events,requests,context,ready,timers,payload,storage,navigations,setOffline(value){fail=value;}};
@@ -68,3 +68,4 @@ test('phone launch rejects unsafe addresses and can return to the local dashboar
 test('saved phone address leaves the embedded public app through the top-level window',()=>{
  const f=fixture(),top=[];f.context.window.top={location:{replace(url){top.push(url);}}};f.storage.set('btc_demo_phone_origin','https://laptop.test.ts.net');vm.runInContext('restorePhoneDashboard()',f.context);assert.deepEqual(top,['https://laptop.test.ts.net/mobile']);assert.equal(f.navigations.length,0);assert.equal(f.requests.length,0);
 });
+

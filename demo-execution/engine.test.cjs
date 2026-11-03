@@ -540,24 +540,24 @@ test('reset baseline starts from reset time and does not change signed unrealize
  assert.equal(f.e.state.startedAt,reset);assert.equal(f.e.unrealizedPnl(),0);assert.equal(f.e.sessionNet(),0);
  f.e.positions=[{symbol,unRealizedProfit:'-10.25'}];assert.equal(f.e.unrealizedPnl(),-10.25);
 });
-test('$100 net goal includes booked fees and funding, then pauses entries and latches across midnight and closes bot positions',async()=>{
+test('$30 net goal includes booked fees and funding, then pauses entries and latches across midnight and closes bot positions',async()=>{
  const f=fixture();f.e.newRules=true;f.signal.exitPolicy='manual-profit-60s-loss';await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- f.e.income=[{income:'-5'},{income:'-1'}];f.e.lastIncome=Date.now();setTradeNet(f,105.99);await f.e.refresh();
+ f.e.income=[{income:'-5'},{income:'-1'}];f.e.lastIncome=Date.now();setTradeNet(f,35.99);await f.e.refresh();
  assert.equal(await f.e.enforceSessionGoal(),false);assert.equal(f.e.active().length,1);
- setTradeNet(f,106);await f.e.refresh();assert.equal(await f.e.enforceSessionGoal(),true);
- assert.equal(f.e.auto,false);assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$100 net session target');assert.equal(f.e.state.goalNet,100);
+ setTradeNet(f,36);await f.e.refresh();assert.equal(await f.e.enforceSessionGoal(),true);
+ assert.equal(f.e.auto,false);assert.equal(f.e.active().length,0);assert.equal(r.closeReason,'$30 net session target');assert.equal(f.e.state.goalNet,30);
  const stamp=f.e.state.goalStopAt;f.api.offset+=86400000;f.e.syncDaily();assert.equal(f.e.state.goalStopAt,stamp);
  f.e.income=[];assert.equal(await f.e.enforceSessionGoal(),true);assert.equal(f.e.auto,false);
 });
 test('session goal closes winning and losing bot positions but not unmanaged positions',async()=>{
  const e=new DemoEngine({offset:0},{version:1,records:[{id:'bd1_a',symbol:'AAAUSDT',side:'BUY',entryStatus:'FILLED'},{id:'bd1_b',symbol:'BBBUSDT',side:'SELL',entryStatus:'FILLED'}],startedAt:Date.now()-1000},()=>{});
- e.estimateSessionClose=async()=>100; e.auto=true;e.lastIncome=Date.now();e.income=[{income:'105'}];e.positions=[{symbol:'AAAUSDT',positionAmt:'1',unRealizedProfit:'10'},{symbol:'BBBUSDT',positionAmt:'-1',unRealizedProfit:'-15'},{symbol:'MANUALUSDT',positionAmt:'1',unRealizedProfit:'0'}];
+ e.estimateSessionClose=async()=>30; e.auto=true;e.lastIncome=Date.now();e.income=[{income:'35'}];e.positions=[{symbol:'AAAUSDT',positionAmt:'1',unRealizedProfit:'10'},{symbol:'BBBUSDT',positionAmt:'-1',unRealizedProfit:'-15'},{symbol:'MANUALUSDT',positionAmt:'1',unRealizedProfit:'0'}];
  const closed=[];e.close=async(symbol,reason)=>{closed.push([symbol,reason]);e.owned(symbol).closedAt=Date.now();e.positions=e.positions.filter(p=>p.symbol!==symbol);};
  assert.equal(await e.enforceSessionGoal(),true);assert.equal(e.auto,false);assert.ok(e.state.goalStopAt);assert.equal(e.active().length,0);
- assert.deepEqual(closed,[['AAAUSDT','$100 net session target'],['BBBUSDT','$100 net session target']]);assert.deepEqual(e.positions.map(p=>p.symbol),['MANUALUSDT']);
+ assert.deepEqual(closed,[['AAAUSDT','$30 net session target'],['BBBUSDT','$30 net session target']]);assert.deepEqual(e.positions.map(p=>p.symbol),['MANUALUSDT']);
 });
 test('explicit new session clears target lock and starts a fresh PnL window when flat',async()=>{
- const f=fixture();f.e.newRules=true;f.e.state.goalStopAt=Date.now()-1000;f.e.state.goal=true;f.e.state.dayOpenPnl=50;f.e.income=[{income:'100'}];let restarted=false;
+ const f=fixture();f.e.newRules=true;f.e.state.goalStopAt=Date.now()-1000;f.e.state.goal=true;f.e.state.dayOpenPnl=50;f.e.income=[{income:'30'}];let restarted=false;
  f.e.start=async()=>{restarted=true;};await f.e.again();assert.equal(restarted,true);assert.equal(f.e.state.goalStopAt,undefined);assert.equal(f.e.state.goal,false);assert.equal(f.e.sessionNet(),0);assert.equal(f.e.state.resetAt,f.e.state.startedAt);
 });
 test('missing candle agreement is rejected before any exchange calls',async()=>{
@@ -730,7 +730,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.67');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.68');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -762,7 +762,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.67');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.68');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(Number.isFinite(r.entryEvidence.plannedStopPrice));
 });
@@ -1061,34 +1061,34 @@ for(const side of ['BUY','SELL'])test(side+' tolerance still rejects excess drif
 
 test('session close attempts every bot and finishes unresolved closes even after PnL drops below target',async()=>{
  const e=new DemoEngine({offset:0},{version:1,records:[{id:'bd1_a',symbol:'AAAUSDT',side:'BUY',entryStatus:'FILLED'},{id:'bd1_b',symbol:'BBBUSDT',side:'SELL',entryStatus:'FILLED'}],startedAt:Date.now()-1000},()=>{});
- e.auto=true;e.lastIncome=Date.now();e.income=[{income:'100'}];e.positions=[];
+ e.auto=true;e.lastIncome=Date.now();e.income=[{income:'30'}];e.positions=[];
  const attempts=[];let failFirst=true;
  e.close=async(symbol)=>{attempts.push(symbol);if(symbol==='AAAUSDT'&&failFirst)throw new DemoError('Close unresolved');e.owned(symbol).closedAt=Date.now();};
  await assert.rejects(()=>e.enforceSessionGoal(),/closure needs reconciliation/);
  assert.deepEqual(attempts,['AAAUSDT','BBBUSDT']);assert.equal(e.active().length,1);assert.equal(e.auto,false);assert.ok(e.state.goalStopAt);
- failFirst=false;e.income=[{income:'70'}];await e.enforceSessionGoal();
+ failFirst=false;e.income=[{income:'20'}];await e.enforceSessionGoal();
  assert.deepEqual(attempts,['AAAUSDT','BBBUSDT','AAAUSDT']);assert.equal(e.active().length,0);assert.equal(e.auto,false);
 });
 test('unknown session close is queried on the next pass without a duplicate order',async()=>{
- const f=fixture();f.e.estimateSessionClose=async()=>100;f.e.newRules=true;await f.e.enter(symbol,f.signal);f.failClose=true;
- f.e.income=[{income:'100'}];f.e.lastIncome=Date.now();
+ const f=fixture();f.e.estimateSessionClose=async()=>30;f.e.newRules=true;await f.e.enter(symbol,f.signal);f.failClose=true;
+ f.e.income=[{income:'30'}];f.e.lastIncome=Date.now();
  await assert.rejects(()=>f.e.enforceSessionGoal());assert.ok(f.e.active()[0].pendingClose);
  const sent=f.calls.filter(c=>c.method==='POST'&&c.p.reduceOnly==='true').length;
  await assert.rejects(()=>f.e.enforceSessionGoal());assert.equal(f.calls.filter(c=>c.method==='POST'&&c.p.reduceOnly==='true').length,sent);
  assert.ok(f.e.state.goalStopAt);assert.equal(f.e.auto,false);
 });
-test('tick observes the $100 session target before closing an individual positive-net winner',async()=>{
- const f=fixture();f.e.estimateSessionClose=async()=>100;f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
+test('tick observes the $30 session target before closing an individual positive-net winner',async()=>{
+ const f=fixture();f.e.estimateSessionClose=async()=>30;f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  f.e.syncDaily=()=>{};f.e.state.dayOpenPnl=0;f.e.tradingReady=true;f.e.lastFullCheck=Date.now();
- f.position.unRealizedProfit='106';await f.e.refresh();f.e.income=[{income:'-6'}];f.e.lastIncome=Date.now();f.e.ensureIncomeFresh=async()=>{};
- await f.e.tick();assert.equal(f.e.state.goalNet,100);assert.equal(r.closeReason,'$100 net session target');assert.equal(f.e.active().length,0);assert.equal(f.e.auto,false);
+ f.position.unRealizedProfit='36';await f.e.refresh();f.e.income=[{income:'-6'}];f.e.lastIncome=Date.now();f.e.ensureIncomeFresh=async()=>{};
+ await f.e.tick();assert.equal(f.e.state.goalNet,30);assert.equal(r.closeReason,'$30 net session target');assert.equal(f.e.active().length,0);assert.equal(f.e.auto,false);
 });
 test('Start accepts a reconciled position with the new loss stop',async()=>{
  const f=fixture();f.e.newRules=true;f.e.tradingReady=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  f.e.pause();await f.e.start();assert.equal(f.e.auto,true);assert.equal(r.protected,true);assert.equal(r.exitsReady,true);
 });
 test('session goal confirms cancellation of partial entry before closing the filled position',async()=>{
- const f=fixture();f.e.estimateSessionClose=async()=>100;f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0],base=f.api.call;
+ const f=fixture();f.e.estimateSessionClose=async()=>30;f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0],base=f.api.call;
  r.entryStatus='PARTIALLY_FILLED';let cancelled=false;const before=f.calls.length;
  f.api.call=async(m,p,q,s)=>{
   if(p==='/fapi/v1/order'&&m==='GET'&&q.origClientOrderId===r.id)return {status:cancelled?'CANCELED':'PARTIALLY_FILLED',orderId:r.orderId,executedQty:r.quantity};
@@ -1096,32 +1096,32 @@ test('session goal confirms cancellation of partial entry before closing the fil
   if(p==='/fapi/v1/order'&&m==='POST'&&q.reduceOnly)assert.ok(cancelled);
   return base(m,p,q,s);
  };
- f.e.income=[{income:'100'}];f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();
+ f.e.income=[{income:'30'}];f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();
  const calls=f.calls.slice(before);assert.ok(calls.findIndex(c=>c.method==='DELETE'&&c.path==='/fapi/v1/order')<calls.findIndex(c=>c.method==='POST'&&c.p.reduceOnly));
  assert.equal(f.e.active().length,0);assert.equal(f.e.auto,false);
 });
 test('unresolved entry cancellation remains journaled at the session goal instead of falsely reporting flat',async()=>{
- const f=fixture();f.e.estimateSessionClose=async()=>100;f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0],base=f.api.call,before=f.calls.length;
+ const f=fixture();f.e.estimateSessionClose=async()=>30;f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0],base=f.api.call,before=f.calls.length;
  r.entryStatus='PARTIALLY_FILLED';f.api.call=async(m,p,q,s)=>{
   if(p==='/fapi/v1/order'&&m==='GET'&&q.origClientOrderId===r.id)return {status:'PARTIALLY_FILLED',orderId:r.orderId};
   return base(m,p,q,s);
  };
- f.e.income=[{income:'100'}];f.e.lastIncome=Date.now();await assert.rejects(()=>f.e.enforceSessionGoal(),/unresolved/);
+ f.e.income=[{income:'30'}];f.e.lastIncome=Date.now();await assert.rejects(()=>f.e.enforceSessionGoal(),/unresolved/);
  assert.equal(f.e.active().length,1);assert.equal(r.closedAt,undefined);assert.equal(f.e.auto,false);assert.ok(f.e.state.goalStopAt);
  assert.ok(!f.calls.slice(before).some(c=>c.method==='POST'));
 });
 test('session completion waits for confirmed flat positions after a close acknowledgement',async()=>{
- const f=fixture();f.e.estimateSessionClose=async()=>100;f.e.newRules=true;await f.e.enter(symbol,f.signal);const close=f.e.close.bind(f.e);
- f.e.income=[{income:'100'}];f.e.lastIncome=Date.now();f.e.close=async()=>{};
+ const f=fixture();f.e.estimateSessionClose=async()=>30;f.e.newRules=true;await f.e.enter(symbol,f.signal);const close=f.e.close.bind(f.e);
+ f.e.income=[{income:'30'}];f.e.lastIncome=Date.now();f.e.close=async()=>{};
  await assert.rejects(()=>f.e.enforceSessionGoal(),/awaiting flat position confirmation/);assert.equal(f.e.auto,false);assert.equal(f.e.active().length,1);
- f.e.income=[{income:'90'}];f.e.close=close;await f.e.enforceSessionGoal();assert.equal(f.e.active().length,0);assert.match(f.e.block,/positions closed/);
+ f.e.income=[{income:'20'}];f.e.close=close;await f.e.enforceSessionGoal();assert.equal(f.e.active().length,0);assert.match(f.e.block,/positions closed/);
 });
 test('new short has a loss stop and closes at the session target',async()=>{
- const f=fixture();f.e.estimateSessionClose=async()=>100;f.e.newRules=true;f.signal.side='SELL';f.signal.low=101;f.e.marketContext.side='SELL';
+ const f=fixture();f.e.estimateSessionClose=async()=>30;f.e.newRules=true;f.signal.side='SELL';f.signal.low=101;f.e.marketContext.side='SELL';
  await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
  assert.ok([...f.algos.values()].every(a=>a.type==='STOP_MARKET'&&a.clientAlgoId.length<=36));
- f.e.income=[{income:'100'}];f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();
- assert.equal(f.e.active().length,0);assert.equal(f.e.auto,false);assert.equal(r.closeReason,'$100 net session target');
+ f.e.income=[{income:'30'}];f.e.lastIncome=Date.now();await f.e.enforceSessionGoal();
+ assert.equal(f.e.active().length,0);assert.equal(f.e.auto,false);assert.equal(r.closeReason,'$30 net session target');
  assert.ok([...f.algos.values()].every(a=>a.algoStatus==='CANCELED'));
 });
 
@@ -1243,11 +1243,11 @@ test('a fee increase on final recheck can prevent a supposedly profitable exit',
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/userTrades'&&++queries===1)f.trades[0].commission=String(Number(f.trades[0].commission)+1);return base(m,p,q,s);};
  await f.e.reconcile();assert.ok(f.position);assert.equal(r.netEstimate,1);
 });
-test('$100 net close estimate reserves all remaining exit fees and uses actual execution costs',async()=>{
- const f=await currentTrade();f.e.income=[];f.e.lastIncome=Date.now();setTradeNet(f,99.99);await f.e.refresh();assert.ok(f.e.sessionNet()>100);
- assert.equal(await f.e.enforceSessionGoal(),false);assert.equal(f.e.sessionCloseEstimate.net,99.99);assert.ok(f.position);
- setTradeNet(f,100);await f.e.refresh();assert.equal(await f.e.enforceSessionGoal(),true);assert.equal(f.e.state.goalNet,100);assert.equal(f.position,null);assert.equal(f.e.auto,false);
- const actual=f.trades.reduce((sum,t)=>sum+Number(t.realizedPnl)-Number(t.commission),0);assert.ok(Math.abs(actual-100)<1e-6);
+test('$30 net close estimate reserves all remaining exit fees and uses actual execution costs',async()=>{
+ const f=await currentTrade();f.e.income=[];f.e.lastIncome=Date.now();setTradeNet(f,29.99);await f.e.refresh();assert.ok(f.e.sessionNet()>30);
+ assert.equal(await f.e.enforceSessionGoal(),false);assert.equal(f.e.sessionCloseEstimate.net,29.99);assert.ok(f.position);
+ setTradeNet(f,30);await f.e.refresh();assert.equal(await f.e.enforceSessionGoal(),true);assert.equal(f.e.state.goalNet,30);assert.equal(f.position,null);assert.equal(f.e.auto,false);
+ const actual=f.trades.reduce((sum,t)=>sum+Number(t.realizedPnl)-Number(t.commission),0);assert.ok(Math.abs(actual-30)<1e-6);
 });
 test('partial-close fees are not double-counted when Binance income has already posted them',async()=>{
  const f=await currentTrade(),r=f.e.owned(symbol);setTradeNet(f,-3.2);await f.e.reconcile();setTradeNet(f,100);await f.e.refresh();
@@ -1376,8 +1376,8 @@ test('trial scanner ignores forming and stale candles, and supports all advertis
  f.e.scanBars=async(_s,interval)=>{reads.push(interval);const ms=({'1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'2h':120,'4h':240})[interval]*60000;const bars=continuationBars('BUY',ms,Date.now()-ms*3);return bars;};
  const out=await f.e.scanCandidate(symbol,null,f.e.stopEpoch);assert.equal(out.signal,null);assert.equal(reads.length,8);
 });
-test('trial session profit still reserves closing costs and stops all bot entries at $100',async()=>{
- const f=await currentTrade(),r=f.e.owned(symbol);r.oneHourTrial={...armTrial(f.e)};r.rulesVersion=9;setTradeNet(f,101);f.e.lastIncome=Date.now();f.e.income=[];
+test('trial session profit still reserves closing costs and stops all bot entries at $30',async()=>{
+ const f=await currentTrade(),r=f.e.owned(symbol);r.oneHourTrial={...armTrial(f.e)};r.rulesVersion=9;setTradeNet(f,31);f.e.lastIncome=Date.now();f.e.income=[];
  assert.equal(await f.e.enforceSessionGoal(),true);assert.ok(r.closedAt);assert.ok(f.e.state.goalStopAt);assert.equal(f.e.auto,false);
 });
 
