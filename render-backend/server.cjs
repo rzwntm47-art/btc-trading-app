@@ -7,7 +7,10 @@ const routes={GET:new Set(['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/
 function equal(a,b){const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y)}
 function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now,extension,relayLocked=()=>false}={}){
  let active=0,windowAt=now(),count=0,cooldown=0,probeAt=-Infinity,probe=null;
- return http.createServer(async(req,res)=>{
+ let pending=0;
+ const server=http.createServer(async(req,res)=>{
+  const relay=req.method==='POST'&&req.url==='/relay';if(relay)pending++;
+  try{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
   const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data))};
   if(extension&&await extension(req,res,send))return;
@@ -48,8 +51,12 @@ function createServer({fetcher=fetch,token=process.env.RELAY_TOKEN,now=Date.now,
    return send(200,data);
   }catch{return send(502,{error:'Binance Demo request failed',uncertain:method!=='GET'});}
   finally{clearTimeout(timer);active--;}
+  }finally{if(relay)pending--;}
  });
+ server.pendingRelays=()=>pending;
+ return server;
 }
 if(require.main===module)createServer().listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('Binance Demo backend listening'));
 module.exports={createServer};
+
 

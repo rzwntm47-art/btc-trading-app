@@ -24,8 +24,8 @@ async function body(req){
   return JSON.parse(raw);
 }
 const SNAPSHOT_FIELDS=['appVersion','bandRules','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','entryHold','lastRiskCheck','retryLimited','startPending','retryAt','retryAttempt','accountingUpdateRequired','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
-function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=1000}={}){
-  let engine=null,connecting=false,lastError='',pair=null,origin='',connectId='',generation=random();
+function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=1000,restartTimeoutMs=30000}={}){
+  let engine=null,connecting=false,restarting=false,lastError='',pair=null,origin='',connectId='',generation=random();
   const sessions=new Map(),commands=new Map();
   try{origin=remoteOrigin(JSON.parse(fs.readFileSync(path.join(dataDir,'mobile-origin.json'),'utf8')).origin);}catch{}
   const phoneFile=path.join(dataDir,'trusted-phones.json');let phoneAccount='';
@@ -40,9 +40,9 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
   function revokePhones(){sessions.clear();pair=null;phoneAccount='';savePhones();}
   const snapshot=()=>{
     if(!origin)try{origin=remoteOrigin(JSON.parse(fs.readFileSync(path.join(dataDir,'mobile-origin.json'),'utf8')).origin);}catch{}
-    return {version:2,generation,connecting,error:lastError,remoteOrigin:origin,pairedDevices:sessions.size,serverAt:now(),engine:engine?Object.fromEntries(SNAPSHOT_FIELDS.map(k=>[k,engine[k]])):null};
+    return {version:2,service:'btc-demo-laptop',connectorVersion:APP_VERSION,restartSupported:true,generation,connecting,restarting,error:lastError,remoteOrigin:origin,pairedDevices:sessions.size,serverAt:now(),engine:engine?Object.fromEntries(SNAPSHOT_FIELDS.map(k=>[k,engine[k]])):null};
   };
-  const locked=()=>connecting||!!engine?.api?.key;
+  const locked=()=>restarting||connecting||!!engine?.api?.key;
   function persistFor(key){const file=path.join(dataDir,'journal-'+hash(key)+'.json');return {file,save:state=>writeJson(file,state)};}
   function startConnect(input){
     if(locked())throw Error('A background connection already exists. Reconnect to its controls instead.');
@@ -92,7 +92,7 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
     }catch(error){entry.status='error';entry.error=error.message;e.handleRunError(error);}finally{entry.completedAt=now();}})();
     return entry;
   }
-  const timer=setInterval(()=>{if(engine?.connected&&!connecting)engine.tick().catch(error=>{lastError=error.message;engine?.handleRunError(error);});},intervalMs);timer.unref();
+  const timer=setInterval(()=>{if(engine?.connected&&!connecting&&!restarting)engine.tick().catch(error=>{lastError=error.message;engine?.handleRunError(error);});},intervalMs);timer.unref();
   let attempts=0,attemptWindow=now();
   async function extension(req,res,send){
     const pathname=req.url.split('?')[0];
@@ -129,6 +129,7 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
       if(req.method==='POST'&&pathname==='/mobile/pair'){
         if(now()-attemptWindow>60000){attemptWindow=now();attempts=0;}if(++attempts>20){send(429,{error:'Too many pairing attempts. Wait one minute.'});return true;}
         const input=await body(req);
+        if(restarting){send(409,{error:'Connector is restarting. Reconnect on the laptop first.'});return true;}
         if(!pair||pair.expires<=now()||typeof input.code!=='string'||!equal(hash(input.code),pair.hash)){send(401,{error:'Phone link expired or already used. Create a new phone link on the laptop.'});return true;}
         pair=null;const value=random(),csrf=random(),sid=hash(value);sessions.set(sid,{csrf,expires:now()+30*86400000});savePhones();
         res.setHeader('Set-Cookie','__Host-btc-mobile='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000');send(200,{csrf,...snapshot()});return true;
@@ -137,8 +138,8 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
       if(!isHost){
         const value=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('__Host-btc-mobile='))?.split('=')[1]||'';
         sid=hash(value);session=sessions.get(sid);
-        if(!session||session.expires<=now()){if(sessions.delete(sid))savePhones();send(401,{error:'Phone access expired or was revoked. Open a new one-time phone link from the laptop.'});return true;}
-        if(session.expires-now()<15*86400000){session.expires=now()+30*86400000;savePhones();res.setHeader('Set-Cookie','__Host-btc-mobile='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000');}
+        if(!session||session.expires<=now()){if(!restarting&&sessions.delete(sid))savePhones();send(401,{error:'Phone access expired or was revoked. Open a new one-time phone link from the laptop.'});return true;}
+        if(!restarting&&session.expires-now()<15*86400000){session.expires=now()+30*86400000;savePhones();res.setHeader('Set-Cookie','__Host-btc-mobile='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000');}
       }
       if(req.method==='GET'&&(pathname==='/host/status'||pathname==='/mobile/status')){send(200,{...snapshot(),...(session?{csrf:session.csrf}:{})});return true;}
       if(req.method==='GET'&&(pathname==='/host/command'||pathname==='/mobile/command')){
@@ -148,6 +149,23 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
       if(req.method!=='POST'){send(404,{error:'Not found'});return true;}
       const input=await body(req);
       if(session&&!equal(input.csrf,session.csrf)){send(403,{error:'Refresh this page before sending commands.'});return true;}
+      if(restarting){send(409,{error:'Connector restart is already pending. Wait for the new connector window.'});return true;}
+      if(pathname==='/host/restart'){
+        if(input.generation!==generation){send(409,{error:'Connector changed. Check its status before restarting.'});return true;}
+        restarting=true;
+        try{
+          engine?.pause('Connector restart requested. New entries stopped.');
+          const deadline=Date.now()+restartTimeoutMs;
+          // Let accepted exchange requests finish and journal their results. Never force-kill an order.
+          while(connecting||engine?.busy||engine?.controlPending||server.pendingRelays()){
+            if(Date.now()>=deadline)throw Error('Restart cancelled: an action is still pending. Connector remains open; background Auto is stopped. Sync and retry when the action finishes.');
+            await new Promise(resolve=>setTimeout(resolve,25));
+          }
+          engine?.pause();engine?.save();
+          res.once('finish',()=>{server.close();server.closeIdleConnections();});
+          send(202,{ok:true,restarting:true,generation});return true;
+        }catch(error){restarting=false;engine?.pause();send(409,{error:error.message});return true;}
+      }
       if(pathname==='/host/connect'){
         if(typeof input.requestId!=='string'||input.requestId.length<16)throw Error('Connection request ID required');
         if(input.requestId!==connectId)startConnect(input);
@@ -175,17 +193,18 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
   server.on('close',()=>{clearInterval(timer);engine?.pause();engine?.api.clear();});
   return {server,snapshot,locked};
 }
-if(require.main===module){
-  fs.mkdirSync(DATA_DIR,{recursive:true,mode:0o700});const file=path.join(DATA_DIR,'local-token');
-  let token=process.env.RELAY_TOKEN;
-  if(!token){try{token=fs.readFileSync(file,'utf8').trim();}catch{token=random();fs.writeFileSync(file,token,{mode:0o600});}}
+function loadLocalToken(dataDir=DATA_DIR,override=process.env.RELAY_TOKEN){
+  fs.mkdirSync(dataDir,{recursive:true,mode:0o700});const file=path.join(dataDir,'local-token');
+  let token=override;
+  if(!token){
+    try{token=fs.readFileSync(file,'utf8').trim();}catch(error){
+      if(error.code!=='ENOENT')throw error;
+      token=random();try{fs.writeFileSync(file,token,{mode:0o600,flag:'wx'});}catch(writeError){if(writeError.code!=='EEXIST')throw writeError;token=fs.readFileSync(file,'utf8').trim();}
+    }
+  }
   if(token.length<32)throw Error('RELAY_TOKEN must contain at least 32 characters.');
-  const {server}=createDesktop({token});
-  server.on('error',error=>{console.error(error.code==='EADDRINUSE'?'Port 10000 is already in use. Stop the old connector, then run START-LAPTOP.cmd again.':error.message);process.exitCode=1;});
-  server.listen(10000,'127.0.0.1',()=>{
-    console.log('Laptop connector ready · trading engine V'+APP_VERSION+'. Keep this window open and laptop awake.');
-    console.log('Local connection token (paste only into your laptop dashboard):\n'+token);
-    console.log('Open https://rzwntm47-art.github.io/btc-trading-app/ and click Pair Mobile.');
-  });
+  return token;
 }
-module.exports={createDesktop,remoteOrigin,DATA_DIR};
+module.exports={createDesktop,remoteOrigin,DATA_DIR,loadLocalToken};
+if(require.main===module)require('./launch-desktop.cjs').main();
+

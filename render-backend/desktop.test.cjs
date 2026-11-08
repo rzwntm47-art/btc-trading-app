@@ -14,9 +14,10 @@ class FakeEngine extends DemoEngine{
   async close(){this.closes++;}
 }
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-async function fixture(fn){
+async function until(fn){for(let i=0;i<150&&!fn();i++)await delay(2);assert.ok(fn(),'condition did not become true');}
+async function fixture(fn,options={}){
   const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'btc-pair-test-'));let time=Date.now();
-  const create=()=>createDesktop({token:TOKEN,dataDir,Engine:FakeEngine,now:()=>time,intervalMs:15,fetcher:()=>{throw Error('No exchange calls allowed');}});
+  const create=()=>createDesktop({token:TOKEN,dataDir,Engine:FakeEngine,now:()=>time,intervalMs:15,fetcher:()=>{throw Error('No exchange calls allowed');},...options});
   let app=create();await new Promise(r=>app.server.listen(0,'127.0.0.1',r));let base='http://127.0.0.1:'+app.server.address().port;
   const restart=async()=>{app.server.closeAllConnections();await new Promise(r=>app.server.close(r));app=create();await new Promise(r=>app.server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.server.address().port;return app;};
   const request=async(route,data,{mobile=false,cookie='',auth=TOKEN,origin,headers={}}={})=>{
@@ -34,6 +35,54 @@ test('private HTTPS address validation rejects public, credential-bearing and no
   assert.equal(remoteOrigin(ORIGIN),ORIGIN);
   for(const v of ['http://test-laptop.testnet.ts.net','https://evil.example','https://user:pass@test-laptop.testnet.ts.net','https://test-laptop.testnet.ts.net/path','https://test-laptop.testnet.ts.net:8443'])assert.throws(()=>remoteOrigin(v));
 });
+test('connector identifies its loaded version before Binance is connected',()=>fixture(async({request})=>{
+ const state=(await request('/host/status')).json;assert.equal(state.service,'btc-demo-laptop');assert.equal(state.connectorVersion,require('../demo-execution/engine.js').APP_VERSION);assert.equal(state.restartSupported,true);assert.equal(state.restarting,false);assert.equal(state.engine,null);
+}));
+test('restart requires local authentication and matching generation; phone routes cannot restart',()=>fixture(async({app,request,connect,pair})=>{
+ await connect();const p=await pair(),generation=app.snapshot().generation;
+ assert.equal((await request('/host/restart',{generation},{auth:'wrong'})).status,401);
+ assert.equal((await request('/host/restart',{generation},{headers:{'X-Forwarded-Host':new URL(ORIGIN).host}})).status,403);
+ assert.equal((await request('/host/restart',{generation},{origin:'https://other.example'})).status,403);
+ assert.equal((await request('/mobile/restart',{generation,csrf:p.csrf},{mobile:true,cookie:p.cookie})).status,404);
+ assert.equal((await request('/host/restart',{generation:'stale'})).status,409);assert.equal(app.snapshot().restarting,false);assert.ok(app.server.listening);
+}));
+test('restart drains in-flight work, stops new commands, and preserves the journal and remembered phone',()=>fixture(async({app,request,connect,pair,dataDir,restart})=>{
+ await connect();const p=await pair(),e=FakeEngine.last;e.auto=true;e.busy=true;
+ const trust=fs.readFileSync(path.join(dataDir,'trusted-phones.json'),'utf8'),closed=new Promise(r=>app.server.once('close',r));
+ const pending=request('/host/restart',{generation:app.snapshot().generation});await until(()=>app.snapshot().restarting);
+ assert.equal(e.auto,false);assert.ok(app.server.listening);const ticks=e.ticks;await delay(30);assert.equal(e.ticks,ticks);
+ assert.equal((await request('/host/command',{id:'restart-start-01234567',action:'start'})).status,409);
+ assert.equal((await request('/host/connect',{requestId:'restart-connect-01234567',key:KEY,secret:SECRET,demoOnly:true})).status,409);
+ assert.equal((await request('/host/restart',{generation:app.snapshot().generation})).status,409);
+ e.state.goal=true;e.state.goalStopAt=12345;e.state.goalNet=21;e.busy=false;
+ assert.equal((await pending).status,202);await closed;assert.equal(e.api.key,'');assert.equal(e.starts,0);
+ assert.equal(fs.readFileSync(path.join(dataDir,'trusted-phones.json'),'utf8'),trust);
+ const journal=JSON.parse(fs.readFileSync(path.join(dataDir,fs.readdirSync(dataDir).find(x=>x.startsWith('journal-'))),'utf8'));assert.equal(journal.goalStopAt,12345);assert.equal(journal.goalNet,21);
+ await restart();assert.equal((await request('/mobile/status',undefined,{mobile:true,cookie:p.cookie})).status,200);
+ await connect();assert.equal(FakeEngine.last.state.goalStopAt,12345);assert.equal(FakeEngine.last.auto,false);assert.equal(FakeEngine.last.starts,0);
+}));
+test('busy restart timeout leaves the connector open, Auto stopped, and position checks available',()=>fixture(async({app,request,connect})=>{
+ await connect();const e=FakeEngine.last;e.auto=true;e.busy=true;
+ const failed=await request('/host/restart',{generation:app.snapshot().generation});assert.equal(failed.status,409);assert.match(failed.json.error,/action is still pending/);assert.ok(app.server.listening);assert.equal(app.snapshot().restarting,false);assert.equal(e.auto,false);assert.ok(e.api.key);
+ e.busy=false;const ticks=e.ticks;await until(()=>e.ticks>ticks);assert.equal((await request('/host/status')).status,200);
+},{restartTimeoutMs:35}));
+test('journal write failure cancels shutdown and keeps the existing connector available',()=>fixture(async({app,request,connect})=>{
+ await connect();const e=FakeEngine.last;e.auto=true;e.save=()=>{throw Error('disk unavailable');};
+ const result=await request('/host/restart',{generation:app.snapshot().generation});assert.equal(result.status,409);assert.match(result.json.error,/disk unavailable/);assert.ok(app.server.listening);assert.equal(app.snapshot().restarting,false);assert.equal(e.auto,false);assert.ok(e.api.key);
+}));
+test('restart waits for an accepted browser relay request before closing the listener',async()=>{
+ let release,entered=false;const upstream=new Promise(r=>release=r);
+ await fixture(async({app,request})=>{
+  const input={method:'POST',path:'/fapi/v1/order',apiKey:KEY,query:'timestamp='+Date.now()+'&recvWindow=5000&signature='+'a'.repeat(64)};
+  const relay=request('/relay',input);await until(()=>entered);assert.equal(app.server.pendingRelays(),1);
+  const closed=new Promise(r=>app.server.once('close',r)),pending=request('/host/restart',{generation:app.snapshot().generation});await until(()=>app.snapshot().restarting);assert.ok(app.server.listening);
+  assert.equal((await request('/relay',input)).status,409);release(Response.json({orderId:123,status:'FILLED'}));assert.equal((await relay).status,200);assert.equal((await pending).status,202);await closed;assert.equal(app.server.pendingRelays(),0);
+ },{fetcher:async()=>{entered=true;return upstream;}});
+});
+test('launcher can drain an authenticated real connector and observe its released port',()=>fixture(async({app})=>{
+ const {prepareRestart}=require('./launch-desktop.cjs'),base='http://127.0.0.1:'+app.server.address().port;
+ const closed=new Promise(r=>app.server.once('close',r));await prepareRestart({base,token:TOKEN,log(){}});await closed;assert.equal(app.server.listening,false);
+}));
 test('background connection is single-owner, imports journal, stays stopped and persists no credentials',()=>fixture(async({app,request,connect,dataDir})=>{
   await connect({version:1,records:[],startedAt:123,goal:false});assert.equal(app.snapshot().engine.auto,false);
   const publicState=JSON.stringify((await request('/host/status')).json);assert.ok(!publicState.includes(SECRET));assert.ok(!publicState.includes(KEY));assert.ok(!publicState.includes(TOKEN));
@@ -86,7 +135,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.71');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:20,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.72');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:20,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{

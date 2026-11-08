@@ -36,15 +36,21 @@ async function remoteRequest(transport,path,data){
 class RemoteDemo extends DemoEngine{
   constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.transport=transport;}
   apply(snapshot){
-    if(snapshot.engine)Object.assign(this,snapshot.engine);else{this.connected=false;this.auto=false;this.busy=false;this.controlPending=false;}
+    const wasWaiting=this.needsReconnect;
+    if(snapshot.engine)Object.assign(this,snapshot.engine);else Object.assign(this,new RemoteDemo(this.transport));
     this.entryHold=snapshot.engine?.entryHold||'';this.lastRiskCheck=snapshot.engine?.lastRiskCheck||null;
-    this.appVersion=snapshot.engine?.appVersion||null;this.entryPolicy=snapshot.engine?.entryPolicy||null;this.scanAudit=snapshot.engine?.scanAudit||null;this.lastScan=snapshot.engine?.lastScan||0;this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.api.offset=snapshot.serverAt-Date.now();this.transport.generation=snapshot.generation;
-    render();$('credentials').hidden=true;$('backgroundNote').hidden=false;$('browserRequirement').hidden=true;
+    this.appVersion=snapshot.engine?.appVersion||snapshot.connectorVersion||null;this.entryPolicy=snapshot.engine?.entryPolicy||null;this.scanAudit=snapshot.engine?.scanAudit||null;this.lastScan=snapshot.engine?.lastScan||0;this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.api.offset=snapshot.serverAt-Date.now();this.transport.generation=snapshot.generation;
+    const needsReconnect=!snapshot.engine&&!snapshot.connecting&&!snapshot.restarting;
+    this.needsReconnect=needsReconnect;
+    if(snapshot.restarting){this.connected=false;this.auto=false;}
+    render();$('credentials').hidden=onPhoneController||!needsReconnect;$('backgroundNote').hidden=false;$('browserRequirement').hidden=true;
+    if(needsReconnect&&!onPhoneController){$('credentials').open=true;if(!wasWaiting)$('pairPanel').hidden=false;}
     if(onPhoneController){$('resetDemo').hidden=true;$('pairMobile').hidden=true;}
-    if(!this.connected)status(snapshot.connecting?'Laptop is connecting to Binance Demo. Please wait…':snapshot.error||'Laptop bot is disconnected. Reconnect on the laptop.');
+    const reconnectNote=onPhoneController?'Laptop connector is ready. Reconnect Binance on the laptop; this phone remains paired.':'Laptop connector is ready. Open Mobile — same account, unlock saved keys or enter them in Connect Binance Demo, then click Connect laptop / reconnect controls. After connection, click Start / Resume Demo.';
+    if(!this.connected)status(snapshot.restarting?'Laptop connector is restarting. Wait for its new window, then reconnect Binance on the laptop.':snapshot.connecting?'Laptop is connecting to Binance Demo. Please wait…':snapshot.error||reconnectNote);
     else status('LAPTOP BACKGROUND BOT · '+$('status').textContent);
     $('backgroundNote').textContent='Laptop engine '+(this.appVersion?'V'+this.appVersion:'version unavailable — update the laptop connector for the latest fixes')+'. Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
-    if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.connecting?'Connecting in the background…':this.connected?'Same laptop bot connected · '+snapshot.pairedDevices+' remembered phone(s). Open the saved phone app, or create a one-time link for a new phone.':snapshot.error||'Reconnect Binance on the laptop.');}
+    if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.restarting?'Connector restart in progress…':snapshot.connecting?'Connecting in the background…':this.connected?'Same laptop bot connected · '+snapshot.pairedDevices+' remembered phone(s). Open the saved phone app, or create a one-time link for a new phone.':snapshot.error||reconnectNote);}
   }
   async command(action,extra={}){
     const id=crypto.randomUUID();
@@ -113,12 +119,13 @@ $('connectBackground').onclick=async()=>{
     const transport={base:'http://127.0.0.1:10000',prefix:'/host',token};
     const initial=await remoteRequest(transport,'/status');
     if(initial.version!==2)throw Error('Update the laptop connector first.');
+    if(initial.restarting)throw Error('Connector restart is in progress. Wait for the new connector window, then reconnect.');
     if(initial.engine||initial.connecting){
       if(engine&&!engine.remote){engine.pause();const old=engine;const stopped=await old.control(async()=>{old.connected=false;old.api.clear();});if(!stopped)throw Error('Wait for the current dashboard action to finish.');}
       await attachBackground(transport,initial);return;
     }
     const key=saved?.key||$('key').value.trim(),secret=saved?.secret||$('secret').value.trim();
-    if(!key||!secret)throw Error('Enter your saved-key password above, or enter your Demo API key and HMAC secret in Connect Binance Demo first.');
+    if(!key||!secret){$('credentials').hidden=false;$('credentials').open=true;throw Error('Enter your saved-key password above, or enter your Demo API key and HMAC secret in Connect Binance Demo first. Then use Connect laptop / reconnect controls below.');}
     if(!$('backgroundConsent').checked)throw Error('Tick the Binance Demo confirmation above before moving trading to the laptop.');
     let state;
     if(engine&&!engine.remote){
@@ -170,3 +177,4 @@ if(onPhoneController){
   remoteTransport={base:'',prefix:'/mobile',mobile:true};
   (async()=>{try{if(code)await remoteRequest(remoteTransport,'/pair',{code});await pollRemote();}catch(error){status(error.message);}})();
 }
+

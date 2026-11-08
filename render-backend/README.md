@@ -1,3 +1,13 @@
+## V1.72 — laptop restart and reconnection
+
+Run `START-LAPTOP.cmd` from the fully extracted project. It checks Node.js 22+ and companion folders before restarting anything. If a V1.72 connector already owns port 10000, the launcher authenticates it with the existing local token, pauses background Auto, waits up to 30 seconds for connecting/pending engine work and accepted relay requests, saves the journal, and starts a fresh connector. It never kills unrelated processes. A timeout or save error leaves the existing connector open with background Auto stopped.
+
+**One-time upgrade from V1.71 or older:** Stop Auto, wait for pending actions, close the old connector window, update `demo-execution` and `render-backend` together, and run `START-LAPTOP.cmd`. Those older running processes do not support the new restart endpoint. Refreshing the website alone cannot update them.
+
+After restart, open the laptop dashboard, choose **Mobile — same account**, enter your saved-key password (or enter Demo keys in **Connect Binance Demo**), then click **Connect laptop / reconnect controls**. Click **Start / Resume Demo** after account checks finish. The dashboard now reveals the reconnection fields and reports the connector version even before Binance connects. API keys remain memory-only; restarting does not start orders automatically.
+
+The profile data in `.btc-demo-laptop`, stable local token, journals, armed exit levels, $20 session latch and remembered phone trust are preserved. Do not reset history or clear saved browser credentials. Restarting cannot resume a session already stopped at its $20 target; the existing New $20 session action still applies when flat.
+
 # Binance Demo backend — Render Free
 
 Deploy this directory as a Node web service. Root directory: `render-backend`. Build command: `npm test`. Start command: `npm start`. No dependencies or Binance secrets are required.
@@ -39,3 +49,4 @@ The relay permits signed Demo-only `GET /fapi/v1/userTrades` for paid commission
 No live host or new Binance write endpoint is enabled. Replace both folders, preserve journals, and restart; a GitHub Pages refresh alone is insufficient.
 
 V1.63 installs a $12 Binance backup stop. The $6 recovery decision and profit floors need this engine running. It closes at the next fresh observation at or below an armed floor, without closing just because profit first rises through a level. Restart preserves the new peak/floor. Existing positions migrate without adding margin or changing leverage; prior fees and partial results still count. Slippage, gaps and fees can exceed exit targets.
+

@@ -38,7 +38,7 @@ let renderPending=false;
 function queueRender(){if(renderPending)return;renderPending=true;setTimeout(()=>{renderPending=false;render();},100);}
 function render(){
   const e=engine,connected=!!e?.connected;
-  const sessionTarget=Number.isFinite(e?.entryPolicy?.sessionTarget)?e.entryPolicy.sessionTarget:e?.remote?100:SESSION_TARGET;
+  const sessionTarget=Number.isFinite(e?.entryPolicy?.sessionTarget)?e.entryPolicy.sessionTarget:e?.remote&&e.appVersion!==APP_VERSION?100:SESSION_TARGET;
   $('sessionHeading').textContent='Net trading result · $'+sessionTarget+' target';
   $('again').textContent='New $'+sessionTarget+' session';
   const connectorUpdate=!!e&&(!!e.accountingUpdateRequired||(e.remote&&e.appVersion!==APP_VERSION));

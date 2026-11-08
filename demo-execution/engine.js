@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.71';
+const APP_VERSION='1.72';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;

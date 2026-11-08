@@ -1,4 +1,4 @@
-# Same account on mobile — V1.66
+# Same account on mobile — V1.72
 
 The laptop runs one Binance Demo bot. The phone displays that same account, balances, positions, scan results and controls. API keys are entered only on the laptop. The phone does not start a second bot.
 
@@ -16,7 +16,7 @@ The phone shows the actual laptop engine version. Refreshing a public website ca
 
 Open the saved phone app. No repeated token, API-key entry or QR scan. The phone refreshes status every three seconds and immediately when it returns to the foreground or regains network access. Closing the phone page does not send Stop. Keep the laptop awake, online, and its connector window open. The phone does not keep the engine alive if the laptop is off.
 
-After a laptop restart, reconnect the same Binance account on the laptop. Remembered phones remain authorized and show that account as soon as it reconnects. API signing keys stay in process memory and are cleared by restart; phone trust does not store or recover them.
+Run `START-LAPTOP.cmd` again to restart a V1.72 connector: it waits for pending work and replaces the running process. For an older connector, Stop Auto, wait for pending actions, and close its old window once before running the updated launcher. After a laptop restart, open **Mobile — same account**, unlock saved keys, click **Connect laptop / reconnect controls**, then **Start / Resume Demo**. Reconnect the same Binance account on the laptop. Remembered phones remain authorized and show that account as soon as it reconnects. API signing keys stay in process memory and are cleared by restart; phone trust does not store or recover them.
 
 ## Access and recovery
 
@@ -29,4 +29,5 @@ After a laptop restart, reconnect the same Binance account on the laptop. Rememb
 The connector binds to `127.0.0.1:10000`. Tailscale Serve supplies private HTTPS; no public Funnel or router port opening is needed. This does not bypass Binance regional restrictions. The public app stores only the validated private address; sensitive state and commands are not cached by its service worker.
 
 Validation: `node --test --test-timeout=10000 demo-execution/*.test.cjs render-backend/*.test.cjs`. Automated tests use fake accounts and do not place exchange orders.
+
 

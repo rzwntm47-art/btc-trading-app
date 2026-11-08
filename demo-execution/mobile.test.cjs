@@ -26,6 +26,22 @@ test('remote Start and Close send explicit idempotent commands without Binance c
 test('losing the network disables controls without claiming or sending a Stop',async()=>{
  const f=fixture({fail:true});f.ready();await vm.runInContext('pollRemote()',f.context);assert.equal(vm.runInContext('engine.connected',f.context),false);assert.match(f.node('status').textContent,/may still be trading/);assert.ok(f.requests.every(x=>!x.url.includes('/command')));
 });
+test('restarted laptop exposes credentials and reconnect instructions without replaying any command',async()=>{
+ const f=fixture();f.ready();f.node('credentials').hidden=true;f.node('pairPanel').hidden=true;
+ vm.runInContext("engine.state.goalStopAt=123;engine.positions=[{symbol:'BTCUSDT'}];engine.auto=true;",f.context);
+ f.payload.engine=null;f.payload.connectorVersion='1.72';f.payload.generation='restarted';await vm.runInContext('pollRemote()',f.context);
+ assert.equal(f.node('credentials').hidden,false);assert.equal(f.node('credentials').open,true);assert.equal(f.node('pairPanel').hidden,false);assert.match(f.node('status').textContent,/unlock saved keys/);
+ assert.equal(vm.runInContext('engine.positions.length',f.context),0);assert.equal(vm.runInContext('engine.state.goalStopAt',f.context),undefined);assert.equal(vm.runInContext('engine.appVersion',f.context),'1.72');assert.equal(vm.runInContext('engine.auto',f.context),false);assert.ok(f.requests.every(x=>x.url.endsWith('/status')));
+});
+test('phone remains a controller after connector restart and never exposes laptop credentials',async()=>{
+ const f=fixture({phone:true});await new Promise(r=>setTimeout(r,10));f.payload.engine=null;f.payload.connectorVersion='1.72';await vm.runInContext('pollRemote()',f.context);
+ assert.equal(f.node('credentials').hidden,true);assert.equal(f.node('pairMobile').hidden,true);assert.match(f.node('status').textContent,/Reconnect Binance on the laptop; this phone remains paired/);assert.equal(f.requests.filter(x=>x.url==='/mobile/pair').length,1);
+});
+test('reconnection during restart is blocked and missing credentials can be entered after restart',async()=>{
+ const f=fixture();f.ready();f.node('pairToken').value='t'.repeat(43);f.payload.restarting=true;
+ await f.node('connectBackground').onclick();assert.match(f.node('pairStatus').textContent,/restart is in progress/);assert.ok(f.requests.every(x=>x.url.endsWith('/status')));
+ f.payload.restarting=false;f.payload.engine=null;f.node('credentials').hidden=true;await f.node('connectBackground').onclick();assert.equal(f.node('credentials').hidden,false);assert.equal(f.node('credentials').open,true);assert.match(f.node('pairStatus').textContent,/Connect laptop \/ reconnect controls below/);assert.ok(f.requests.every(x=>x.url.endsWith('/status')));
+});
 test('returning to the mobile controller reconnects immediately and restores laptop Auto intent',async()=>{
  const f=fixture({fail:true});f.ready();await vm.runInContext('pollRemote()',f.context);assert.equal(vm.runInContext('engine.connected',f.context),false);
  f.setOffline(false);f.payload.engine.auto=true;f.payload.engine.appVersion='1.66';f.payload.engine.entryHold='Order still settling';
@@ -68,4 +84,5 @@ test('phone launch rejects unsafe addresses and can return to the local dashboar
 test('saved phone address leaves the embedded public app through the top-level window',()=>{
  const f=fixture(),top=[];f.context.window.top={location:{replace(url){top.push(url);}}};f.storage.set('btc_demo_phone_origin','https://laptop.test.ts.net');vm.runInContext('restorePhoneDashboard()',f.context);assert.deepEqual(top,['https://laptop.test.ts.net/mobile']);assert.equal(f.navigations.length,0);assert.equal(f.requests.length,0);
 });
+
 

@@ -1,3 +1,9 @@
+## V1.72 — laptop connector restart
+
+The launcher now performs an authenticated, graceful restart of an already-running V1.72 connector, waits for pending engine and relay work, preserves saved state, and rejects unsafe port conflicts or incomplete installations. Older connectors need their old window closed once after Stop Auto and pending actions finish. No force-kill or automatic order replay is used.
+
+After restarting, the laptop dashboard reveals credential/reconnect controls, displays the loaded connector version before account connection, and keeps the $20 target visible. Reconnect the same Demo account, then Start / Resume. Phone access stays paired and API signing keys stay memory-only. Existing trading rules are unchanged. See `render-backend/README.md` for installation.
+
 ## V1.71 — fresh direction required before entry
 
 The 24-hour movers list remains a candidate list. The prior longer-timeframe Bollinger check could permit a small opposing 1m candle, and the final order gate reused the earlier minute-candle assessment. V1.71 requires an aligned completed 1m candle for every Bollinger timeframe and reads uncached 1m candles again after exchange settings, before fetching the final bid/ask. This is a targeted entry change; existing position management, $300 margin, fee limits, leverage selection, $2–$6 early loss exit, $6/$12 loss rules, profit floors and $20 session target remain.
