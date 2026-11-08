@@ -26,6 +26,28 @@ test('remote Start and Close send explicit idempotent commands without Binance c
 test('losing the network disables controls without claiming or sending a Stop',async()=>{
  const f=fixture({fail:true});f.ready();await vm.runInContext('pollRemote()',f.context);assert.equal(vm.runInContext('engine.connected',f.context),false);assert.match(f.node('status').textContent,/may still be trading/);assert.ok(f.requests.every(x=>!x.url.includes('/command')));
 });
+test('reset waits for an overlapping old poll, then fetches the confirmed zero snapshot',async()=>{
+ const f=fixture();f.ready();Object.assign(f.payload.engine,{resultResetSupported:true,appVersion:'1.74',income:[{income:'-39.44',incomeType:'REALIZED_PNL'}],lastIncome:Date.now(),incomeWindowStart:100,state:{version:1,records:[],startedAt:100}});
+ f.context.initial=f.payload;vm.runInContext('engine.apply(initial)',f.context);let releaseOld,reads=0,commands=0,finished=false;
+ const old=JSON.parse(JSON.stringify(f.payload));
+ f.context.fetch=async(url,options={})=>{
+  if(url.endsWith('/status')){reads++;if(reads===1)return new Promise(r=>releaseOld=()=>r(Response.json(old)));return Response.json(f.payload);}
+  const input=JSON.parse(options.body);assert.equal(input.action,'resetResult');commands++;const at=Date.now();Object.assign(f.payload.engine,{income:[],lastIncome:at,incomeWindowStart:at,incomeWindowEnd:at,auto:false,state:{version:1,records:[],startedAt:at,resetAt:at,dayOpenPnl:0,resultResetSequence:1}});
+  return Response.json({id:input.id,status:'done',reset:{at,sequence:1,net:0,openingUnrealized:0}});
+ };
+ const oldPoll=vm.runInContext('pollRemote()',f.context),reset=f.node('resetResult').onclick().then(()=>{finished=true;});await new Promise(r=>setImmediate(r));assert.equal(commands,1);assert.equal(finished,false);
+ releaseOld();await oldPoll;await reset;assert.equal(reads,2);assert.equal(commands,1);assert.equal(vm.runInContext('engine.sessionNet()',f.context),0);assert.match(f.node('resultResetMessage').textContent,/Reset confirmed/);
+ await vm.runInContext('pollRemote()',f.context);assert.match(f.node('resultResetMessage').textContent,/Reset confirmed/);
+});
+test('an old connector cannot inherit the website reset capability or receive an unsupported reset',async()=>{
+ const f=fixture();f.ready();f.payload.engine.appVersion='1.73';await vm.runInContext('pollRemote()',f.context);await f.node('resetResult').onclick();
+ assert.equal(vm.runInContext('engine.resultResetSupported',f.context),false);assert.match(f.node('resultResetMessage').textContent,/V1.73/);assert.equal(f.node('resultResetUpdate').hidden,false);assert.ok(f.requests.every(r=>r.url.endsWith('/status')));
+});
+test('a remote reset rejection remains visible beside the amount after polling resumes',async()=>{
+ const f=fixture();f.ready();f.payload.engine.resultResetSupported=true;await vm.runInContext('pollRemote()',f.context);
+ f.context.fetch=async(url,options={})=>url.endsWith('/command')?Response.json({status:'error',error:'Account read failed'}):Response.json(f.payload);
+ await f.node('resetResult').onclick();await vm.runInContext('pollRemote()',f.context);assert.match(f.node('resultResetMessage').textContent,/Reset not confirmed: Account read failed/);assert.ok(!f.node('resultResetMessage').textContent.startsWith('Reset confirmed'));
+});
 test('restarted laptop exposes credentials and reconnect instructions without replaying any command',async()=>{
  const f=fixture();f.ready();f.node('credentials').hidden=true;f.node('pairPanel').hidden=true;
  vm.runInContext("engine.state.goalStopAt=123;engine.positions=[{symbol:'BTCUSDT'}];engine.auto=true;",f.context);

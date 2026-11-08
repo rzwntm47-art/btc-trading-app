@@ -1,3 +1,9 @@
+## V1.74 — reset the counter without clearing trading state
+
+The new `resetResult` command reads account/position data, saves a fresh result window and opening unrealized baseline, and returns a sequence/time confirmation. It preserves all existing records and protection, so open positions or protective orders do not block this counter action. Auto remains stopped. The command is available to authenticated laptop and paired-phone controllers and retains command-ID deduplication. The older full-journal `reset` command remains host-only.
+
+Status explicitly advertises counter reset support. The website will show the actual running version and installation steps when the connector has not been updated. Install both code folders, run START-LAPTOP.cmd and reconnect; refreshing only the website cannot update local code.
+
 ## V1.73 — zero the result when Reset succeeds
 
 Update `demo-execution` and `render-backend` together, run `START-LAPTOP.cmd`, and reconnect. **Reset result to $0** saves a fresh session boundary and broadcasts the zero result to laptop and phone immediately. Previous bot records stay archived, the wallet is unchanged, and Auto stays stopped. Existing flat-position and pending-order checks remain. Later refreshes query only the new result window; late responses cannot restore the prior loss. The $20 target and all trading rules are unchanged.

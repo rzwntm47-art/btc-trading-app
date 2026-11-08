@@ -1,7 +1,7 @@
 'use strict';
 // Remote views receive snapshots and explicit commands only. They never execute DemoAPI calls.
 const onPhoneController=location.pathname==='/mobile';
-let remoteTransport=null,remotePollBusy=false,pairExpiryTimer;
+let remoteTransport=null,remotePollPromise=null,pairExpiryTimer;
 const PHONE_ORIGIN_KEY='btc_demo_phone_origin';
 function phoneOrigin(value){
   const u=new URL(value);
@@ -34,10 +34,11 @@ async function remoteRequest(transport,path,data){
   return result;
 }
 class RemoteDemo extends DemoEngine{
-  constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.transport=transport;}
+  constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.resultResetSupported=false;this.transport=transport;}
   apply(snapshot){
     const wasWaiting=this.needsReconnect;
     if(snapshot.engine)Object.assign(this,snapshot.engine);else Object.assign(this,new RemoteDemo(this.transport));
+    this.resultResetSupported=snapshot.engine?.resultResetSupported===true;
     this.entryHold=snapshot.engine?.entryHold||'';this.lastRiskCheck=snapshot.engine?.lastRiskCheck||null;
     this.appVersion=snapshot.engine?.appVersion||snapshot.connectorVersion||null;this.entryPolicy=snapshot.engine?.entryPolicy||null;this.scanAudit=snapshot.engine?.scanAudit||null;this.lastScan=snapshot.engine?.lastScan||0;this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.api.offset=snapshot.serverAt-Date.now();this.transport.generation=snapshot.generation;
     const needsReconnect=!snapshot.engine&&!snapshot.connecting&&!snapshot.restarting;
@@ -59,7 +60,10 @@ class RemoteDemo extends DemoEngine{
     while(entry.status==='pending'&&Date.now()<until){await new Promise(r=>setTimeout(r,750));entry=await remoteRequest(this.transport,'/command?id='+encodeURIComponent(id));}
     if(entry.status==='pending')throw Error('Action is still running on the laptop. Sync before trying another command.');
     if(entry.status==='error')throw Error(entry.error);
-    await pollRemote();return entry.report;
+    // A poll already in flight may contain the pre-command state. Wait for it,
+    // then read a fresh snapshot before reporting the command as confirmed.
+    if(remotePollPromise)await remotePollPromise;
+    await pollRemote();return entry.reset??entry.report;
   }
   async control(fn){if(this.localControl)return false;this.localControl=true;try{await fn();return true;}finally{this.localControl=false;}}
   start(){return this.command('start');}
@@ -74,19 +78,26 @@ class RemoteDemo extends DemoEngine{
   close(symbol){return this.command('close',{symbol});}
   again(){return this.command('again');}
   resetFromBinance(){return this.command('reset');}
+  resetResult(){return this.command('resetResult');}
   freshTradeReport(){return this.command('report');}
   tick(){return pollRemote();}
 }
 async function pollRemote(){
-  if(!remoteTransport||remotePollBusy)return;remotePollBusy=true;
+  if(!remoteTransport)return;if(remotePollPromise)return remotePollPromise;
+  const transport=remoteTransport;
+  remotePollPromise=(async()=>{
   try{
-    const snapshot=await remoteRequest(remoteTransport,'/status');
-    if(!engine?.remote)engine=new RemoteDemo(remoteTransport);
+    const snapshot=await remoteRequest(transport,'/status');
+    if(remoteTransport!==transport)return;
+    if(!engine?.remote)engine=new RemoteDemo(transport);
     engine.apply(snapshot);
   }catch(error){
+    if(remoteTransport!==transport)return;
     if(engine?.remote){engine.connected=false;engine.auto=false;render();}
     status('LAPTOP CONNECTION LOST · '+error.message+' The laptop may still be trading; no stop is confirmed.');pairMessage(error.message);
-  }finally{remotePollBusy=false;}
+  }finally{remotePollPromise=null;}
+  })();
+  return remotePollPromise;
 }
 async function attachBackground(transport,snapshot){
   remoteTransport=transport;engine=new RemoteDemo(transport);engine.apply(snapshot);

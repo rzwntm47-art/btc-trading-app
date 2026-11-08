@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.73';
+const APP_VERSION='1.74';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -422,6 +422,7 @@ function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
+    this.resultResetSupported=true;
     this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
@@ -715,6 +716,25 @@ class DemoEngine {
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=SESSION_TARGET){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
     this.startPending=false;this.entryHold='';this.auto=true;this.retryAt=0;this.retryLimited=false;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 normal after-fee loss exit / $12 backup; fresh recovery evidence required beyond $6 · net profit pullbacks $5 / $8 / $11 / +$3 · $'+SESSION_TARGET+' net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $'+SESSION_TARGET+' net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+  }
+  async resetResult(){
+    if(!this.newRules)throw new DemoError('Update the running engine before resetting the result counter.');
+    this.pause('Resetting the net result counter. New entries stopped.');
+    // Only a fresh account/position read is needed. Existing orders and trade
+    // protection remain in place; resetting a counter must not erase ownership.
+    await this.refresh({inventory:false,valuation:false});
+    const previous=this.state,at=Date.now()+this.api.offset,openingUnrealized=this.unrealizedPnl();
+    const sequence=(Number.isSafeInteger(previous.resultResetSequence)?previous.resultResetSequence:0)+1;
+    const record={at,sequence,openingUnrealized,previousStartedAt:previous.startedAt,
+      previousNet:this.lastIncome&&this.incomeWindowStart===previous.startedAt?this.sessionNet():null,
+      previousIncomeAt:this.lastIncome||null};
+    this.state={...previous,startedAt:at,resetAt:at,dayStart:Math.floor((at+14400000)/86400000)*86400000-14400000,
+      dayOpenPnl:openingUnrealized,goal:false,resultResetSequence:sequence,resultResets:[...(previous.resultResets||[]),record]};
+    delete this.state.goalStopAt;delete this.state.goalNet;
+    try{this.save();}catch(error){this.state=previous;throw error;}
+    this.income=[];this.incomeWindowStart=at;this.incomeWindowEnd=at;this.lastIncome=Date.now();this.sessionCloseEstimate=null;this.block='';
+    this.event('Net result counter reset to $0.00. Trades, positions and protective orders kept. Auto stopped.');
+    return {sequence,at,net:this.sessionNet(),openingUnrealized};
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');

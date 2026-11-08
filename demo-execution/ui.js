@@ -23,7 +23,7 @@ async function readCredentials(password){
  catch{throw Error('Could not unlock saved credentials. Check your save password.');}
 }
 
-let engine=null,releaseLock=null,connectionBusy=false;
+let engine=null,releaseLock=null,connectionBusy=false,resultResetBusy=false;
 const money=n=>Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
 function line(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');if(v instanceof Node)td.append(v);else td.textContent=String(v??'—');tr.append(td);}parent.append(tr);}
 const expandedSetups=new Set();
@@ -46,7 +46,8 @@ function render(){
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
   $('start').disabled=!connected||e.controlPending||e.auto||!!e.state.goalStopAt||(!e.newRules&&e.state.goal&&!e.experimentActive());
-  $('resetDemo').disabled=!connected||e.controlPending;
+  $('resetDemo').disabled=!connected||e.controlPending||resultResetBusy;
+  $('resetResult').disabled=$('resetDemo').disabled;
   $('copyTradeReport').disabled=!connected||e.controlPending;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.controlPending;
   $('again').hidden=!e?.state?.goalStopAt;
@@ -261,7 +262,22 @@ $('forgetSaved').onclick=()=>{
  status('Saved credentials deleted from this browser. An existing connection stays active until Disconnect.');
 };
 
-$('resetDemo').onclick=()=>run(()=>engine.resetFromBinance());
+async function resetResultCounter(){
+ const target=engine;if(!target?.connected||resultResetBusy)return;
+ resultResetBusy=true;$('resultResetUpdate').hidden=true;
+ $('resultResetMessage').textContent='Reset requested. Waiting for the running engine to save the new starting point…';
+ render();$('resultResetMessage').scrollIntoView?.({behavior:'smooth',block:'center'});
+ try{
+  if(!target.resultResetSupported){$('resultResetUpdate').hidden=false;throw Error('The running laptop engine '+(target.appVersion?'V'+target.appVersion:'(version unknown)')+' does not support this counter reset. The updated website alone cannot change it. Install the laptop update below and reconnect.');}
+  let result;const ran=await target.control(async()=>{if(engine!==target)throw Error('Connection changed before reset.');result=await target.resetResult();});
+  if(!ran)throw Error('Another action is pending. Reset was not sent; wait for it to finish, then try again.');
+  if(engine!==target||!target.connected||!result||result.net!==0||result.sequence!==target.state.resultResetSequence||result.at!==target.state.startedAt||target.auto)throw Error('The running engine has not confirmed the new starting point. Sync before retrying.');
+  $('resultResetMessage').textContent='Reset confirmed at '+new Date(result.at).toLocaleTimeString()+': started from $0.00. Only changes after this time count. Auto is stopped.';
+ }catch(error){$('resultResetMessage').textContent='Reset not confirmed: '+error.message;}
+ finally{resultResetBusy=false;render();}
+}
+$('resetDemo').onclick=resetResultCounter;
+$('resetResult').onclick=resetResultCounter;
 
 $('positionsTab').onclick=()=>{ $('positions').hidden=false;$('orderPanel').hidden=true;$('positionsTab').classList.add('selected');$('ordersTab').classList.remove('selected');};
 $('ordersTab').onclick=()=>{ $('positions').hidden=true;$('orderPanel').hidden=false;$('ordersTab').classList.add('selected');$('positionsTab').classList.remove('selected');};

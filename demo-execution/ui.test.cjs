@@ -7,7 +7,7 @@ function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.73',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.74',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.bandRules=false;engine.entryPolicy={margin:300,maxLeverage:10,lossLimit:5,profitExit:'net-trailing',sessionExit:'close-bot-positions'};engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -45,7 +45,7 @@ test('real Sync handler queues behind polling and refreshes exactly once',async(
  e.busy=false;await sync;assert.equal(reads,1);assert.equal(e.controlPending,false);
 });
 test('real Reset and tab handlers dispatch correctly',async()=>{
- const {node,e}=fixture();let resets=0;e.resetFromBinance=async()=>resets++;
+ const {node,e}=fixture();let resets=0;e.resetResult=async()=>resets++;
  await node('resetDemo').onclick();assert.equal(resets,1);
  node('ordersTab').onclick();assert.equal(node('positions').hidden,true);assert.equal(node('orderPanel').hidden,false);
  node('positionsTab').onclick();assert.equal(node('positions').hidden,false);assert.equal(node('orderPanel').hidden,true);
@@ -60,6 +60,21 @@ test('Reset renders 0.00 immediately instead of the old negative result or Not s
 test('old income snapshot from a different window is never displayed as the current net result',()=>{
  const {node,context,e}=fixture();e.income=[{incomeType:'REALIZED_PNL',income:'-39.44'}];e.lastIncome=Date.now();e.incomeWindowStart=e.state.startedAt-1;
  vm.runInContext('renderActual()',context);assert.equal(node('session').textContent,'Syncing income…');assert.match(node('pnlEquation').textContent,/Waiting for income history/);assert.ok(!node('incomeAudit').textContent.includes('-39.44'));
+});
+test('counter reset failures remain beside the result after normal dashboard renders',async()=>{
+ const {node,context,e}=fixture();e.income=[{income:'-39.44',incomeType:'REALIZED_PNL'}];e.lastIncome=Date.now();e.incomeWindowStart=e.state.startedAt;e.resetResult=async()=>{throw Error('Binance read unavailable');};
+ await node('resetResult').onclick();assert.match(node('resultResetMessage').textContent,/Reset not confirmed: Binance read unavailable/);
+ e.block='';vm.runInContext('renderActual()',context);vm.runInContext('renderActual()',context);assert.equal(node('session').textContent,'-39.44');assert.match(node('resultResetMessage').textContent,/Binance read unavailable/);
+});
+test('an unsupported running connector displays its version and update steps without claiming a reset',async()=>{
+ const {node,e}=fixture();e.remote=true;e.resultResetSupported=false;e.appVersion='1.73';let called=false;e.resetResult=async()=>{called=true;};
+ await node('resetResult').onclick();assert.equal(called,false);assert.equal(node('resultResetUpdate').hidden,false);assert.match(node('resultResetMessage').textContent,/running laptop engine V1.73/);assert.match(node('resultResetMessage').textContent,/Reset not confirmed/);
+});
+test('a busy control reports that reset was not sent instead of silently ignoring the click',async()=>{
+ const {node,e}=fixture();e.control=async()=>false;await node('resetResult').onclick();assert.match(node('resultResetMessage').textContent,/Reset was not sent/);assert.ok(!node('resultResetMessage').textContent.startsWith('Reset confirmed'));
+});
+test('a success response without a matching saved starting point is not shown as confirmed',async()=>{
+ const {node,e}=fixture();e.resetResult=async()=>({at:Date.now(),sequence:999,net:0});await node('resetResult').onclick();assert.match(node('resultResetMessage').textContent,/has not confirmed the new starting point/);
 });
 
 test('background tab polling and paper navigation preserve Demo Auto; explicit Stop still stops',async()=>{
@@ -92,7 +107,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.73');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.74');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -121,7 +136,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.73');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.74');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();

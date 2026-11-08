@@ -1,3 +1,11 @@
+## V1.74 — dedicated net-result counter reset
+
+The previous button still invoked the full journal reset, which refuses existing positions or orders. The result panel now has its own **Reset result to $0** button, and both reset buttons call a dedicated counter action. It reads fresh account/position values, saves a new time window, preserves all trade records, orders, ownership and exit levels, and stops new entries. Existing unrealized PnL becomes the opening baseline, so subsequent changes and income count toward the same $20 target. It does not reset the wallet.
+
+The panel shows a persistent pending, confirmed or failed result. Success requires the engine confirmation to match a freshly loaded saved window. An overlapping older status poll must finish before a new post-command read, preventing it from restoring an obsolete amount. Older laptop engines advertise no counter capability and receive a visible update instruction instead of a false success. The full journal reset remains available only through its existing host command; no automatic fallback invokes it.
+
+Update the laptop code folders and run START-LAPTOP.cmd to load V1.74, then reconnect. A public website update does not replace a local engine.
+
 ## V1.73 — reset net trading result to $0.00
 
 **Reset result to $0** now saves a new accounting window immediately and renders $0.00 after a successful reset. It verifies the account is flat with no pending orders, archives the previous bot records, clears the old target latch and closing estimate, and leaves Auto stopped. The wallet, entry/exit strategy and $20 target are unchanged.

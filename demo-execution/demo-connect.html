@@ -4,7 +4,7 @@
 
 body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2329;border-color:#363c45}button{background:#2b3139;border-color:#474d57}.primary{background:#fcd535;color:#181a20}.good{color:#0ecb81}.bad{color:#f6465d}.columns{grid-template-columns:1fr}.exchange-tabs{display:flex;gap:20px;border-bottom:1px solid #363c45}.exchange-tabs button{background:none;border:0;border-radius:0;padding:12px 0;color:#848e9c}.exchange-tabs .selected{color:#eaecef;border-bottom:3px solid #fcd535}.position-card{padding:18px 0;border-bottom:1px solid #363c45}.position-card h3{font-size:17px;margin:0 0 14px}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:14px 0}.position-grid b{display:block;margin-top:5px;font-size:15px}.position-card button{width:100%;margin-top:10px}.position-card .pnl{font-size:23px}#syncNote{margin:10px 0}
 </style></head><body><main>
-<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.73</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
+<header><div><h1>Binance Demo Auto Trader <small style="display:inline">V1.74</small></h1><small>Virtual funds · Binance USDⓈ-M · exchange orders</small></div><a href="./" target="_top">Paper dashboard</a></header>
 <details id="credentials" open><summary>Connect Binance Demo</summary><form id="connectform" autocomplete="off"><label><input id="localMode" type="checkbox" checked> Use backend on this Windows computer</label><label for="relayToken">Local connection token (only when using local backend)</label><input id="relayToken" type="password" autocomplete="off"><section><label><input id="remember" type="checkbox" checked> Remember credentials on this computer (encrypted)</label><label for="vaultPassword">Save / unlock password</label><input id="vaultPassword" type="password" autocomplete="off" placeholder="Choose at least 8 characters when saving"><div class="actions"><button id="unlockSaved" type="button">Unlock saved keys</button><button id="forgetSaved" type="button">Forget saved keys</button></div><small>First time: fill in credentials and choose a password, then Connect &amp; Start Demo. Next time: enter only this password and click Unlock saved keys. The password is not stored. If you restart the local backend with a new token, replace the saved token and save again.</small></section><div class="authgrid"><div><label for="key">Demo API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" required></div><div><label for="secret">Demo HMAC secret</label><input id="secret" type="password" autocomplete="new-password" spellcheck="false" required></div></div><label><input id="demoOnly" type="checkbox" required> This is a Binance Demo key with Futures trading permission.</label><div class="actions"><button id="connect" type="submit">Connect &amp; Start Demo</button><button id="retry" type="button" disabled>Retry connection</button><button id="disconnect" type="button" disabled>Disconnect</button><a href="https://demo.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer">Demo API settings</a></div></form><small>Connect &amp; Start Demo enables automatic demo orders after account checks. Active credentials are cleared on disconnect or page closure. Remembered credentials remain encrypted in this browser until Forget saved keys. Unlock them after a refresh. Never paste them in chat. If a request fails, use Retry connection without pasting again. Only order tracking is saved on this browser. Use One-way and Single-Asset Mode for USDT cross-margin trading.</small></details>
 <div class="actions"><button id="start" class="primary" disabled>Start / Resume Demo</button><button id="stop" class="danger" disabled>Stop Auto</button><button id="refresh" disabled>Sync Binance</button><button id="pairMobile" type="button">Mobile — same account</button><button id="copyScanDiagnostics">Copy scan diagnostics</button><button id="copyTradeReport">Copy trade report</button><button id="resetDemo" disabled>Reset result to $0</button><button id="again" hidden disabled>New $20 session</button></div>
 
@@ -31,15 +31,15 @@ body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2
 <div class="actions"><button id="makeQr" type="button" class="primary">Create phone link — once</button><button id="revokePhones" type="button">Revoke all phones</button></div>
 <div id="pairQr" hidden><p id="pairQrNote"></p><div class="actions"><button id="copyPhoneLink" type="button" class="primary">Copy phone link</button><a id="pairLink" target="_blank" rel="noopener noreferrer">Open this link on your phone</a></div><textarea id="phoneLinkText" hidden readonly aria-label="One-time phone link" style="width:100%;height:90px"></textarea><details><summary>Optional: scan QR instead</summary><img id="pairQrImage" alt="One-time mobile pairing QR code" style="display:block;width:min(300px,100%);height:auto;background:white;margin:16px 0"></details></div>
 </section><p id="backgroundNote" hidden role="status"></p>
-<textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><section id="trialPanel" hidden><h2>Previous engine experiment</h2><p>The one-hour experiment is replaced by the 1–10m / 15m / 20m / 30m / 60m Bollinger / Williams %R strategy in V1.73. Update and restart an older laptop engine to apply the new rules.</p><div class="actions"><button id="startTrial" type="button" disabled>Previous experiment</button><button id="endTrial" type="button" disabled>End previous experiment</button></div><p id="trialStatus" role="status">Replaced by the current strategy.</p></section>
+<textarea id="tradeReportText" hidden readonly aria-label="Trade report" style="width:100%;height:220px"></textarea><section id="trialPanel" hidden><h2>Previous engine experiment</h2><p>The one-hour experiment is replaced by the 1–10m / 15m / 20m / 30m / 60m Bollinger / Williams %R strategy in V1.74. Update and restart an older laptop engine to apply the new rules.</p><div class="actions"><button id="startTrial" type="button" disabled>Previous experiment</button><button id="endTrial" type="button" disabled>End previous experiment</button></div><p id="trialStatus" role="status">Replaced by the current strategy.</p></section>
 <p id="status" role="status" aria-live="polite">Disconnected · no orders sent</p>
 <section aria-labelledby="entryStatusHeading"><h2 id="entryStatusHeading">Entry status — works with zero trades</h2><p id="entryStatus" role="status">Connect Binance Demo to load scanning status.</p><small>Shows whether new entries are stopped, waiting for reconciliation, delayed by Binance, or rejected by signal checks. Position checks continue while connected, including during entry-only retries. Exchange outages or rate limits can delay management. Copy scan diagnostics works without trades and without an account refresh.</small><textarea id="scanDiagnosticsText" hidden readonly aria-label="Scan diagnostics" style="width:100%;height:220px"></textarea></section><p id="leverageWindow">1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · Cross · $300 margin per trade · highest fee-compatible Binance leverage · commission ≤ 25% of reference target move and half the normal loss budget; target net ≥ $5 · $6 normal after-fee loss exit / $12 backup target</p><small>Entry direction: BUY requires a rising completed 1m candle and fresh rising bid/ask prices; SELL requires the reverse. Flat or opposing movement waits for a new check. Gainers/losers are candidates, not profit predictions.</small><small>Early loss exit: from $2 net loss, a losing trade can close before -$6 when fresh prices or a strong opposing 1m candle confirm deterioration. Reaching -$2 alone does not trigger a close; fees alone do not qualify. After-fee profit pullbacks: $5 / $8 / $11 / $14 / +$3. Hold while rising; close on return to an armed floor. Beyond -$6, hold only with fresh recovery evidence; exit by the -$12 target. No loss timer or partial reduction. The $20 net session target closes bot positions and stops entries. Manual close remains available.</small>
 <section><h2>Available USDT · margin allocation</h2><b id="budgetValue">Awaiting account</b><small>Uses USDT collateral only; no BTC or USDC conversions. Cross positions share available USDT. Exit thresholds use total trade net after paid commissions, partial-close results, funding and estimated closing fees. The normal -$6 exit needs the engine running. Binance backup targets -$12. These are targets, not guaranteed maximum losses: market gaps, slippage and fees can change the fill. At $20 estimated net after closing fees, all bot positions close and new entries stop.</small></section><div class="metrics"><div class="metric"><small>Combined demo margin value ≈ USDT</small><b id="combined">—</b><small id="balanceNote">Awaiting Binance account</small></div><div class="metric"><small>Available USDT collateral (not combined assets)</small><b id="available">—</b><small id="wallet">—</small></div><div class="metric"><small>Binance unrealized P&amp;L · USDT positions</small><b id="unrealized">—</b><small id="unrealizedNote">Open positions only · before commissions and funding</small></div></div>
-<section><h2 id="sessionHeading">Net trading result · $20 target</h2><b id="session">—</b><small id="sessionNote">Awaiting trading window</small><p id="pnlEquation"></p><small>Reset result to $0 starts a new calculation from now, keeps previous trades archived, and stops Auto. Close positions and clear pending orders first.</small><small>Compare the unrealized box above with Binance unrealized P&amp;L. This net result includes booked trading results and costs; it is a different measure.</small></section><section><h2>Why is my USDT wallet changing?</h2><p id="incomeAudit">Awaiting Binance income history</p><p id="incomeDiagnosis"></p><small>Account-wide USDT realized P&amp;L, commission and funding since the displayed trading-day/reset start. Includes manual trades; excludes transfers, asset resets and other income types. Open profit is not booked profit. This is not a full wallet reconciliation. Share this panel to diagnose losses; never share API keys.</small></section><div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><small id="moversNote">Futures gainers / losers · 1–10m / 15m / 20m / 30m / 60m Bollinger + Williams %R</small><small id="scanTiming">Waiting for scan timings</small><small>Signals use completed candles. Expand each row to see the band and Williams %R check. Signal rules, entry checks and network errors are shown separately; a qualifying signal is not yet a filled order.</small><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th><th>Stage / elapsed time</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
+<section><h2 id="sessionHeading">Net trading result · $20 target</h2><b id="session">—</b><small id="sessionNote">Awaiting trading window</small><div class="actions"><button id="resetResult" type="button" disabled>Reset result to $0</button></div><p id="resultResetMessage" role="status" aria-live="polite"></p><p id="resultResetUpdate" hidden><a href="https://github.com/rzwntm47-art/btc-trading-app/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer">Download the laptop update</a>. Replace demo-execution and render-backend together, run START-LAPTOP.cmd, and reconnect. Your trade data stays saved.</p><p id="pnlEquation"></p><small>Reset starts this counter from $0 and stops Auto. Your trade history, open positions and protective orders are kept. For open positions, only the change in unrealized profit after reset counts.</small><small>Compare the unrealized box above with Binance unrealized P&amp;L. This net result includes booked trading results and costs; it is a different measure.</small></section><section><h2>Why is my USDT wallet changing?</h2><p id="incomeAudit">Awaiting Binance income history</p><p id="incomeDiagnosis"></p><small>Account-wide USDT realized P&amp;L, commission and funding since the displayed trading-day/reset start. Includes manual trades; excludes transfers, asset resets and other income types. Open profit is not booked profit. This is not a full wallet reconciliation. Share this panel to diagnose losses; never share API keys.</small></section><div class="columns"><section><h2 id="scanTitle">Setups · waiting</h2><small id="moversNote">Futures gainers / losers · 1–10m / 15m / 20m / 30m / 60m Bollinger + Williams %R</small><small id="scanTiming">Waiting for scan timings</small><small>Signals use completed candles. Expand each row to see the band and Williams %R check. Signal rules, entry checks and network errors are shown separately; a qualifying signal is not yet a filled order.</small><div class="scroll"><table><thead><tr><th>Coin</th><th>Signal</th><th>Checked</th><th>Stage / elapsed time</th></tr></thead><tbody id="setups"></tbody></table></div></section><section class="exchange-panel"><div class="exchange-tabs"><button id="positionsTab" class="selected">Positions (0)</button><button id="ordersTab">Open Orders (0)</button></div><small id="syncNote">Awaiting Binance</small><div id="positions"></div><div id="orderPanel" hidden><small>Basic orders and conditional TP/SL orders reported by Binance.</small><div class="scroll"><table><thead><tr><th>Symbol / side</th><th>Type</th><th>Price / trigger</th><th>Quantity</th><th>Status</th></tr></thead><tbody id="openOrders"></tbody></table></div></div><small id="pending"></small></section><section><h2>Bot trades</h2><div class="scroll"><table><thead><tr><th>Coin</th><th>Status</th><th>Net income*</th></tr></thead><tbody id="trades"></tbody></table></div><small>*Binance realized P&amp;L, commission and funding for the trade window. Recent results may still be settling.</small></section></div>
 <details><summary>Wallet assets</summary><div class="scroll"><table><thead><tr><th>Asset</th><th>Wallet</th><th>Available</th><th>Margin</th></tr></thead><tbody id="assets"></tbody></table></div></details>
 <p id="browserRequirement"><small>Browser mode: switching tabs or viewing the paper simulator does not stop Demo Auto. Keep this app tab open and the computer awake. Chrome may delay or suspend background work; closing this tab or shutting down cannot automatically close positions. Profit pullback exits and the $20 session close require the engine running. Accepted Binance STOP_MARKET loss exits remain active if the engine stops; they cannot guarantee an exact dollar fill.</small></p><details open><summary>Activity &amp; connection</summary><div id="log"></div></details>
 <details><summary>How this demo works</summary>
-<p>V1.73 keeps Auto enabled while new entries wait for recoverable errors or reconciliation. Open-position checks run before account income checks and during entry-only retry delays. Pending orders and unverified protection still block new entries; exchange-wide rate limits delay all requests. Manual Stop and the $20 session stop remain. Conditional-order ID recovery is preserved. Temporary read failures wait and retry automatically; startup checks must finish before entries resume. Manual Stop cancels retries. Saved stale stops are cleared only after Binance confirms the trade is flat or replacement loss protection is active. No reset or history deletion is needed.</p>
+<p>V1.74 keeps Auto enabled while new entries wait for recoverable errors or reconciliation. Open-position checks run before account income checks and during entry-only retry delays. Pending orders and unverified protection still block new entries; exchange-wide rate limits delay all requests. Manual Stop and the $20 session stop remain. Conditional-order ID recovery is preserved. Temporary read failures wait and retry automatically; startup checks must finish before entries resume. Manual Stop cancels retries. Saved stale stops are cleared only after Binance confirms the trade is flat or replacement loss protection is active. No reset or history deletion is needed.</p>
 <p>The top 20 eligible USDⓈ-M Futures demo gainers are LONG candidates; the top 20 losers are SHORT candidates. Rankings refresh once per minute. Eight rotating candidates and recent qualifying setups repeat continuously, with up to three public checks at once. Rankings describe past 24-hour changes, not future profit. Other coins are not traded by this strategy.</p>
 <p>Independently check completed 1–10 minute candles, plus 15m, 20m, 30m and 60m candles with Bollinger Bands (20-period simple average, two population standard deviations) and Williams %R (14 periods). A LONG needs a lower-band touch on the last two candles, Williams %R at or below -80 on one of those candles, then a rising bullish close back above the lower band with improving %R. SHORT uses the reverse: upper-band touch, %R at or above -20, and a falling bearish close back below the upper band. Williams %R measures price within its recent high-low range; it is not a percentage of buyers or sellers. A band touch alone is not an entry. The 2–4m and 6–10m candles use complete UTC-aligned 1m groups; longer frames use complete 5m groups. Each timeframe is independent. Only two shared candle datasets are needed per coin.</p>
 <p>Do not chase a setup that has already reached the middle band. Check current quotes, spread, fees, exchange limits and fresh 1m direction before entry. Every timeframe requires the latest completed 1m candle to move in the trade direction, with a confirming body and close. A 1m entry also revalidates its Bollinger reversal. Read the minute candles again after exchange settings, then require both bid and ask to have advanced in the trade direction, without reversing during setup. Flat, opposing, stale or overextended prices wait for a fresh check. A forming candle, when returned, must also support the direction. Estimated opening and closing commission must be at most 25% of the gross middle-band reference move, with at least $5 net at that reference and current round-trip commission within half the normal $6 loss budget. If the first timeframe fails sizing, other qualifying timeframes are checked against the same fresh quote. Confirmed commission rates are cached for at most one minute; unavailable or expired fees block that entry without being guessed. Rejected candidates do not turn Auto off. Temporary read failures retry; unknown order outcomes must be reconciled before more entries.</p>
@@ -47,11 +47,11 @@ body{background:#181a20;color:#eaecef}section,details,.metric,th{background:#1e2
 <p>Estimated total trade net = realized partial-close P&amp;L − commissions already paid + funding + remaining P&amp;L at an executable closing price − estimated closing commission. Matched Binance execution history is required. This differs from Binance unrealized P&amp;L, which excludes costs. Unknown costs defer profit exits rather than being treated as zero.</p>
 <p>Profit exits use total net after fees. No profit floor is armed at $5 or below. Once profit exceeds $5, arm a $5 floor; above $8, raise it to $8; above $11, raise it to $11; continue in $3 steps without a profit cap. Hold while profit rises, then close when a fresh net estimate returns to or below the armed floor. For example, a peak of exactly $20 arms $17; a peak above $20 arms $20. The floor never moves down and survives an engine restart. A gap through a floor triggers an exit at the available market price, even if the result is below the intended floor. Old Bollinger profit targets no longer close trades.</p>
 <p>At -$6 total net, close unless fresh 1m and 5m trends, a strong completed 1m candle since entry, and the current executable price support recovery. Recheck that evidence on each loss evaluation; if it weakens or is unavailable, close at the current price. Never extend the target beyond -$12. Install a Binance STOP_MARKET backup targeting -$12, adjusted for paid fees and booked results. The normal -$6 decision and profit floors require the engine running; the exchange backup remains independently active. No loss timer or partial-loss reduction. Existing bot positions migrate without changing size or leverage; the new stop is confirmed before older bot exits are cancelled. Earlier partial-close losses still count. Gaps, slippage, network delays and fees can exceed either target; recovery is not guaranteed.</p>
-<p>At $20 estimated account-wide net after expected closing fees, close all bot positions, including losers, and stop new entries. The decision remains latched while unresolved orders are reconciled. Unmanaged positions are not closed. Final booked net can differ. Updating the website does not update a running laptop connector: replace its files and restart it to load V1.73.</p>
+<p>At $20 estimated account-wide net after expected closing fees, close all bot positions, including losers, and stop new entries. The decision remains latched while unresolved orders are reconciled. Unmanaged positions are not closed. Final booked net can differ. Updating the website does not update a running laptop connector: replace its files and restart it to load V1.74.</p>
 </details>
 </main><script>
 'use strict';
-const APP_VERSION='1.73';
+const APP_VERSION='1.74';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -474,6 +474,7 @@ function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
+    this.resultResetSupported=true;
     this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
@@ -767,6 +768,25 @@ class DemoEngine {
     await this.updateIncome();if(!this.newRules&&!this.experimentActive()&&this.sessionNet()>=SESSION_TARGET){this.state.goal=true;this.save();throw new DemoError('Session goal already reached');}
     if(epoch!==this.stopEpoch)return;
     this.startPending=false;this.entryHold='';this.auto=true;this.retryAt=0;this.retryLimited=false;this.retryAttempt=0;this.block='';this.event(this.bandRules?'Auto enabled · 1–10m / 15m / 20m / 30m / 60m Bollinger (20, 2) + Williams %R (14) · gainers LONG / losers SHORT · $300 margin per entry · highest fee-compatible Binance leverage for that size · $6 normal after-fee loss exit / $12 backup; fresh recovery evidence required beyond $6 · net profit pullbacks $5 / $8 / $11 / +$3 · $'+SESSION_TARGET+' net session target':this.newRules?'Auto enabled · USDⓈ-M Demo · $300 target margin · adaptive 1–10× · net profit floors $2 / $4 / $6 / $8 / $10 / +$5 · trim 25% once at -$3 · close trade at -$5 · $'+SESSION_TARGET+' net session closes bot positions and stops entries':this.experimentActive()?'EXPERIMENT enabled · 50× · available USDT · no automatic exits on new positions until '+new Date(this.experimentUntil).toISOString():'Auto enabled · filtered signals · adaptive 3× / 5× / 8× cross · up to $100 margin per entry · $1,000 budget · $800 total margin cap');
+  }
+  async resetResult(){
+    if(!this.newRules)throw new DemoError('Update the running engine before resetting the result counter.');
+    this.pause('Resetting the net result counter. New entries stopped.');
+    // Only a fresh account/position read is needed. Existing orders and trade
+    // protection remain in place; resetting a counter must not erase ownership.
+    await this.refresh({inventory:false,valuation:false});
+    const previous=this.state,at=Date.now()+this.api.offset,openingUnrealized=this.unrealizedPnl();
+    const sequence=(Number.isSafeInteger(previous.resultResetSequence)?previous.resultResetSequence:0)+1;
+    const record={at,sequence,openingUnrealized,previousStartedAt:previous.startedAt,
+      previousNet:this.lastIncome&&this.incomeWindowStart===previous.startedAt?this.sessionNet():null,
+      previousIncomeAt:this.lastIncome||null};
+    this.state={...previous,startedAt:at,resetAt:at,dayStart:Math.floor((at+14400000)/86400000)*86400000-14400000,
+      dayOpenPnl:openingUnrealized,goal:false,resultResetSequence:sequence,resultResets:[...(previous.resultResets||[]),record]};
+    delete this.state.goalStopAt;delete this.state.goalNet;
+    try{this.save();}catch(error){this.state=previous;throw error;}
+    this.income=[];this.incomeWindowStart=at;this.incomeWindowEnd=at;this.lastIncome=Date.now();this.sessionCloseEstimate=null;this.block='';
+    this.event('Net result counter reset to $0.00. Trades, positions and protective orders kept. Auto stopped.');
+    return {sequence,at,net:this.sessionNet(),openingUnrealized};
   }
   async resetFromBinance(){
     this.pause('Refreshing Binance before reset.');
@@ -1865,7 +1885,7 @@ async function readCredentials(password){
  catch{throw Error('Could not unlock saved credentials. Check your save password.');}
 }
 
-let engine=null,releaseLock=null,connectionBusy=false;
+let engine=null,releaseLock=null,connectionBusy=false,resultResetBusy=false;
 const money=n=>Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
 function line(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');if(v instanceof Node)td.append(v);else td.textContent=String(v??'—');tr.append(td);}parent.append(tr);}
 const expandedSetups=new Set();
@@ -1888,7 +1908,8 @@ function render(){
   $('connect').disabled=connectionBusy||!!e?.api?.key;$('disconnect').disabled=!e?.api?.key||e.busy;
   $('retry').disabled=connectionBusy||!e?.api?.key||e.busy;
   $('start').disabled=!connected||e.controlPending||e.auto||!!e.state.goalStopAt||(!e.newRules&&e.state.goal&&!e.experimentActive());
-  $('resetDemo').disabled=!connected||e.controlPending;
+  $('resetDemo').disabled=!connected||e.controlPending||resultResetBusy;
+  $('resetResult').disabled=$('resetDemo').disabled;
   $('copyTradeReport').disabled=!connected||e.controlPending;
   $('stop').disabled=!connected;$('refresh').disabled=!connected||e.controlPending;
   $('again').hidden=!e?.state?.goalStopAt;
@@ -2103,7 +2124,22 @@ $('forgetSaved').onclick=()=>{
  status('Saved credentials deleted from this browser. An existing connection stays active until Disconnect.');
 };
 
-$('resetDemo').onclick=()=>run(()=>engine.resetFromBinance());
+async function resetResultCounter(){
+ const target=engine;if(!target?.connected||resultResetBusy)return;
+ resultResetBusy=true;$('resultResetUpdate').hidden=true;
+ $('resultResetMessage').textContent='Reset requested. Waiting for the running engine to save the new starting point…';
+ render();$('resultResetMessage').scrollIntoView?.({behavior:'smooth',block:'center'});
+ try{
+  if(!target.resultResetSupported){$('resultResetUpdate').hidden=false;throw Error('The running laptop engine '+(target.appVersion?'V'+target.appVersion:'(version unknown)')+' does not support this counter reset. The updated website alone cannot change it. Install the laptop update below and reconnect.');}
+  let result;const ran=await target.control(async()=>{if(engine!==target)throw Error('Connection changed before reset.');result=await target.resetResult();});
+  if(!ran)throw Error('Another action is pending. Reset was not sent; wait for it to finish, then try again.');
+  if(engine!==target||!target.connected||!result||result.net!==0||result.sequence!==target.state.resultResetSequence||result.at!==target.state.startedAt||target.auto)throw Error('The running engine has not confirmed the new starting point. Sync before retrying.');
+  $('resultResetMessage').textContent='Reset confirmed at '+new Date(result.at).toLocaleTimeString()+': started from $0.00. Only changes after this time count. Auto is stopped.';
+ }catch(error){$('resultResetMessage').textContent='Reset not confirmed: '+error.message;}
+ finally{resultResetBusy=false;render();}
+}
+$('resetDemo').onclick=resetResultCounter;
+$('resetResult').onclick=resetResultCounter;
 
 $('positionsTab').onclick=()=>{ $('positions').hidden=false;$('orderPanel').hidden=true;$('positionsTab').classList.add('selected');$('ordersTab').classList.remove('selected');};
 $('ordersTab').onclick=()=>{ $('positions').hidden=true;$('orderPanel').hidden=false;$('ordersTab').classList.add('selected');$('positionsTab').classList.remove('selected');};
@@ -2138,7 +2174,7 @@ $('copyScanDiagnostics').onclick=async()=>{
 'use strict';
 // Remote views receive snapshots and explicit commands only. They never execute DemoAPI calls.
 const onPhoneController=location.pathname==='/mobile';
-let remoteTransport=null,remotePollBusy=false,pairExpiryTimer;
+let remoteTransport=null,remotePollPromise=null,pairExpiryTimer;
 const PHONE_ORIGIN_KEY='btc_demo_phone_origin';
 function phoneOrigin(value){
   const u=new URL(value);
@@ -2171,10 +2207,11 @@ async function remoteRequest(transport,path,data){
   return result;
 }
 class RemoteDemo extends DemoEngine{
-  constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.transport=transport;}
+  constructor(transport){super({key:'remote-controller',offset:0,clear(){}},null,()=>{});this.remote=true;this.resultResetSupported=false;this.transport=transport;}
   apply(snapshot){
     const wasWaiting=this.needsReconnect;
     if(snapshot.engine)Object.assign(this,snapshot.engine);else Object.assign(this,new RemoteDemo(this.transport));
+    this.resultResetSupported=snapshot.engine?.resultResetSupported===true;
     this.entryHold=snapshot.engine?.entryHold||'';this.lastRiskCheck=snapshot.engine?.lastRiskCheck||null;
     this.appVersion=snapshot.engine?.appVersion||snapshot.connectorVersion||null;this.entryPolicy=snapshot.engine?.entryPolicy||null;this.scanAudit=snapshot.engine?.scanAudit||null;this.lastScan=snapshot.engine?.lastScan||0;this.lastContact=Date.now();this.lastServerAt=snapshot.serverAt;this.api.offset=snapshot.serverAt-Date.now();this.transport.generation=snapshot.generation;
     const needsReconnect=!snapshot.engine&&!snapshot.connecting&&!snapshot.restarting;
@@ -2196,7 +2233,10 @@ class RemoteDemo extends DemoEngine{
     while(entry.status==='pending'&&Date.now()<until){await new Promise(r=>setTimeout(r,750));entry=await remoteRequest(this.transport,'/command?id='+encodeURIComponent(id));}
     if(entry.status==='pending')throw Error('Action is still running on the laptop. Sync before trying another command.');
     if(entry.status==='error')throw Error(entry.error);
-    await pollRemote();return entry.report;
+    // A poll already in flight may contain the pre-command state. Wait for it,
+    // then read a fresh snapshot before reporting the command as confirmed.
+    if(remotePollPromise)await remotePollPromise;
+    await pollRemote();return entry.reset??entry.report;
   }
   async control(fn){if(this.localControl)return false;this.localControl=true;try{await fn();return true;}finally{this.localControl=false;}}
   start(){return this.command('start');}
@@ -2211,19 +2251,26 @@ class RemoteDemo extends DemoEngine{
   close(symbol){return this.command('close',{symbol});}
   again(){return this.command('again');}
   resetFromBinance(){return this.command('reset');}
+  resetResult(){return this.command('resetResult');}
   freshTradeReport(){return this.command('report');}
   tick(){return pollRemote();}
 }
 async function pollRemote(){
-  if(!remoteTransport||remotePollBusy)return;remotePollBusy=true;
+  if(!remoteTransport)return;if(remotePollPromise)return remotePollPromise;
+  const transport=remoteTransport;
+  remotePollPromise=(async()=>{
   try{
-    const snapshot=await remoteRequest(remoteTransport,'/status');
-    if(!engine?.remote)engine=new RemoteDemo(remoteTransport);
+    const snapshot=await remoteRequest(transport,'/status');
+    if(remoteTransport!==transport)return;
+    if(!engine?.remote)engine=new RemoteDemo(transport);
     engine.apply(snapshot);
   }catch(error){
+    if(remoteTransport!==transport)return;
     if(engine?.remote){engine.connected=false;engine.auto=false;render();}
     status('LAPTOP CONNECTION LOST · '+error.message+' The laptop may still be trading; no stop is confirmed.');pairMessage(error.message);
-  }finally{remotePollBusy=false;}
+  }finally{remotePollPromise=null;}
+  })();
+  return remotePollPromise;
 }
 async function attachBackground(transport,snapshot){
   remoteTransport=transport;engine=new RemoteDemo(transport);engine.apply(snapshot);

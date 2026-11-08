@@ -23,7 +23,7 @@ async function body(req){
   let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2*1024*1024)throw Error('Request too large');}
   return JSON.parse(raw);
 }
-const SNAPSHOT_FIELDS=['appVersion','bandRules','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','entryHold','lastRiskCheck','retryLimited','startPending','retryAt','retryAttempt','accountingUpdateRequired','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
+const SNAPSHOT_FIELDS=['resultResetSupported','appVersion','bandRules','entryPolicy','sessionCloseEstimate','scanAudit','lastScan','marketContext','scanStats','entryTiming','state','connected','tradingReady','auto','entryHold','lastRiskCheck','retryLimited','startPending','retryAt','retryAttempt','accountingUpdateRequired','busy','controlPending','account','accountAt','positions','positionAt','orders','algos','ordersAt','scopedOrders','symbols','cursor','scanned','scanChecked','moversNote','income','lastIncome','incomeWindowStart','incomeWindowEnd','events','block','balance','newRules'];
 function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine=DemoEngine,intervalMs=1000,restartTimeoutMs=30000}={}){
   let engine=null,connecting=false,restarting=false,lastError='',pair=null,origin='',connectId='',generation=random();
   const sessions=new Map(),commands=new Map();
@@ -71,7 +71,7 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
     const dedupe=owner+':'+input.id;
     if(commands.has(dedupe))return commands.get(dedupe);
     if(!engine?.connected||connecting)throw Error('Laptop is not connected to Binance Demo.');
-    if(!['start','startTrial','endTrial','stop','refresh','close','again','reset','report','disconnect'].includes(input.action))throw Error('Unsupported command');
+    if(!['start','startTrial','endTrial','stop','refresh','close','again','reset','resetResult','report','disconnect'].includes(input.action))throw Error('Unsupported command');
     const e=engine,entry={id:input.id,status:'pending',action:input.action,at:now()};commands.set(dedupe,entry);
     if(commands.size>500)for(const [k,v] of commands)if(v.status!=='pending'){commands.delete(k);if(commands.size<=400)break;}
     if(input.action==='stop'){e.pause('Stopped from remote controls. Existing protective exits remain.');entry.status='done';return entry;}
@@ -85,6 +85,7 @@ function createDesktop({token,dataDir=DATA_DIR,fetcher=fetch,now=Date.now,Engine
         if(input.action==='close'){if(!/^[A-Z0-9]+USDT$/.test(input.symbol||'')||!e.owned(input.symbol))throw Error('Only this bot’s positions can be closed.');await e.close(input.symbol);}
         if(input.action==='again')await e.again();
         if(input.action==='reset')await e.resetFromBinance();
+        if(input.action==='resetResult')entry.reset=await e.resetResult();
         if(input.action==='report')entry.report=await e.freshTradeReport();
         if(input.action==='disconnect'){e.pause();e.api.clear();engine=null;revokePhones();generation=random();}
       },['start','startTrial'].includes(input.action)?'start':'action');

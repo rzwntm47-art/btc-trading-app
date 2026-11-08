@@ -46,6 +46,13 @@ test('laptop Reset publishes a zero result to both controllers and persists the 
  for(const s of [laptop,phone]){assert.equal(s.income.length,0);assert.equal(s.state.startedAt,s.state.resetAt);assert.equal(s.incomeWindowStart,s.state.resetAt);assert.ok(s.lastIncome);assert.equal(s.auto,false);assert.equal(s.entryPolicy.sessionTarget,20);}
  assert.equal(app.snapshot().pairedDevices,1);const journal=JSON.parse(fs.readFileSync(path.join(dataDir,fs.readdirSync(dataDir).find(x=>x.startsWith('journal-'))),'utf8'));assert.equal(journal.startedAt,laptop.state.startedAt);
 }));
+test('phone and laptop counter reset preserves owned trades and orders and is idempotent per command',()=>fixture(async({app,request,connect,pair})=>{
+ await connect();const p=await pair(),e=FakeEngine.last;e.auto=true;e.income=[{income:'-39.44',incomeType:'REALIZED_PNL'}];e.positions=[{symbol:'BTCUSDT',positionAmt:'1',unRealizedProfit:'-2'}];e.orders=[{symbol:'BTCUSDT',orderId:8}];e.algos=[{symbol:'BTCUSDT',algoId:9}];const record={id:'bd1_keep',symbol:'BTCUSDT',side:'BUY',entryStatus:'FILLED',profitFloor:5};e.state.records=[record];
+ const input={id:'counter-reset-01234567',action:'resetResult',csrf:p.csrf},options={mobile:true,cookie:p.cookie};
+ await request('/mobile/command',input,options);let result;for(let i=0;i<100;i++){result=(await request('/mobile/command?id='+input.id,undefined,options)).json;if(result.status!=='pending')break;await delay(2);}assert.equal(result.status,'done',result.error);assert.equal(result.reset.net,0);assert.equal(result.reset.openingUnrealized,-2);
+ const sequence=result.reset.sequence;await request('/mobile/command',input,options);assert.equal(e.state.resultResetSequence,sequence);assert.equal(e.state.records[0],record);assert.equal(e.orders.length,1);assert.equal(e.algos.length,1);assert.equal(e.auto,false);assert.equal(e.closes,0);assert.equal(e.starts,0);
+ for(const snapshot of [(await request('/host/status')).json,(await request('/mobile/status',undefined,options)).json]){assert.equal(snapshot.engine.resultResetSupported,true);assert.equal(snapshot.engine.state.resultResetSequence,sequence);assert.equal(snapshot.engine.income.length,0);assert.equal(snapshot.engine.state.dayOpenPnl,-2);}
+}));
 test('restart requires local authentication and matching generation; phone routes cannot restart',()=>fixture(async({app,request,connect,pair})=>{
  await connect();const p=await pair(),generation=app.snapshot().generation;
  assert.equal((await request('/host/restart',{generation},{auth:'wrong'})).status,401);
@@ -143,7 +150,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.73');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:20,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.74');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:20,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{
