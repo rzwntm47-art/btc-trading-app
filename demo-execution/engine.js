@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.70';
+const APP_VERSION='1.71';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -258,7 +258,7 @@ function entryMomentum(raw,side,now){
   const mean=n=>bars.slice(-n).reduce((sum,b)=>sum+number(b[4]),0)/n;
   const buy=side==='BUY',fast=mean(5),slow=mean(20);
   const atr=bars.slice(-20).reduce((sum,b,i)=>sum+Math.max(number(b[2])-number(b[3]),Math.abs(number(b[2])-number(bars[bars.length-21+i][4])),Math.abs(number(b[3])-number(bars[bars.length-21+i][4]))),0)/20;
-  const evidence={atr,close,open,fast,slow,previousClose:number(previous[4]),threeBarsAgo:number(bars.at(-4)[4]),closedAt:number(last[6]),side};
+  const evidence={atr,close,open,fast,slow,body:range>0?Math.abs(close-open)/range:0,closeStrength:range>0?(buy?close-low:high-close)/range:0,previousClose:number(previous[4]),threeBarsAgo:number(bars.at(-4)[4]),closedAt:number(last[6]),side};
   if(!(buy?close>open&&close>number(previous[4])&&close>fast&&fast>slow:close<open&&close<number(previous[4])&&close<fast&&fast<slow))return {...evidence,reason:'Latest 1m movement no longer confirms '+side};
   if(range<=0||Math.abs(close-open)/range<.4||(buy?(close-low)/range:(high-close)/range)<.65)return {...evidence,reason:'Latest 1m candle body/close does not confirm '+side};
   return evidence;
@@ -293,13 +293,19 @@ function earlyLossDecision(r,quote,now,observations=[],momentum=null){
 }
 function entryConfirmation(raw,signal,now){
   const current=entryMomentum(raw,signal.side,now),minutes=(signal.intervalMs||300000)/60000;
-  if(signal.setupType==='bollinger-wr'&&minutes===1){
+  if(signal.setupType==='bollinger-wr'){
     // A lower-band rebound is below the 20-close middle by definition. Requiring
     // the momentum strategy's close > fast > slow here would reject every LONG
     // (and the mirrored SHORT). Revalidate the actual reversal strategy instead.
-    let reason;
-    const fresh=bollingerSetup(raw,signal.side,now,r=>reason=r,60000);
-    return {...current,reason:fresh?null:'Latest 1m band setup: '+reason,signalMinutes:1,confirmation:'Fresh Bollinger / Williams %R reversal'};
+    if(minutes===1){
+      let reason;
+      if(!bollingerSetup(raw,signal.side,now,r=>reason=r,60000))return {...current,reason:'Latest 1m band setup: '+reason,signalMinutes:1};
+    }
+    if(!(current.atr>0)||!Number.isFinite(current.closedAt))return current;
+    const sign=signal.side==='BUY'?1:-1;
+    if(sign*(current.close-current.open)<=0||sign*(current.close-current.previousClose)<=0||current.body<.4||current.closeStrength<.65)
+      return {...current,signalMinutes:minutes,reason:'Current 1m direction does not confirm '+signal.side+'; wait for a strong closed candle in the trade direction'};
+    return {...current,reason:null,signalMinutes:minutes,confirmation:'Closed 1m candle confirms '+signal.side+'; live continuation still required'};
   }
   if(minutes<=1||!current.reason)return {...current,signalMinutes:minutes};
   if(!(current.atr>0)||!Number.isFinite(current.closedAt))return current;
@@ -311,6 +317,32 @@ function entryConfirmation(raw,signal,now){
   const sustained=sign*(current.close-current.threeBarsAgo)<=-.8*current.atr;
   if(sharp||(opposing&&sustained))return {...current,reason:'Current 1m reversal opposes the '+minutes+'m '+signal.side+' setup'};
   return {...current,reason:null,signalMinutes:minutes,confirmation:'Small 1m pullback allowed; selected timeframe and price boundary remain valid'};
+}
+function bandEntryLiveCheck(before,quote,momentum,{symbol,side,tick,now,raw,checkpoint}){
+  const sign=side==='BUY'?1:side==='SELL'?-1:0;
+  const evidence={checkedAt:now,side,baseline:before,quote,oneMinute:momentum};
+  const reject=reason=>({...evidence,reason});
+  if(!sign||!(Number(tick)>0)||!momentum||momentum.reason||!(momentum.atr>0)||!Number.isFinite(momentum.closedAt)||momentum.closedAt>=now||now-momentum.closedAt>75000)return reject('Fresh aligned 1m evidence required before entry');
+  for(const q of [before,quote])if(!q||q.symbol!==symbol||![q.bidPrice,q.askPrice,q.time].every(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)))||!(Number(q.bidPrice)>0)||Number(q.askPrice)<Number(q.bidPrice))return reject('Fresh valid bid and ask observations required before entry');
+  const firstAt=Number(before.time),lastAt=Number(quote.time);
+  if(firstAt>now||now-firstAt>10000||lastAt>now||now-lastAt>5000||lastAt<=firstAt)return reject('Waiting for two fresh, distinct market quotes; no entry from stale or repeated prices');
+  const minimumMove=Math.max(2*Number(tick),.05*momentum.atr),bidMove=sign*(Number(quote.bidPrice)-Number(before.bidPrice)),askMove=sign*(Number(quote.askPrice)-Number(before.askPrice));
+  Object.assign(evidence,{minimumMove,bidMove,askMove});
+  if(bidMove+1e-10<minimumMove||askMove+1e-10<minimumMove)return reject('Waiting for both bid and ask to move '+(side==='BUY'?'up before BUY':'down before SELL')+'; flat, opposing or spread-only moves do not qualify');
+  if(checkpoint&&(Number(checkpoint.time)<firstAt||Number(checkpoint.time)>lastAt))return reject('Market quote timestamps arrived out of order; wait for fresh direction evidence');
+  if(checkpoint&&(sign*(Number(quote.bidPrice)-Number(checkpoint.bidPrice))<-1e-10||sign*(Number(quote.askPrice)-Number(checkpoint.askPrice))<-1e-10))return reject('Live direction reversed during exchange settings; waiting for a new setup check');
+  if(checkpoint)evidence.beforeSettings=checkpoint;
+  const executable=Number(side==='BUY'?quote.bidPrice:quote.askPrice),distance=sign*(executable-momentum.close);
+  if(distance<-1e-10)return reject('Live price reversed beyond the latest closed 1m price');
+  if(distance>.75*momentum.atr+1e-10)return reject('Live move is too extended from the latest 1m candle; do not chase');
+  const last=raw?.at(-1);
+  if(last&&Number(last[6])>=now){
+    const [start,open,high,low,close,volume,end]=last.map(Number);
+    if(![start,open,high,low,close,volume,end].every(Number.isFinite)||start!==momentum.closedAt+1||start>now||end-start!==59999||!(low>0)||high<low||open<low||open>high||close<low||close>high||volume<0)return reject('Current forming 1m candle is invalid');
+    evidence.forming={start,open,high,low,close,end};
+    if(sign*(close-open)<=0||sign*(executable-open)<=0)return reject('Current forming 1m candle is flat or moving against '+side);
+  }
+  return {...evidence,reason:null,confirmation:'Fresh closed candle and both live quotes confirm '+side};
 }
 function profitFloor(peak){if(!Number.isFinite(peak)||peak<=4)return null;if(peak>32)return 32+5*Math.max(0,Math.ceil((peak-32)/5)-1);let floor=4;while(peak>floor*2)floor*=2;return floor;}
 function exitPrice(entry,qty,fee,target,side,tick){
@@ -390,7 +422,7 @@ function bollingerSetup(raw,side,now,explain=()=>{},intervalMs=300000){
 class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
-    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -581,7 +613,7 @@ class DemoEngine {
     else if(!this.symbols.length)status='No eligible markets have been loaded.';
     else if(elapsed!==null&&elapsed>90)status='No completed coin check for '+elapsed+' seconds. '+(this.block||this.entryOutcome||'Check connection and last scan times.');
     else status='Auto scanning. '+(audit?audit.checked+' completed coin checks; '+audit.qualified+' candle setups; '+audit.submitted+' confirmed order submissions; '+audit.skipped+' entry skips; '+(audit.entryErrors||0)+' entry errors; '+audit.dataErrors+' data errors. Reasons: '+(audit.appFiltered||0)+' app filters; '+(audit.readUnavailable||0)+' entry-data failures; '+(audit.exchangeRejected||0)+' Binance order rejections.':'Detailed counters unavailable from this engine.')+(audit?.lastResult?' Latest: '+audit.lastResult.symbol+' — '+audit.lastResult.reason:' Waiting for first completed check.');
-    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,entryHold:this.entryHold||null,lastRiskCheck:this.lastRiskCheck||null,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,entryResult:s.entryResult||null,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
+    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,entryHold:this.entryHold||null,lastRiskCheck:this.lastRiskCheck||null,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,entryResult:s.entryResult||null,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates,entryDirection:s.entryDirection||null})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
   }
   tradeReport(){
     const now=Date.now(),incomeReady=!!this.lastIncome&&this.incomeWindowStart===this.state.startedAt;
@@ -870,10 +902,13 @@ class DemoEngine {
     if(Date.now()-this.metaAt>900000)throw new DemoError('Exchange filters expired. Reconnect to refresh.');
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return skip('Market-order filters unavailable');
-    let momentum,minuteBars;
+    let momentum,minuteBars,directionBaseline,directionCostQuote;
     if(this.newRules){
       progress('Reading current 1m movement for timeframe-aware entry checks');
-      try{minuteBars=await this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false);breakout(minuteBars,Date.now()+this.api.offset,60000);}
+      try{
+        [minuteBars,directionBaseline]=await Promise.all([this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false),band?this.entryRead('/fapi/v1/ticker/bookTicker',{symbol},false):null]);
+        breakout(minuteBars,Date.now()+this.api.offset,60000);
+      }
       catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skipRead('1m entry check unavailable; scanning continues: '+error.message,error);}
     }
     progress('Checking current entry price');
@@ -945,6 +980,7 @@ class DemoEngine {
         candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
         if(!selection.signal)return skip('No fee-compatible leverage for $300 margin: '+candidateChecks.map(c=>c.minutes+'m '+c.reason).join(' | ')+'; scanning continues');
         signal=selection.signal;momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset);
+        directionCostQuote={...quote};
         if(row){row.intervalMs=signal.intervalMs;row.candleClosedAt=signal.close;}
         progress('Selected '+signal.intervalMs/60000+'m after full cost and sizing checks');
       }catch(error){if(error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;return skipRead('Leverage cost check unavailable; scanning continues: '+error.message,error);}
@@ -1019,12 +1055,25 @@ class DemoEngine {
     if(this.newRules){
       progress('Checking current spread, mark price and entry exposure');
       try{
+        if(band){
+          // Uncached re-read after exchange settings: the candle can reverse or
+          // roll over while leverage and margin checks are awaiting responses.
+          minuteBars=await this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false);
+          momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset);
+          if(momentum.reason)return skip('Final direction check: '+momentum.reason);
+          if(!this.auto||this.entryHold||epoch!==this.stopEpoch||this.controlPending)return skip('Auto or manual action changed during final direction check');
+        }
         const [quote,currentMark]=await Promise.all([this.entryRead('/fapi/v1/ticker/bookTicker',{symbol},false),this.entryRead('/fapi/v1/premiumIndex',{symbol},false)]);
         const quotedPrice=number(signal.side==='BUY'?quote.askPrice:quote.bidPrice);
         if(quotedPrice<=0)return skip('Invalid entry quote; scanning continues');
         ({quantity,qty,notional}=minimumPlan(selectedLeverage,quotedPrice,flexible?number(leverage.maxNotionalValue):Infinity));
         quoteEvidence=entryQuoteCheck(quote,currentMark,{symbol,side:signal.side,qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
         if(quoteEvidence.reason)return skip(quoteEvidence.reason+'; scanning continues');
+        if(band){
+          quoteEvidence.liveDirection=bandEntryLiveCheck(directionBaseline,quote,momentum,{symbol,side:signal.side,tick:priceFilter.tickSize,now:Date.now()+this.api.offset,raw:minuteBars,checkpoint:directionCostQuote});
+          const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryDirection=quoteEvidence.liveDirection;
+          if(quoteEvidence.liveDirection.reason)return skip(quoteEvidence.liveDirection.reason+'; scanning continues');
+        }
         if(band&&quoteEvidence.estimatedRoundTripFees>lossLimit*.5+1e-8)return skip('Fresh quote commission exceeds half the normal loss budget; scanning continues');
         quoteEvidence.estimatedLossAtOneAtr=Math.max(0,-quoteEvidence.estimatedImmediateExitNet,-quoteEvidence.estimatedMarkNet)+qty*(momentum?.atr||0)*(1+fee);
         if(!band&&quoteEvidence.estimatedLossAtOneAtr>ENTRY_VOLATILITY_ALLOWANCE+1e-8)return skip('Fresh spread, mark movement and one recent 1m ATR exceed the entry sizing allowance; scanning continues');
@@ -1723,6 +1772,7 @@ class DemoEngine {
     }catch(e){this.handleRunError(e);}finally{this.busy=false;this.notify();}
   }
 }
-if(typeof module!=='undefined')module.exports={SESSION_TARGET,earlyLossDecision,bandEntryCosts,steppedProfitFloor,APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
+if(typeof module!=='undefined')module.exports={bandEntryLiveCheck,SESSION_TARGET,earlyLossDecision,bandEntryCosts,steppedProfitFloor,APP_VERSION,BAND_TIMEFRAMES,bollingerSnapshot,bollingerSetup,trialProfitFloor,netProfitFloor,entryConfirmation,selectEntryCandidate,ENTRY_MARGIN,MAX_ENTRY_LEVERAGE,candleTrend,momentumSetup,entryPriceReason,signalLeverageCeiling,DemoAPI,DemoEngine,DemoError,rounded,breakout,twoMinuteBars,aggregateMinutes,aggregateFiveMinuteBars,qualifySetup,experimentSignal,profitFloor,recoverySignal,entryMomentum,entryQuoteCheck,adaptiveLeveragePlan,exitPrice,combinedValue,DEMO_BASE};
+
 
 

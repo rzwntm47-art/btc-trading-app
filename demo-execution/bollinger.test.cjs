@@ -149,7 +149,7 @@ for(const available of [250,300.001])test('available '+available+' cannot shrink
  await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.equal(f.e.auto,true);assert.match(f.e.entryOutcome,/margin.*fees/);
 });
 test('quantity rounding targets $300 at the final quote within one exchange lot step',async()=>{
- const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/ticker/bookTicker'?{symbol,bidPrice:'100.003',askPrice:'100.003',bidQty:'10000',askQty:'10000',time:Date.now()}:base(m,p,q,s);
+ const f=bandFixture(),base=f.api.call;let reads=0;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/ticker/bookTicker'&&++reads>1?{symbol,bidPrice:'100.003',askPrice:'100.003',bidQty:'10000',askQty:'10000',time:Date.now()}:base(m,p,q,s);
  await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol);assert.ok(r,f.e.entryOutcome);assert.ok(r.estimatedEntryMargin>=300&&r.estimatedEntryMargin<300+.001*100.003/r.leverage);assert.equal(r.leverage,20);
 });
 test('migration changes $2 backup to $12 and preserves entry evidence without adding margin',async()=>{
@@ -241,7 +241,7 @@ test('when even 1x fees reach the stop, no leverage write or order is sent and A
 });
 test('a worsening final quote after leverage selection cannot submit an unsafe entry',async()=>{
  const f=bandFixture(),base=f.api.call;let reads=0;f.api.call=async(m,p,q,s)=>{
-  if(p==='/fapi/v1/ticker/bookTicker'&&++reads===2)return {symbol,bidPrice:'99',askPrice:'101',bidQty:'1000',askQty:'1000',time:Date.now()};return base(m,p,q,s);
+  if(p==='/fapi/v1/ticker/bookTicker'&&++reads===3)return {symbol,bidPrice:'99',askPrice:'101',bidQty:'1000',askQty:'1000',time:Date.now()};return base(m,p,q,s);
  };
  await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/spread.*fees.*loss target/);assert.equal(f.e.auto,true);
 });
@@ -261,3 +261,4 @@ test('a 60m signal is derived from complete 5m groups with its own freshness bou
  const bars=await f.e.bandCandles(symbol,60),signal=bollingerSetup(bars,'SELL',Date.now(),()=>{},3600000);assert.ok(signal);assert.equal(signal.close,rows.at(-1)[6]);assert.equal(signal.intervalMs,3600000);
  assert.equal(bollingerSetup(bars,'SELL',Date.now()+7200000,()=>{},3600000),null);
 });
+

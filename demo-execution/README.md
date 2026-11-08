@@ -1,3 +1,19 @@
+## V1.71 — fresh direction required before entry
+
+The 24-hour movers list remains a candidate list. The prior longer-timeframe Bollinger check could permit a small opposing 1m candle, and the final order gate reused the earlier minute-candle assessment. V1.71 requires an aligned completed 1m candle for every Bollinger timeframe and reads uncached 1m candles again after exchange settings, before fetching the final bid/ask. This is a targeted entry change; existing position management, $300 margin, fee limits, leverage selection, $2–$6 early loss exit, $6/$12 loss rules, profit floors and $20 session target remain.
+
+- A BUY needs the latest closed minute's close above its open and previous close; SELL mirrors this. Body must occupy at least 40% of the candle range, with the close in the directional 35% of that range. A 1m Bollinger entry must also retain its original reversal setup. No contradictory requirement to be above/below the Bollinger middle is added.
+- Capture a baseline best bid/ask during initial direction checks. At final dispatch, both must have advanced at least the greater of two ticks or 5% of the recent 1m ATR. The baseline must be no more than 10 seconds old; the final quote no more than 5 seconds old, with a distinct later transaction time. The final quote cannot reverse against the intermediate quote used for sizing. Duplicate, out-of-order, invalid and stale observations skip the trade without an order or journal entry.
+- The executable closing side of the final quote must not be adverse to the latest closed 1m close, or more than 0.75 ATR beyond it. If a forming 1m candle is returned, validate its OHLC and time and require its body and executable price to agree with the entry direction. The forming candle is a veto, never a replacement for completed-candle confirmation.
+- Missing final candle/quote data skips the entry; authentication and rate-limit handling remain authoritative. Stop and queued manual actions still cancel dispatch. Recheck size, fees, spread, signal price boundaries and net target room using the final quote.
+- Store `entryEvidence.liveDirection` in the trade report, show the entry confirmation on position cards, and include skipped-entry evidence in scan diagnostics. Existing positions and persisted trade history are not reset. Quotes are observations, not a forecast; spread and commissions can make a new trade net-negative, and subsequent prices/fills can still lose.
+
+Validation uses synthetic market data and exchange mocks, including rising/falling prices, reversals during setup, stale and repeated quotes, spread-only moves, failed final reads, manual Stop and existing exits. These checks do not establish profitability or explain a specific historical loss without its trade report. No recent account report was available during this review.
+
+Activation: refresh and reconnect browser mode. For laptop/background mode, replace the current code folders while preserving journals/data, restart `START-LAPTOP.cmd`, reconnect and verify the running engine shows V1.71. Publishing the site does not update a laptop process.
+
+Market data fields: [Binance Futures market data documentation](https://developers.binance.info/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data).
+
 ## V1.70 — $20 net session target
 
 The net trading result and automatic session close-and-stop target are now $20 after expected closing fees. Entry and exit strategies, $2–$6 early loss exits, session locks and history are unchanged. Refresh/reconnect browser mode; update the laptop files and restart START-LAPTOP.cmd for background mode. Older laptop connectors continue to show their actual target until updated.
@@ -123,4 +139,5 @@ The current `render-backend/server.cjs` allows the signed Demo-only `GET /fapi/v
 Deterministic tests cover mirrored LONG/SHORT qualification, fixed-margin maximum-leverage sizing, stepped profit exits, fresh recovery checks, $6/$12 loss exits, migration, paid fees, manual controls, leverage/capacity errors, read recovery, unknown writes, mobile snapshots and old-connector detection. These verify execution behavior, not profitability.
 
 Indicator references: [John Bollinger's rules](https://www.bollingerbands.com/bollinger-band-rules), [Bollinger Bands calculation](https://www.bollingerbands.com/bollinger-bands), [Williams %R](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/williams-r).
+
 

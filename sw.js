@@ -1,5 +1,5 @@
 'use strict';
-const CACHE='btc-dashboard-v1.70-static';
+const CACHE='btc-dashboard-v1.71-static';
 const BASE=new URL('./',self.location.href);
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png'].map(path=>new URL(path,BASE).href);
 const DEMO=new URL('./demo-connect.html',BASE).href;
@@ -30,4 +30,5 @@ self.addEventListener('fetch',event=>{
     }
   })());
 });
+
 

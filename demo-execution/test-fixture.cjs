@@ -21,15 +21,19 @@ function lowVolatility(f){
  const base=f.api.call;f.api.call=async(m,p,q,s)=>p==='/fapi/v1/klines'?entryBars(f.signal.side,Date.now(),.1):p==='/fapi/v1/commissionRate'?{takerCommissionRate:'.00001'}:base(m,p,q,s);
 }
 function fixture(){
-  let position=null,orders=new Map(),algos=new Map(),calls=[],trades=[],fillPrice=100,unknownEntry=false,failProtection=false,failClose=false;
+  let position=null,orders=new Map(),algos=new Map(),calls=[],trades=[],fillPrice=100,unknownEntry=false,failProtection=false,failClose=false,entryQuoteReads=0;
   const api={offset:0,call:async(method,path,p={},signed=true)=>{
     calls.push({method,path,p,signed});
+    if(path==='/fapi/v3/account'&&!e.owned(symbol))entryQuoteReads=0;
     if(path==='/fapi/v3/account')return {assets:[{asset:'USDT',walletBalance:'5000',availableBalance:'5000',marginBalance:'5000'}],positions:position?[{...position,unrealizedProfit:position.unRealizedProfit}]:[]};
     if(path==='/fapi/v3/positionRisk')return position?[position]:[];
     if(path==='/fapi/v1/openOrders')return [];
     if(path==='/fapi/v1/openAlgoOrders')return [...algos.values()].filter(x=>x.algoStatus==='NEW');
     if(path==='/fapi/v1/assetIndex')return [{symbol:'USDTUSD',index:'1',time:Date.now()}];
-    if(path==='/fapi/v1/ticker/bookTicker')return {symbol,bidPrice:'100',askPrice:'100',bidQty:'1000',askQty:'1000',time:Date.now()};
+    if(path==='/fapi/v1/ticker/bookTicker'){
+      const baseline=e.newRules&&e.bandRules&&!e.owned(symbol)&&++entryQuoteReads===1,price=baseline?100-(signal.side==='BUY'?1:-1)*.08:100;
+      return {symbol,bidPrice:String(price),askPrice:String(price),bidQty:'1000',askQty:'1000',time:Date.now()-(baseline?1000:0)};
+    }
     if(path==='/fapi/v1/premiumIndex')return {markPrice:'100',time:Date.now()};
     if(path==='/fapi/v1/klines')return entryBars(signal.side);
     if(path==='/fapi/v1/commissionRate')return {takerCommissionRate:'.0005'};
@@ -79,3 +83,4 @@ function setTradeNet(f,target,{mark=true}={}){
 }
 
 module.exports={fixture,entryBars,continuationBars,lowVolatility,closingQuote,reductionPosts,setTradeNet,now,symbol};
+

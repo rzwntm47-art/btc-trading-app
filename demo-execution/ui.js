@@ -72,7 +72,7 @@ function render(){
   }
   if(policy?.profitExit==='stepped-net-trailing'){
     const frames=policy.timeframes.map(m=>m+'m').join(' / ');
-    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit'+(policy.maxCommissionShare?' · commission ≤ '+(policy.maxCommissionShare*100)+'% of reference target move and ≤ half the normal loss budget; target net ≥ $'+policy.minimumNetAtTarget:'')+(policy.earlyLossExit?' · $2–$6 early loss exit on confirmed adverse movement':'')+' · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
+    $('leverageWindow').textContent=frames+' Bollinger / Williams %R entries · $300 margin · highest leverage fitting the $6 normal loss exit'+(policy.maxCommissionShare?' · commission ≤ '+(policy.maxCommissionShare*100)+'% of reference target move and ≤ half the normal loss budget; target net ≥ $'+policy.minimumNetAtTarget:'')+(policy.entryDirection?' · BUY only with fresh upward movement / SELL only with fresh downward movement':'')+(policy.earlyLossExit?' · $2–$6 early loss exit on confirmed adverse movement':'')+' · after-fee profit floors $5 / $8 / $11 / +$3 · normal loss $6; recovery extension up to $12';
     $('budgetValue').textContent='Available demo USDT: $'+money(Number(e.account?.assets.find(a=>a.asset==='USDT')?.availableBalance))+' · Position margin: $'+money(capital.reserved)+' · $5,000 total margin budget · $300 per entry; no smaller orders · $12 Binance backup loss target; $6 exit and recovery checks need the engine running';
   }
   $('combined').textContent=e.balance===null?'Unavailable':e.balance.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
@@ -117,6 +117,7 @@ function render(){
     const exits=e.algos.filter(a=>a.symbol===p.symbol),note=document.createElement('small');note.textContent='TP / SL: '+(exits.map(a=>(a.orderType||a.type||'Conditional')+' '+(a.triggerPrice??a.stopPrice??'—')).join(' · ')||'No open conditional orders in last sync');card.append(note);
     if(r&&e.exitsSuspended(r)){const warning=document.createElement('p');warning.textContent='NO AUTOMATIC EXITS during experiment · restore after '+new Date(r.experimentUntil).toLocaleString()+' while app is connected';warning.className='bad';card.append(warning);}
     if(r?.sizingNote){const sizing=document.createElement('p');sizing.textContent=r.sizingNote;card.append(sizing);}
+    if(r?.entryEvidence?.liveDirection?.confirmation){const direction=document.createElement('small');direction.textContent='At entry: '+r.entryEvidence.liveDirection.confirmation+' · '+new Date(r.entryEvidence.liveDirection.checkedAt).toLocaleTimeString();card.append(direction);}
     if(r?.exitPolicy==='bollinger-targets'){
       field(grid,'Estimated total net after fees',money(r.netEstimate),Number.isFinite(r.netEstimate)?(r.netEstimate<0?'bad pnl':'good pnl'):'');
       field(grid,'Signal timeframe',((r.bandTargets?.intervalMs??r.signal?.intervalMs??300000)/60000)+'m');
@@ -287,4 +288,5 @@ $('copyScanDiagnostics').onclick=async()=>{
   try{await navigator.clipboard.writeText(text);$('entryStatus').textContent='Scan diagnostics copied — no trades or account refresh required.';}
   catch{$('scanDiagnosticsText').value=text;$('scanDiagnosticsText').hidden=false;$('scanDiagnosticsText').focus();$('scanDiagnosticsText').select();$('entryStatus').textContent='Select and copy the scan diagnostics shown below. No trades are required.';}
 };
+
 
