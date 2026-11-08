@@ -1,3 +1,7 @@
+## V1.73 — zero the result when Reset succeeds
+
+Update `demo-execution` and `render-backend` together, run `START-LAPTOP.cmd`, and reconnect. **Reset result to $0** saves a fresh session boundary and broadcasts the zero result to laptop and phone immediately. Previous bot records stay archived, the wallet is unchanged, and Auto stays stopped. Existing flat-position and pending-order checks remain. Later refreshes query only the new result window; late responses cannot restore the prior loss. The $20 target and all trading rules are unchanged.
+
 ## V1.72 — laptop restart and reconnection
 
 Run `START-LAPTOP.cmd` from the fully extracted project. It checks Node.js 22+ and companion folders before restarting anything. If a V1.72 connector already owns port 10000, the launcher authenticates it with the existing local token, pauses background Auto, waits up to 30 seconds for connecting/pending engine work and accepted relay requests, saves the journal, and starts a fresh connector. It never kills unrelated processes. A timeout or save error leaves the existing connector open with background Auto stopped.

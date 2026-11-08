@@ -38,6 +38,14 @@ test('private HTTPS address validation rejects public, credential-bearing and no
 test('connector identifies its loaded version before Binance is connected',()=>fixture(async({request})=>{
  const state=(await request('/host/status')).json;assert.equal(state.service,'btc-demo-laptop');assert.equal(state.connectorVersion,require('../demo-execution/engine.js').APP_VERSION);assert.equal(state.restartSupported,true);assert.equal(state.restarting,false);assert.equal(state.engine,null);
 }));
+test('laptop Reset publishes a zero result to both controllers and persists the new session boundary',()=>fixture(async({app,request,connect,pair,dataDir})=>{
+ await connect();const p=await pair(),e=FakeEngine.last;e.auto=true;e.account={assets:[{asset:'USDT',walletBalance:'5000'}]};e.income=[{income:'-39.44',incomeType:'REALIZED_PNL'}];e.lastIncome=Date.now();e.incomeWindowStart=e.state.startedAt;
+ const id='reset-result-012345678';assert.equal((await request('/host/command',{id,action:'reset'})).status,202);
+ let result;for(let i=0;i<100;i++){result=(await request('/host/command?id='+id)).json;if(result.status!=='pending')break;await delay(2);}assert.equal(result.status,'done',result.error);
+ const laptop=(await request('/host/status')).json.engine,phone=(await request('/mobile/status',undefined,{mobile:true,cookie:p.cookie})).json.engine;
+ for(const s of [laptop,phone]){assert.equal(s.income.length,0);assert.equal(s.state.startedAt,s.state.resetAt);assert.equal(s.incomeWindowStart,s.state.resetAt);assert.ok(s.lastIncome);assert.equal(s.auto,false);assert.equal(s.entryPolicy.sessionTarget,20);}
+ assert.equal(app.snapshot().pairedDevices,1);const journal=JSON.parse(fs.readFileSync(path.join(dataDir,fs.readdirSync(dataDir).find(x=>x.startsWith('journal-'))),'utf8'));assert.equal(journal.startedAt,laptop.state.startedAt);
+}));
 test('restart requires local authentication and matching generation; phone routes cannot restart',()=>fixture(async({app,request,connect,pair})=>{
  await connect();const p=await pair(),generation=app.snapshot().generation;
  assert.equal((await request('/host/restart',{generation},{auth:'wrong'})).status,401);
@@ -135,7 +143,7 @@ test('mobile page is the generated app with same-origin policy and no referrer',
 
 test('laptop status reports actual engine version and active entry sizing to mobile',()=>fixture(async({app,request,connect})=>{
  await connect();const state=(await request('/host/status')).json.engine;
- assert.equal(state.appVersion,'1.72');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:20,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
+ assert.equal(state.appVersion,'1.73');assert.deepEqual(state.entryPolicy,{margin:300,marginMode:'fixed',leverageMode:'highest-fee-compatible',maxLeverage:150,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:5,strategy:'bollinger-wr-multiframe',entryDirection:'closed-1m-and-live-quotes',timeframes:[1,2,3,4,5,6,7,8,9,10,15,20,30,60],lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing',lossReduction:0,sessionTarget:20,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14});
 }));
 
 test('legacy phone trial commands are idempotent when legacy strategy is explicitly selected',()=>fixture(async({app,request,connect,pair,dataDir})=>{

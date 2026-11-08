@@ -1,3 +1,11 @@
+## V1.73 — reset net trading result to $0.00
+
+**Reset result to $0** now saves a new accounting window immediately and renders $0.00 after a successful reset. It verifies the account is flat with no pending orders, archives the previous bot records, clears the old target latch and closing estimate, and leaves Auto stopped. The wallet, entry/exit strategy and $20 target are unchanged.
+
+The saved reset time survives page refreshes and connector restarts. Income reads use a fixed window, validate timestamps, exclude rows outside that window, and discard late responses belonging to an earlier session. The dashboard only displays income associated with its current session. Subsequent gains, losses and fees count normally from the reset time. Storage failures keep the previous session instead of claiming success.
+
+For background mode, update both code folders and restart the laptop connector to load V1.73, then reconnect and use Reset result to $0. Existing exchange/account history is not erased.
+
 ## V1.72 — laptop connector restart
 
 The launcher now performs an authenticated, graceful restart of an already-running V1.72 connector, waits for pending engine and relay work, preserves saved state, and rejects unsafe port conflicts or incomplete installations. Older connectors need their old window closed once after Stop Auto and pending actions finish. No force-kill or automatic order replay is used.

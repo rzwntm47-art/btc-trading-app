@@ -7,7 +7,7 @@ function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.72',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.73',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.bandRules=false;engine.entryPolicy={margin:300,maxLeverage:10,lossLimit:5,profitExit:'net-trailing',sessionExit:'close-bot-positions'};engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -50,6 +50,17 @@ test('real Reset and tab handlers dispatch correctly',async()=>{
  node('ordersTab').onclick();assert.equal(node('positions').hidden,true);assert.equal(node('orderPanel').hidden,false);
  node('positionsTab').onclick();assert.equal(node('positions').hidden,false);assert.equal(node('orderPanel').hidden,true);
 });
+test('Reset renders 0.00 immediately instead of the old negative result or Not started',async()=>{
+ const {node,context,e}=fixture();e.tradingReady=true;e.balance=5000;e.account={assets:[{asset:'USDT',walletBalance:'5000',availableBalance:'5000'}]};
+ e.income=[{incomeType:'REALIZED_PNL',income:'-39.44'}];e.lastIncome=Date.now();e.incomeWindowStart=e.state.startedAt;
+ vm.runInContext('renderActual()',context);assert.equal(node('session').textContent,'-39.44');
+ await node('resetDemo').onclick();vm.runInContext('renderActual()',context);
+ assert.equal(node('session').textContent,'0.00');assert.equal(node('session').className,'good');assert.match(node('pnlEquation').textContent,/= 0.00$/);assert.ok(!node('incomeAudit').textContent.includes('-39.44'));assert.equal(node('sessionHeading').textContent,'Net trading result · $20 target');assert.equal(e.auto,false);
+});
+test('old income snapshot from a different window is never displayed as the current net result',()=>{
+ const {node,context,e}=fixture();e.income=[{incomeType:'REALIZED_PNL',income:'-39.44'}];e.lastIncome=Date.now();e.incomeWindowStart=e.state.startedAt-1;
+ vm.runInContext('renderActual()',context);assert.equal(node('session').textContent,'Syncing income…');assert.match(node('pnlEquation').textContent,/Waiting for income history/);assert.ok(!node('incomeAudit').textContent.includes('-39.44'));
+});
 
 test('background tab polling and paper navigation preserve Demo Auto; explicit Stop still stops',async()=>{
  const {node,context,intervals,events,paperLink,messages,e}=fixture();
@@ -81,7 +92,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.72');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.73');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -110,7 +121,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.72');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.73');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();

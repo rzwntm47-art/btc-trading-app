@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.72';
+const APP_VERSION='1.73';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -565,12 +565,19 @@ class DemoEngine {
   async updateIncome(){
     if(!this.state.startedAt){this.income=[];this.lastIncome=0;this.incomeWindowStart=null;this.incomeWindowEnd=null;return;}
     // Pagination and fixed end time avoid silently dropping trades in busy accounts.
-    const out=[],endTime=Date.now()+this.api.offset;
-    if(endTime-this.state.startedAt>7*86400000)throw new DemoError('Session exceeds 7 days. Review results and start a new session when flat.');
+    const state=this.state,startTime=state.startedAt,out=[],endTime=Date.now()+this.api.offset;
+    if(endTime-startTime>7*86400000)throw new DemoError('Session exceeds 7 days. Review results and start a new session when flat.');
     for(let page=1;page<=20;page++){
-      const rows=await this.api.call('GET','/fapi/v1/income',{startTime:this.state.startedAt,endTime,page,limit:1000});
+      const rows=await this.api.call('GET','/fapi/v1/income',{startTime,endTime,page,limit:1000});
+      // A late response from the previous session must never overwrite a reset.
+      if(this.state!==state||this.state.startedAt!==startTime)return;
       if(!Array.isArray(rows))throw new DemoError('Invalid income response');out.push(...rows);
-      if(rows.length<1000){const complete=out.filter(x=>x.asset==='USDT'&&['REALIZED_PNL','COMMISSION','FUNDING_FEE'].includes(x.incomeType));for(const x of complete)number(x.income);this.income=complete;this.incomeWindowStart=this.state.startedAt;this.incomeWindowEnd=endTime;this.lastIncome=Date.now();return;}
+      if(rows.length<1000){
+        const relevant=out.filter(x=>x.asset==='USDT'&&['REALIZED_PNL','COMMISSION','FUNDING_FEE'].includes(x.incomeType));
+        for(const x of relevant){number(x.income);if(!Number.isSafeInteger(number(x.time))||number(x.time)<=0)throw new DemoError('Invalid income timestamp');}
+        const complete=relevant.filter(x=>number(x.time)>=startTime&&number(x.time)<=endTime);
+        this.income=complete;this.incomeWindowStart=startTime;this.incomeWindowEnd=endTime;this.lastIncome=Date.now();return;
+      }
     }
     throw new DemoError('Income history is incomplete. Entries paused.');
   }
@@ -731,14 +738,17 @@ class DemoEngine {
       if(!r.observedOpen&&order.status==='FILLED')
         throw new DemoError('Reset blocked: filled entry awaiting reconciliation.');
     }
-    const previous=this.state;
-    this.state={version:1,records:[],startedAt:0,goal:false,
+    const previous=this.state,resetAt=Date.now()+this.api.offset;
+    this.state={version:1,records:[],startedAt:resetAt,goal:false,
+      dayStart:Math.floor((resetAt+14400000)/86400000)*86400000-14400000,dayOpenPnl:0,
       budgetWalletBaseline:previous.budgetWalletBaseline,
-      resetAt:Date.now()+this.api.offset,resetBalance:this.balance,
+      resetAt,resetBalance:this.balance,
       archives:[...(previous.archives||[]),{at:Date.now(),records:previous.records,startedAt:previous.startedAt,goal:previous.goal}]};
     try{this.save();}catch(error){this.state=previous;throw error;}
-    this.income=[];this.lastIncome=0;this.scanned=[];this.cursor=0;this.lastScan=0;this.block='';
-    this.events=[];this.event('Reset complete from Binance. Session cleared; auto stopped. Credentials kept.');
+    // Flat inventory was verified above. The new accounting window starts at zero now.
+    this.income=[];this.incomeWindowStart=resetAt;this.incomeWindowEnd=resetAt;this.lastIncome=Date.now();this.sessionCloseEstimate=null;
+    this.scanned=[];this.cursor=0;this.lastScan=0;this.block='';
+    this.events=[];this.event('Reset complete. Net trading result starts at $0.00 from now; previous trades archived. Auto stopped. Credentials kept.');
   }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.syncDaily();this.state.startedAt=Date.now()+this.api.offset;this.state.resetAt=this.state.startedAt;this.state.dayOpenPnl=0;this.state.goal=false;delete this.state.goalStopAt;delete this.state.goalNet;this.income=[];this.lastIncome=0;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
