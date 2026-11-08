@@ -1,3 +1,13 @@
+## V1.75 — resolve a filled entry whose open position was never seen
+
+A fast-closing trade could fill and close before the first position snapshot. Its journal had FILLED but no observedOpen flag, so reconciliation repeatedly blocked all new entries even while positions and orders were empty. The new recovery reads the exact entry fills, follows execution history from that entry, and requires complete entry/closing quantities to balance exactly. It then rechecks current positions and the symbol’s basic/conditional orders before marking that historical record closed. No order is placed, replayed or cancelled by this recovery.
+
+A position that appears during either fresh check is retained and goes through normal protection. Missing/incomplete fills, another entry changing the position, unresolved closes, open orders, read errors or failed journal saves keep the hold. Flat display data or elapsed time alone cannot retire the record. Verification retries are paced, repeated stopped-bot waiting logs are suppressed, and the pending-trade panel shows the actual reconciliation reason. Reports retain closure evidence.
+
+After installing both folders and restarting/reconnecting the laptop connector, use Sync Binance and Start / Resume Demo if stopped. A running Auto resumes scanning once all holds clear; manual Stop and the $20 session target remain in force. No history reset is needed.
+
+API references: [account trade list](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List), [query order](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Query-Order), [position information](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Position-Information-V3).
+
 ## V1.74 — dedicated net-result counter reset
 
 The previous button still invoked the full journal reset, which refuses existing positions or orders. The result panel now has its own **Reset result to $0** button, and both reset buttons call a dedicated counter action. It reads fresh account/position values, saves a new time window, preserves all trade records, orders, ownership and exit levels, and stops new entries. Existing unrealized PnL becomes the opening baseline, so subsequent changes and income count toward the same $20 target. It does not reset the wallet.

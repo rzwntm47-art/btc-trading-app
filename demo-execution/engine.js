@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.74';
+const APP_VERSION='1.75';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -470,7 +470,7 @@ class DemoEngine {
     if(this.scheduleReadRecovery(error))return;
     this.block=error.message;
     if(this.bandRules&&this.auto){this.holdEntries(error.message);this.retryAt=Math.max(this.retryAt||0,Date.now()+5000);}
-    else this.pause(error.message);
+    else this.pause(error.unseenFill&&this.events[0]?.text===error.message?undefined:error.message);
   }
   entrySafetyReason(){
     if(this.active().some(r=>r.pendingClose||r.lossReduction?.status==='PENDING'||!['FILLED','CANCELED','EXPIRED','REJECTED'].includes(r.entryStatus)||(!(this.newRules?r.exitsReady:r.protected)&&!this.exitsSuspended(r))))return 'Pending orders or unverified exits; reconciling before new entries';
@@ -637,7 +637,7 @@ class DemoEngine {
       totals:incomeReady?this.incomeBreakdown():null,unrealized:positionReady?this.unrealizedPnl():null,openingUnrealized:this.state.dayOpenPnl||0,netSession:complete?this.sessionNet():null,
       incomeRowsOmitted:incomeReady?Math.max(0,this.income.length-200):0,
       income:incomeReady?this.income.slice(-200).map(x=>({symbol:x.symbol,time:x.time,type:x.incomeType,income:x.income,asset:x.asset})):[],
-      botRecords:this.state.records.slice(-50).map(r=>({entryAppVersion:r.entryAppVersion||null,oneHourTrial:r.oneHourTrial||null,bandTargets:r.bandTargets||null,lossRecovery:r.lossRecovery||null,earlyLossReview:r.earlyLossReview||null,maxLossLimit:r.maxLossLimit??null,indicatorSnapshot:r.signal?.bands||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,rejectionCode:r.rejectionCode??null,retryAfter:r.retryAfter??null,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,tradeAccounting:r.tradeAccounting||null,trailPeak:r.trailPeak??null,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
+      botRecords:this.state.records.slice(-50).map(r=>({flatRecovery:r.flatRecovery||null,reconcileError:r.reconcileError||null,entryAppVersion:r.entryAppVersion||null,oneHourTrial:r.oneHourTrial||null,bandTargets:r.bandTargets||null,lossRecovery:r.lossRecovery||null,earlyLossReview:r.earlyLossReview||null,maxLossLimit:r.maxLossLimit??null,indicatorSnapshot:r.signal?.bands||null,symbol:r.symbol,side:r.side,at:r.at,closedAt:r.closedAt,status:r.entryStatus,rejected:!!r.rejected,rejectionCode:r.rejectionCode??null,retryAfter:r.retryAfter??null,entry:r.entry,quantity:r.filledQty??r.quantity,leverage:r.leverage,fee:r.fee,estimatedEntryMargin:r.estimatedEntryMargin,lossLimit:r.lossLimit,takeProfit:r.takeProfit??null,exitPolicy:r.exitPolicy||null,exitsReady:!!r.exitsReady,peak:r.peak,profitFloor:r.profitFloor,closeReason:r.closeReason||(r.closedAt?'Closed on Binance; cause unconfirmed':null),protectionError:r.protectionError||null,entryEvidence:r.entryEvidence,tradeAccounting:r.tradeAccounting||null,trailPeak:r.trailPeak??null,lossReduction:r.lossReduction||null,closingEstimate:r.closingEstimate||null,estimateError:r.estimateError||null}))
     };
   }
   async freshTradeReport(){
@@ -772,6 +772,69 @@ class DemoEngine {
   }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.syncDaily();this.state.startedAt=Date.now()+this.api.offset;this.state.resetAt=this.state.startedAt;this.state.dayOpenPnl=0;this.state.goal=false;delete this.state.goalStopAt;delete this.state.goalNet;this.income=[];this.lastIncome=0;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
+  async recoverUnseenFill(r,order){
+    this.unseenFillChecks??=new Map();const cached=this.unseenFillChecks.get(r.id);
+    if(cached&&Date.now()<cached.retryAt)throw cached.error;
+    const wait=reason=>{throw new DemoError(r.symbol+' filled entry: '+reason+'; new entries wait for confirmation.');};
+    const id=value=>{if((typeof value==='number'&&!Number.isSafeInteger(value))||!/^\d+$/.test(String(value))||BigInt(value)<=0n)wait('invalid execution identifier');return BigInt(value).toString();};
+    // Exact quantities prevent a small remaining position being rounded to flat.
+    const units=value=>{const text=String(value);if(!/^\d+(?:\.\d{1,18})?$/.test(text))wait('invalid execution quantity');const [whole,fraction='']=text.split('.');return BigInt(whole)*10n**18n+BigInt(fraction.padEnd(18,'0'));};
+    const check=t=>{
+      if(!t||t.symbol!==r.symbol||t.positionSide!=='BOTH'||!['BUY','SELL'].includes(t.side)||!Number.isSafeInteger(t.time)||t.time<=0||t.time>Date.now()+this.api.offset+5000)wait('execution history is incomplete or inconsistent');
+      const tradeId=id(t.id),orderId=id(t.orderId),qty=units(t.qty);if(qty<=0n)wait('invalid execution quantity');return {tradeId,orderId,qty};
+    };
+    try{
+      if(r.pendingClose||r.lossReduction?.status==='PENDING')wait('an existing close or reduction still needs reconciliation');
+      // A late position snapshot may now show the fill. In that case normal
+      // reconciliation below must protect it, not retire its journal record.
+      await this.refresh({inventory:false,valuation:false});
+      if(this.position(r.symbol)){this.unseenFillChecks.delete(r.id);return false;}
+      if(order.status!=='FILLED'||order.symbol!==r.symbol||order.clientOrderId!==r.id||order.side!==r.side)wait('entry identity is not confirmed');
+      const entryId=id(order.orderId),executed=units(order.executedQty);if(executed<=0n)wait('filled quantity is unavailable');
+      const entryRows=await this.api.call('GET','/fapi/v1/userTrades',{symbol:r.symbol,orderId:order.orderId,limit:1000});
+      if(!Array.isArray(entryRows)||!entryRows.length||entryRows.length>1000)wait('entry fills are not available yet');
+      const entryFills=new Map();let entryTotal=0n;
+      for(const t of entryRows){const v=check(t);if(v.orderId!==entryId||t.side!==r.side||entryFills.has(v.tradeId))wait('entry fill identity is inconsistent');entryFills.set(v.tradeId,v.qty);entryTotal+=v.qty;}
+      if(entryTotal!==executed)wait('entry fill quantities are still settling');
+      const first=[...entryFills.keys()].reduce((a,b)=>BigInt(a)<BigInt(b)?a:b);
+      let fromId=first,balance=0n,lastTime=0,count=0,proof=null;const matched=new Set(),seen=new Set();
+      for(let page=0;page<20&&!proof;page++){
+        const chunk=await this.api.call('GET','/fapi/v1/userTrades',{symbol:r.symbol,fromId,limit:1000});
+        if(!Array.isArray(chunk)||chunk.length>1000)wait('execution history is incomplete');
+        const rows=chunk.map(t=>({t,...check(t)})).sort((a,b)=>BigInt(a.tradeId)<BigInt(b.tradeId)?-1:1);
+        let largest=BigInt(fromId)-1n;
+        for(const v of rows){
+          const {t,tradeId,orderId,qty}=v;
+          if(BigInt(tradeId)<BigInt(fromId)||seen.has(tradeId)||t.time<lastTime)wait('execution history did not advance consistently');
+          seen.add(tradeId);largest=BigInt(tradeId);lastTime=t.time;count++;
+          if(orderId===entryId){if(t.side!==r.side||entryFills.get(tradeId)!==qty)wait('entry fills do not match the saved order');matched.add(tradeId);}
+          else if(t.side===r.side)wait('another entry changed this position; review Binance trade history');
+          balance+=t.side==='BUY'?qty:-qty;
+          if((r.side==='BUY'&&balance<0n)||(r.side==='SELL'&&balance>0n))wait('position direction changed outside the saved entry');
+          if(balance===0n){
+            if(matched.size!==entryFills.size||orderId===entryId)wait('complete entry and closing fills are not confirmed');
+            proof={kind:'closed-fill-ledger',entryOrderId:entryId,executedQty:String(order.executedQty),firstTradeId:first,closingTradeId:tradeId,closingOrderId:orderId,closedAt:t.time,tradeCount:count};break;
+          }
+        }
+        if(proof)break;
+        if(chunk.length<1000)wait('closing fills are not confirmed yet');
+        if(largest<BigInt(fromId))wait('execution history pagination is incomplete');fromId=(largest+1n).toString();
+      }
+      if(!proof)wait('execution history exceeds the verification limit');
+      // Recheck live state AFTER the historical proof. A flat screen by itself
+      // is never permission to forget an entry or send it again.
+      const [,orders,algos]=await Promise.all([this.refresh({inventory:false,valuation:false}),this.api.call('GET','/fapi/v1/openOrders',{symbol:r.symbol}),this.api.call('GET','/fapi/v1/openAlgoOrders',{symbol:r.symbol})]);
+      if(this.position(r.symbol)){this.unseenFillChecks.delete(r.id);return false;}
+      if(!Array.isArray(orders)||!Array.isArray(algos))wait('fresh order inventory is unavailable');
+      if(orders.length||algos.length)wait('Binance still reports open orders on this symbol');
+      this.orders=this.orders.filter(o=>o.symbol!==r.symbol);this.algos=this.algos.filter(o=>o.symbol!==r.symbol);
+      const previous={...r},verifiedAt=Date.now()+this.api.offset;
+      r.closedAt=proof.closedAt;r.closeReason='Closed fills verified after the initial open-position snapshot was missed';r.flatRecovery={...proof,verifiedAt};
+      r.exits=(r.exits||[]).map(e=>({...e,cancelled:true,confirmed:false,reconciledAt:verifiedAt,recoveryReason:'Closed fills and no open Binance orders confirmed'}));
+      try{this.save();}catch(error){for(const key of Object.keys(r))delete r[key];Object.assign(r,previous);throw error;}
+      this.unseenFillChecks.delete(r.id);this.event(r.symbol+' closed trade reconciled from execution history; entry hold can clear after remaining checks.');return true;
+    }catch(error){error.unseenFill=true;if(!error.message.startsWith(r.symbol))error.message=r.symbol+' fill reconciliation: '+error.message;this.unseenFillChecks.set(r.id,{retryAt:Date.now()+5000,error});throw error;}
+  }
   exitOwner(e){return this.state.records.find(r=>(r.exits||[]).includes(e));}
   exitReference(e){
     const algoId=algoExchangeId(e.algoId);if(algoId)return {algoId};
@@ -1495,11 +1558,17 @@ class DemoEngine {
         this.holdEntries('Entry status unavailable; protecting observed position.');
         order={status:'UNKNOWN',orderId:r.orderId};
       }
+      if(order.orderId!=null&&r.orderId!=null&&String(order.orderId)!==String(r.orderId))throw new DemoError(r.symbol+' entry order ID changed; reconciliation required');
       r.orderId=order.orderId;r.entryStatus=order.status;
       if(['NEW','PARTIALLY_FILLED'].includes(order.status)){this.holdEntries('Entry not fully settled; cancelling remainder.');await this.api.call('DELETE','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});await this.refresh();}
-      const p=this.position(r.symbol);
-      if(!p){if(r.observedOpen||(['CANCELED','EXPIRED','REJECTED'].includes(order.status)&&Number(order.executedQty)===0)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();continue;}throw new DemoError('Filled entry awaiting position confirmation; no new orders');}
+      let p=this.position(r.symbol);
+      if(!p&&!r.observedOpen&&order.status==='FILLED'){
+        if(await this.recoverUnseenFill(r,order))continue;
+        p=this.position(r.symbol);
+      }
+      if(!p){if(r.observedOpen||(['CANCELED','EXPIRED','REJECTED'].includes(order.status)&&Number(order.executedQty)===0)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();continue;}throw new DemoError(r.symbol+' entry awaiting position confirmation; no new orders');}
       if((number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot');
+      this.unseenFillChecks?.delete(r.id);
       r.openedAt=r.openedAt||Number(order.updateTime)||r.at;r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       if(this.exitsSuspended(r)){r.netEstimate=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.protected=false;this.save();continue;}

@@ -161,7 +161,7 @@ function render(){
   $('openOrders').replaceChildren();
   for(const o of [...e.orders,...e.algos])line($('openOrders'),[o.symbol+' / '+o.side,o.orderType||o.type||'Conditional',o.triggerPrice??o.stopPrice??o.price??'—',o.closePosition?'Entire position':o.origQty??o.quantity??'—',o.algoStatus||o.status||'Open']);
   if(!$('openOrders').children.length)line($('openOrders'),['No open orders','','','','']);
-  $('pending').textContent=e.active().filter(r=>(!(['profit-cap','positive-estimate','net-trailing','trial-net-trailing'].includes(r.exitPolicy)?r.exitsReady:r.protected)&&!e.exitsSuspended(r))||r.pendingClose||r.lossReduction?.status==='PENDING').map(r=>r.symbol+' · '+(r.pendingClose?'close pending':r.lossReduction?.status==='PENDING'?'25% reduction pending':r.entryStatus||'entry unresolved')).join(' | ');
+  $('pending').textContent=e.active().filter(r=>r.reconcileError||(!(['profit-cap','positive-estimate','net-trailing','trial-net-trailing'].includes(r.exitPolicy)?r.exitsReady:r.protected)&&!e.exitsSuspended(r))||r.pendingClose||r.lossReduction?.status==='PENDING').map(r=>r.symbol+' · '+(r.reconcileError?.message||(r.pendingClose?'close pending':r.lossReduction?.status==='PENDING'?'25% reduction pending':r.entryStatus||'entry unresolved'))).join(' | ');
   $('trades').replaceChildren();
   for(const r of [...e.state.records].reverse().slice(0,50)){
     const income=e.income.filter(x=>x.symbol===r.symbol&&Number(x.time)>=r.at&&(!r.closedAt||Number(x.time)<=r.closedAt));

@@ -1,3 +1,7 @@
+## V1.75 — filled-entry reconciliation
+
+Update both code folders and restart START-LAPTOP.cmd to load the fix for FILLED entries that closed before the engine observed an open position. Reconnect, Sync Binance, then Start / Resume if stopped. Recovery verifies matching entry and closing fills and fresh flat/no-order state, preserving the trade journal. It never replays the entry. No new relay endpoints or trading rules are added. The $20 target and counter-reset behavior are unchanged.
+
 ## V1.74 — reset the counter without clearing trading state
 
 The new `resetResult` command reads account/position data, saves a fresh result window and opening unrealized baseline, and returns a sequence/time confirmation. It preserves all existing records and protection, so open positions or protective orders do not block this counter action. Auto remains stopped. The command is available to authenticated laptop and paired-phone controllers and retains command-ID deduplication. The older full-journal `reset` command remains host-only.
