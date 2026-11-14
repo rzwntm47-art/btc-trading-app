@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.80';
+const APP_VERSION='1.81';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -448,7 +448,7 @@ class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
     this.resultResetSupported=true;
-    this.entryPolicy={margin:300,marginMode:'leverage-targeted',preferredMargins:[{leverage:100,margin:15},{leverage:50,margin:25}],fallbackMargin:25,leverageMode:'preferred-with-risk-fallback',maxLeverage:100,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:1,strategy:'bollinger-wr-and-trend-continuation',strategies:['bollinger-wr','trend-continuation'],trendTimeframes:[1,5],trendReferenceAtr:2,trendVolatilityLossLimit:1,entryDirection:'closed-candle-stable-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:.5,maxLossLimit:1,lossExit:'tight-net-stop',earlyLossExit:null,earlyLossMin:null,profitStart:1,profitStep:null,takeProfit:1,profitExit:'small-net-profit',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'risk-capped',leverageMode:'highest-fee-compatible',maxLeverage:100,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:1,strategy:'bollinger-wr-and-trend-continuation',strategies:['bollinger-wr','trend-continuation'],trendTimeframes:[1,5],trendReferenceAtr:2,trendVolatilityLossLimit:1,entryDirection:'closed-candle-stable-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:.5,maxLossLimit:1,lossExit:'tight-net-stop',earlyLossExit:null,earlyLossMin:null,profitStart:1,profitStep:null,takeProfit:1,profitExit:'small-net-profit',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'close-bot-positions',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -1136,12 +1136,12 @@ class DemoEngine {
     if(this.newRules&&!flexible&&(available<ENTRY_MARGIN||marginRoom<ENTRY_MARGIN))return skip('Waiting for at least $300 free margin plus fees; scanning continues');
     if(this.newRules&&!band&&!trial&&signal.intervalMs===60000&&2*momentum.atr<=3*(2*price*fee))return skip('Recent 1m movement is too small relative to round-trip fees; scanning continues');
     const trialCeiling=flexible?await this.trialLeverageCeiling(symbol):null;
-    const leverageCeiling=flexible?trialCeiling:this.newRules?signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset):preferredLeverage;
+    const leverageCeiling=flexible?(band?Math.min(trialCeiling,this.entryPolicy.maxLeverage):trialCeiling):this.newRules?signalLeverageCeiling(signal,this.marketContext,Date.now()+this.api.offset):preferredLeverage;
     const sizingLeverages=tiered?[...this.entryPolicy.preferredMargins.map(t=>t.leverage),...Array.from({length:49},(_,i)=>49-i)].filter(n=>n<=leverageCeiling&&n<=this.entryPolicy.maxLeverage):Array.from({length:leverageCeiling},(_,i)=>leverageCeiling-i);
     let adaptive;
     if(band){
-      // Test every integer locally before changing the exchange setting. Keep
-      // $300 margin; reduce leverage when fees/spread would consume the stop.
+      // Test leverage locally before changing the exchange setting. In the
+      // current policy, margin is a ceiling: resize to fit costs and movement.
       try{
         const [quote,currentMark]=await Promise.all([this.entryRead('/fapi/v1/ticker/bookTicker',{symbol},false),this.entryRead('/fapi/v1/premiumIndex',{symbol},false)]);
         const quotedPrice=number(signal.side==='BUY'?quote.askPrice:quote.bidPrice);
@@ -1159,7 +1159,7 @@ class DemoEngine {
             if((tight||choice.setupType==='trend-continuation')&&Math.max(0,-check.estimatedImmediateExitNet,-check.estimatedMarkNet)+size.qty*confirmation.atr*(1+fee)>(tight?this.entryPolicy.maxLossLimit:lossLimit)+1e-8){reason='One recent 1m ATR plus spread and fees exceeds the $'+(tight?this.entryPolicy.maxLossLimit:lossLimit)+' sizing budget';continue;}
             if(check.estimatedRoundTripFees>lossLimit*.5+1e-8){reason='Opening + closing commission would consume more than half the normal loss budget';continue;}
             const targetCosts=bandEntryCosts(choice,quotedPrice,size.qty,fee,this.entryPolicy.minimumNetAtTarget);if(targetCosts.reason){reason=targetCosts.reason;continue;}
-            if(size.notional/candidate>marginRoom+1e-8||size.notional/candidate+check.estimatedRoundTripFees>available+1e-8){reason='Not enough margin plus fees for the '+(tiered?'$'+marginFor(candidate):'full $300')+' entry';continue;}
+            if(size.notional/candidate>marginRoom+1e-8||size.notional/candidate+check.estimatedRoundTripFees>available+1e-8){reason='Not enough available margin plus fees for the '+(tiered?'requested $'+marginFor(candidate):tight?'risk-sized':'full $300')+' entry';continue;}
             adaptive={leverage:candidate,marginTarget:tight?size.notional/candidate:ENTRY_MARGIN,marginMode:this.entryPolicy.marginMode,leverageMode:this.entryPolicy.leverageMode,maxLossTarget:lossLimit,commissionLossBudget:lossLimit*.5,targetCosts,exchangeCeiling:leverageCeiling,estimatedRoundTripFees:check.estimatedRoundTripFees,estimatedImmediateExitNet:check.estimatedImmediateExitNet};return null;
           }
           return reason;

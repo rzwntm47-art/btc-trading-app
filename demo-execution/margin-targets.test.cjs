@@ -2,16 +2,18 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {DemoEngine,DemoError,trendContinuationSetup}=require('./engine.js');
 const {fixture,entryBars,setTradeNet,symbol}=require('./test-fixture.cjs');
+// V1.80 remains explicit here to cover old tier policies independently of current defaults.
+const tierPolicy=()=>({...new DemoEngine({offset:0}).entryPolicy,marginMode:'leverage-targeted',preferredMargins:[{leverage:100,margin:15},{leverage:50,margin:25}],fallbackMargin:25,leverageMode:'preferred-with-risk-fallback'});
 function setup({side='BUY',fee=.00001,scale=.12,ceiling=100}={}){
- const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;f.signal.side=side;
+ const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy=tierPolicy();f.signal.side=side;
  const bars=ms=>{const rows=entryBars(side,Date.now(),scale),end=Math.floor(Date.now()/ms)*ms;rows.forEach((b,i)=>{b[0]=end-(rows.length-i)*ms;b[6]=b[0]+ms-1;});return rows;};
  const base=f.api.call;f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/klines'?bars(q.interval==='5m'?300000:60000):p==='/fapi/v1/commissionRate'?{takerCommissionRate:String(fee)}:p==='/fapi/v1/leverageBracket'?{symbol,brackets:[{initialLeverage:ceiling,notionalCap:1000000,notionalFloor:0}]}:base(m,p,q,s);
  f.signal=trendContinuationSetup(bars(60000),bars(300000),side,Date.now());assert.ok(f.signal);return f;
 }
 const entries=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);
 const leveragePosts=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/leverage');
-test('default policy requests the two agreed margin tiers and keeps the net loss and session targets',()=>{
- const p=new DemoEngine({offset:0}).entryPolicy;assert.deepEqual(p.preferredMargins,[{leverage:100,margin:15},{leverage:50,margin:25}]);assert.equal(p.fallbackMargin,25);assert.equal(p.maxLeverage,100);assert.equal(p.marginMode,'leverage-targeted');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);
+test('explicit historical tier policy retains its margin targets and loss limits',()=>{
+ const p=tierPolicy();assert.deepEqual(p.preferredMargins,[{leverage:100,margin:15},{leverage:50,margin:25}]);assert.equal(p.fallbackMargin,25);assert.equal(p.maxLeverage,100);assert.equal(p.marginMode,'leverage-targeted');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);
 });
 for(const side of ['BUY','SELL']){
  for(const [ceiling,expectedLeverage,margin] of [[150,100,15],[100,100,15],[75,50,25],[50,50,25]])test(side+' uses $'+margin+' at '+expectedLeverage+'x under ceiling '+ceiling+' when costs fit',async()=>{
@@ -68,5 +70,5 @@ test('unknown entry status at the requested margin is never blindly duplicated',
 });
 test('already-open positions are never topped up when the margin policy changes',async()=>{
  const f=setup({fee:.0005,scale:1});f.e.entryPolicy.marginMode='risk-capped';await f.e.enter(symbol,f.signal);const r=f.e.owned(symbol),qty=f.position.positionAmt,leverage=r.leverage;
- assert.ok(r);f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;await f.e.reconcile();await f.e.enter(symbol,f.signal);assert.equal(f.position.positionAmt,qty);assert.equal(r.leverage,leverage);assert.equal(entries(f).length,1);
+ assert.ok(r);f.e.entryPolicy=tierPolicy();await f.e.reconcile();await f.e.enter(symbol,f.signal);assert.equal(f.position.positionAmt,qty);assert.equal(r.leverage,leverage);assert.equal(entries(f).length,1);
 });

@@ -1,3 +1,13 @@
+## V1.81 — flexible margin without mandatory tiers
+
+The $15 at 100× and $25 at 50× examples are no longer mandatory entry sizes. New entries use flexible margin up to $300, sized to available funds, fees, spread and recent movement. All integer leverage values up to the lower of the Binance ceiling and 100× are available. A valid smaller order may proceed instead of being rejected for missing a margin tier. Final quotes, volatility and exchange capacity can reduce the quantity again before submission; Binance minimums and all other entry checks still apply.
+
+The existing 14 Bollinger / Williams %R frames (1–10m, 15m, 20m, 30m, 60m) and independent 1m / 5m trend continuation remain active. The $0.50 estimated net-loss exit, $1 exchange backup target, $1 estimated net-profit exit and $20 session target remain. Existing positions are not topped up or releveraged. Stops are triggers, not guaranteed execution prices. Profit or completion time is not guaranteed.
+
+Regression tests reproduce eligible BUY and SELL orders blocked by the historical margin floor, then verify submission under the current policy. They cover limited funds, exchange capacity, intermediate leverage, the 100× ceiling, final volatility resizing, loss/profit exits, exchange minimums, manual Stop and uncertain-order deduplication. Exchange responses are simulated; these are correctness tests, not a profitability backtest.
+
+Install both `demo-execution` and `render-backend`, run `START-LAPTOP.cmd`, reconnect, then **Sync Binance → Start / Resume Demo**. Verify both the page and laptop engine show **V1.81**. Updating the website alone does not update a running connector. No reset or history deletion is needed.
+
 ## V1.80 — requested margin with leverage fallback
 
 New entries try **$15 margin at 100×**, then **$25 at 50×**, within the exchange leverage ceiling. If those sizes do not fit costs or volatility, try **$25 margin at lower integer leverage below 50×**. Do not select intermediate 51–99× leverage or exceed 100×. Retain the requested margin when checking exchange capacity and available funds; skip if no valid order fits. Round to the exchange quantity step and revalidate final quotes; actual fills may change the displayed margin.

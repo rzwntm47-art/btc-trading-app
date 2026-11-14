@@ -15,7 +15,7 @@ async function opened(side='BUY',band=false,legacy=false){const f=setup(side,ban
 const entries=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);
 const closes=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&c.p.reduceOnly);
 test('tight defaults retain entry strategies, $1 profit and the $20 session target',()=>{
- const p=new DemoEngine({offset:0}).entryPolicy;assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.earlyLossExit,null);assert.equal(p.marginMode,'leverage-targeted');assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);assert.deepEqual(p.strategies,['bollinger-wr','trend-continuation']);assert.equal(p.entryDirection,'closed-candle-stable-quotes');
+ const p=new DemoEngine({offset:0}).entryPolicy;assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.earlyLossExit,null);assert.equal(p.marginMode,'risk-capped');assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);assert.deepEqual(p.strategies,['bollinger-wr','trend-continuation']);assert.equal(p.entryDirection,'closed-candle-stable-quotes');
 });
 for(const side of ['BUY','SELL']){
  for(const band of [false,true])test(side+' '+(band?'band':'trend')+' uses a smaller position that fits fees, spread and volatility',async()=>{
