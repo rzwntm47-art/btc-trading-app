@@ -1,9 +1,9 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {DemoEngine,DemoError,trendContinuationSetup}=require('./engine.js');
-const {fixture,entryBars,setTradeNet,symbol}=require('./test-fixture.cjs');
+const {v181Policy,fixture,entryBars,setTradeNet,symbol}=require('./test-fixture.cjs');
 // V1.80 remains explicit here to cover old tier policies independently of current defaults.
-const tierPolicy=()=>({...new DemoEngine({offset:0}).entryPolicy,marginMode:'leverage-targeted',preferredMargins:[{leverage:100,margin:15},{leverage:50,margin:25}],fallbackMargin:25,leverageMode:'preferred-with-risk-fallback'});
+const tierPolicy=()=>({...v181Policy(),marginMode:'leverage-targeted',preferredMargins:[{leverage:100,margin:15},{leverage:50,margin:25}],fallbackMargin:25,leverageMode:'preferred-with-risk-fallback'});
 function setup({side='BUY',fee=.00001,scale=.12,ceiling=100}={}){
  const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy=tierPolicy();f.signal.side=side;
  const bars=ms=>{const rows=entryBars(side,Date.now(),scale),end=Math.floor(Date.now()/ms)*ms;rows.forEach((b,i)=>{b[0]=end-(rows.length-i)*ms;b[6]=b[0]+ms-1;});return rows;};

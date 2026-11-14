@@ -20,11 +20,6 @@ function setup(side='BUY',band=false){
 async function opened(side='BUY',band=false){const f=setup(side,band);await f.e.enter(symbol,f.signal);assert.ok(f.e.owned(symbol),f.e.entryOutcome);return f;}
 const entries=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);
 const closes=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&c.p.reduceOnly);
-test('current defaults select small net exits and retain the $20 session and loss controls',()=>{
- const p=new DemoEngine({offset:0}).entryPolicy;
- assert.equal(p.profitExit,'small-net-profit');assert.equal(p.profitStart,1);assert.equal(p.takeProfit,1);assert.equal(p.profitStep,null);assert.equal(p.minimumNetAtTarget,1);
- assert.equal(p.entryDirection,'closed-candle-stable-quotes');assert.equal(p.sessionTarget,20);assert.equal(p.earlyLossMin,null);assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.margin,300);
-});
 for(const side of ['BUY','SELL']){
  for(const net of [1,2,3])test(side+' closes immediately at $'+net+' total net without a pullback',async()=>{
   const f=await opened(side),r=f.e.owned(symbol);assert.equal(r.rulesVersion,13);assert.equal(r.exitPolicy,'small-net-profit');

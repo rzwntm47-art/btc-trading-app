@@ -1,3 +1,17 @@
+## V1.82 — immediate 1m entries and uncapped net-profit trailing
+
+New entries first check recent 1m momentum and fresh executable quotes. A qualifying fast setup returns immediately without fetching 5m confirmation; it can submit while the current 1m candle is forming. The 24h gainers/losers list supplies candidates, but actual 1m direction determines BUY or SELL. If the fast path does not qualify, the existing 14 Bollinger frames and 1m / 5m continuation remain available. Per-symbol cooldown is 30 seconds after close, with a fresh untraded candle still required. Uncertain orders, existing positions, stale/reversing quotes and exchange constraints remain protected.
+
+The normal loss exit is **$1 estimated total net loss**, including paid commission, realized partial results, funding and expected closing fees. An exchange **$1.50 backup target** is installed immediately from the confirmed fill and adjusted from actual accounting. Position checks target one second for this policy; network delays, gaps and market fills can exceed either trigger. There is no recovery extension.
+
+Profit is no longer closed automatically at $1. At $1 net, arm a trailing floor equal to the highest observed net minus the larger of **$0.50 or 10% of that peak**. Examples: $2 → $1.50, $12 → $10.80, $20 → $18, $30 → $27. Floors never fall; fresh fees and executable quotes are checked again before closing. A gap below the floor still exits instead of waiting for recovery. There is no profit ceiling.
+
+The $20 session goal uses **booked net**, with the existing opening session adjustment. Unrealized peaks do not trigger a forced close. Once booked net reaches $20, new entries pause and pending entry remainders are cancelled; open bot positions keep trailing and loss management. This decision stays latched until a new session is started while flat. Final net can change while open positions finish.
+
+Margin remains flexible up to $300 per order, within the $5,000 total margin budget and exchange/100× leverage ceiling. Fees and spread may use at most half the normal $1 loss budget; one recent 1m ATR plus costs must fit $1.50. Reference net must be at least $1 and commission within 25% of the reference move. These cost checks do not predict profit. No mandatory $15/$25 margin, top-ups or changes to existing leverage.
+
+Update both `demo-execution` and `render-backend`, restart `START-LAPTOP.cmd`, reconnect, then **Sync Binance → Start / Resume Demo**. Verify the page and connected engine both show **V1.82**. Updating the website alone cannot replace a running laptop engine. History and session results remain saved; no reset is required. Regression tests use simulated exchange responses, not a profitability backtest.
+
 ## V1.81 — flexible margin without mandatory tiers
 
 The $15 at 100× and $25 at 50× examples are no longer mandatory entry sizes. New entries use flexible margin up to $300, sized to available funds, fees, spread and recent movement. All integer leverage values up to the lower of the Binance ceiling and 100× are available. A valid smaller order may proceed instead of being rejected for missing a margin tier. Final quotes, volatility and exchange capacity can reduce the quantity again before submission; Binance minimums and all other entry checks still apply.

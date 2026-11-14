@@ -551,6 +551,7 @@ test('$20 net goal includes booked fees and funding, then pauses entries and lat
 });
 test('session goal closes winning and losing bot positions but not unmanaged positions',async()=>{
  const e=new DemoEngine({offset:0},{version:1,records:[{id:'bd1_a',symbol:'AAAUSDT',side:'BUY',entryStatus:'FILLED'},{id:'bd1_b',symbol:'BBBUSDT',side:'SELL',entryStatus:'FILLED'}],startedAt:Date.now()-1000},()=>{});
+ e.entryPolicy.sessionExit='close-bot-positions'; // Historical forced-close session policy.
  e.estimateSessionClose=async()=>20; e.auto=true;e.lastIncome=Date.now();e.income=[{income:'35'}];e.positions=[{symbol:'AAAUSDT',positionAmt:'1',unRealizedProfit:'10'},{symbol:'BBBUSDT',positionAmt:'-1',unRealizedProfit:'-15'},{symbol:'MANUALUSDT',positionAmt:'1',unRealizedProfit:'0'}];
  const closed=[];e.close=async(symbol,reason)=>{closed.push([symbol,reason]);e.owned(symbol).closedAt=Date.now();e.positions=e.positions.filter(p=>p.symbol!==symbol);};
  assert.equal(await e.enforceSessionGoal(),true);assert.equal(e.auto,false);assert.ok(e.state.goalStopAt);assert.equal(e.active().length,0);
@@ -730,7 +731,7 @@ test('bad income refresh preserves the previous validated snapshot atomically',a
 });
 test('report identifies unknown historical versions and preserves protection failure evidence',async()=>{
  const f=fixture();f.failProtection=true;await assert.rejects(()=>f.e.enter(symbol,f.signal));
- const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.81');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
+ const r=f.e.tradeReport().botRecords[0];assert.equal(r.entryAppVersion,'1.82');assert.equal(r.protectionError.code,-1111);assert.match(r.protectionError.message,/unsupported/);
  delete f.e.state.records[0].entryAppVersion;delete f.e.state.records[0].closeReason;
  const old=f.e.tradeReport().botRecords[0];assert.equal(old.entryAppVersion,null);assert.match(old.closeReason,/cause unconfirmed/);
 });
@@ -762,7 +763,7 @@ test('Stop during final quote request prevents dispatch',async()=>{
 });
 test('accepted entry carries bid/ask, mark, fee and version evidence with $300 sizing',async()=>{
  const f=fixture();f.e.newRules=true;await f.e.enter(symbol,f.signal);const r=f.e.active()[0];
- assert.equal(r.entryAppVersion,'1.81');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
+ assert.equal(r.entryAppVersion,'1.82');assert.equal(r.estimatedEntryMargin,300);assert.equal(r.leverage,5);
  assert.ok(Math.abs(r.entryEvidence.estimatedMarkNet+1.5)<1e-8);assert.ok(Math.abs(r.entryEvidence.estimatedImmediateExitNet+1.5)<1e-8);
  assert.equal(r.entryEvidence.bid,100);assert.equal(r.entryEvidence.markPrice,100);assert.ok(Number.isFinite(r.entryEvidence.plannedStopPrice));
 });
@@ -1061,6 +1062,7 @@ for(const side of ['BUY','SELL'])test(side+' tolerance still rejects excess drif
 
 test('session close attempts every bot and finishes unresolved closes even after PnL drops below target',async()=>{
  const e=new DemoEngine({offset:0},{version:1,records:[{id:'bd1_a',symbol:'AAAUSDT',side:'BUY',entryStatus:'FILLED'},{id:'bd1_b',symbol:'BBBUSDT',side:'SELL',entryStatus:'FILLED'}],startedAt:Date.now()-1000},()=>{});
+ e.entryPolicy.sessionExit='close-bot-positions'; // Historical forced-close session policy.
  e.auto=true;e.lastIncome=Date.now();e.income=[{income:'30'}];e.positions=[];
  const attempts=[];let failFirst=true;
  e.close=async(symbol)=>{attempts.push(symbol);if(symbol==='AAAUSDT'&&failFirst)throw new DemoError('Close unresolved');e.owned(symbol).closedAt=Date.now();};
@@ -1292,7 +1294,7 @@ test('trial starts once, persists exact hour, and refuses to extend on repeated 
  assert.equal(await f.e.startTrial(),true);const t={...f.e.state.oneHourTrial};assert.equal(t.until-t.startedAt,3600000);
  assert.equal(await f.e.startTrial(),false);assert.deepEqual(f.e.state.oneHourTrial,t);
  const reload=new DemoEngine(f.api,JSON.parse(JSON.stringify(f.e.state)),()=>{});reload.bandRules=false;assert.equal(reload.trialActive(t.until-1),true);assert.equal(reload.trialActive(t.until),false);assert.equal(reload.trialActive(t.startedAt-1),false);
- assert.equal(reload.entryPolicy.maxLeverage,100);assert.equal(reload.entryPolicy.lossLimit,.5);
+ assert.equal(reload.entryPolicy.maxLeverage,100);assert.equal(reload.entryPolicy.lossLimit,1);
 });
 test('Stop during trial start checks prevents both auto and timer activation',async()=>{
  const f=fixture();f.e.newRules=true;let release;f.e.start=async()=>{await new Promise(r=>release=r);};

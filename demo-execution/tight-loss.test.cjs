@@ -1,10 +1,10 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {DemoEngine,DemoError,trendContinuationSetup,bollingerSetup}=require('./engine.js');
-const {fixture,entryBars,setTradeNet,symbol}=require('./test-fixture.cjs');
+const {v181Policy,fixture,entryBars,setTradeNet,symbol}=require('./test-fixture.cjs');
 function bars(side,ms=60000){const rows=entryBars(side),end=Math.floor(Date.now()/ms)*ms;rows.forEach((b,i)=>{b[0]=end-(rows.length-i)*ms;b[6]=b[0]+ms-1;});return rows;}
 function setup(side='BUY',band=false,legacy=false){
- const f=fixture(),prior=f.e.entryPolicy;f.e.newRules=f.e.bandRules=true;f.e.entryPolicy={...new DemoEngine({offset:0}).entryPolicy,marginMode:'risk-capped',leverageMode:'highest-fee-compatible',maxLeverage:150};f.signal.side=side;
+ const f=fixture(),prior=f.e.entryPolicy;f.e.newRules=f.e.bandRules=true;f.e.entryPolicy={...v181Policy(),marginMode:'risk-capped',leverageMode:'highest-fee-compatible',maxLeverage:150};f.signal.side=side;
  if(legacy)f.e.entryPolicy={...f.e.entryPolicy,...prior,profitExit:'small-net-profit',profitStart:1,profitStep:null,takeProfit:1,minimumNetAtTarget:1,entryDirection:'closed-candle-stable-quotes'};
  const base=f.api.call;f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/klines'?bars(side,q.interval==='5m'?300000:60000):base(m,p,q,s);
  if(band){const rows=bars('BUY',300000);rows.forEach(b=>{b[1]=104;b[2]=105.3;b[3]=103.7;b[4]=105;});Object.assign(rows.at(-2),{1:104,2:104.3,3:95,4:96});Object.assign(rows.at(-1),{1:96,2:100.3,3:95.8,4:100});f.signal=bollingerSetup(side==='BUY'?rows:rows.map(b=>[b[0],200-b[1],200-b[3],200-b[2],200-b[4],b[5],b[6]]),side,Date.now());}
@@ -14,8 +14,8 @@ function setup(side='BUY',band=false,legacy=false){
 async function opened(side='BUY',band=false,legacy=false){const f=setup(side,band,legacy);await f.e.enter(symbol,f.signal);assert.ok(f.e.owned(symbol),f.e.entryOutcome);return f;}
 const entries=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);
 const closes=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&c.p.reduceOnly);
-test('tight defaults retain entry strategies, $1 profit and the $20 session target',()=>{
- const p=new DemoEngine({offset:0}).entryPolicy;assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.earlyLossExit,null);assert.equal(p.marginMode,'risk-capped');assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);assert.deepEqual(p.strategies,['bollinger-wr','trend-continuation']);assert.equal(p.entryDirection,'closed-candle-stable-quotes');
+test('V1.79–V1.81 tight defaults retain entry strategies, $1 profit and the $20 session target',()=>{
+ const p=v181Policy();assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.earlyLossExit,null);assert.equal(p.marginMode,'risk-capped');assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);assert.deepEqual(p.strategies,['bollinger-wr','trend-continuation']);assert.equal(p.entryDirection,'closed-candle-stable-quotes');
 });
 for(const side of ['BUY','SELL']){
  for(const band of [false,true])test(side+' '+(band?'band':'trend')+' uses a smaller position that fits fees, spread and volatility',async()=>{
@@ -80,17 +80,17 @@ test('fees too large for the reference move still block entries',async()=>{
 });
 test('migration replaces the old $12 stop only after the new $1 stop is confirmed',async()=>{
  const f=await opened('BUY',false,true),r=f.e.owned(symbol),old=r.exits.find(x=>x.kind==='sl12'&&!x.cancelled),qty=f.position.positionAmt,leverage=r.leverage;
- setTradeNet(f,-.4);const previousCalls=f.calls.length;f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;await f.e.reconcile();assert.ok(!r.closedAt);assert.equal(r.rulesVersion,14);assert.equal(r.lossLimit,.5);assert.equal(r.lossRecovery,null);assert.equal(f.position.positionAmt,qty);assert.equal(r.leverage,leverage);
+ setTradeNet(f,-.4);const previousCalls=f.calls.length;f.e.entryPolicy=v181Policy();await f.e.reconcile();assert.ok(!r.closedAt);assert.equal(r.rulesVersion,14);assert.equal(r.lossLimit,.5);assert.equal(r.lossRecovery,null);assert.equal(f.position.positionAmt,qty);assert.equal(r.leverage,leverage);
  const changes=f.calls.slice(previousCalls),install=changes.findIndex(c=>c.method==='POST'&&c.path==='/fapi/v1/algoOrder'),cancel=changes.findIndex(c=>c.method==='DELETE'&&c.path==='/fapi/v1/algoOrder'&&(c.p.clientAlgoId===old.id||String(c.p.algoId)===String(old.algoId)));
  assert.ok(install>=0&&cancel>install);assert.equal(old.cancelled,true);assert.ok(r.exits.some(x=>x.kind==='sl1'&&x.confirmed&&!x.cancelled));
 });
 test('existing large positions already below the new stop close on migration without resizing',async()=>{
- const f=await opened('BUY',false,true),r=f.e.owned(symbol),qty=f.position.positionAmt;setTradeNet(f,-2);r.lossRecovery={allowed:true};f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;
+ const f=await opened('BUY',false,true),r=f.e.owned(symbol),qty=f.position.positionAmt;setTradeNet(f,-2);r.lossRecovery={allowed:true};f.e.entryPolicy=v181Policy();
  await f.e.reconcile();assert.ok(r.closedAt);assert.equal(r.closeReason,'$0.50 net trade loss');assert.equal(Number(closes(f).at(-1).p.quantity),Number(qty));assert.equal(r.lossRecovery,null);
 });
 test('restart loads tight stops for a previous-version position and does not replay entry',async()=>{
  const f=await opened('SELL',false,true),r=f.e.owned(symbol);setTradeNet(f,-.6);
- const e=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});e.meta=f.e.meta;await e.refresh();await e.reconcile();assert.equal(e.active().length,0);assert.equal(e.state.records[0].closeReason,'$0.50 net trade loss');assert.equal(e.auto,false);assert.equal(entries(f).length,1);
+ const e=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});e.entryPolicy=v181Policy();e.meta=f.e.meta;await e.refresh();await e.reconcile();assert.equal(e.active().length,0);assert.equal(e.state.records[0].closeReason,'$0.50 net trade loss');assert.equal(e.auto,false);assert.equal(entries(f).length,1);
 });
 for(const kind of ['fees','quote'])test(kind+' failure keeps the new exchange backup active',async()=>{
  const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,-.6);r.tradeAccounting=null;const base=f.api.call;
@@ -98,12 +98,12 @@ for(const kind of ['fees','quote'])test(kind+' failure keeps the new exchange ba
  await f.e.reconcile();assert.ok(f.position);assert.ok(r.estimateError);assert.ok(r.exits.some(x=>x.kind==='sl1'&&x.confirmed&&!x.cancelled));assert.equal(closes(f).length,0);
 });
 test('missing ledger during migration still replaces a stale $12 backup',async()=>{
- const f=await opened('BUY',false,true),r=f.e.owned(symbol);setTradeNet(f,-.4);f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;const base=f.api.call;
+ const f=await opened('BUY',false,true),r=f.e.owned(symbol);setTradeNet(f,-.4);f.e.entryPolicy=v181Policy();const base=f.api.call;
  f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/userTrades')throw new DemoError('unavailable',503);return base(m,p,q,s);};
  await f.e.reconcile();assert.ok(f.position);assert.ok(r.exits.some(x=>x.kind==='sl1'&&x.confirmed&&!x.cancelled));assert.ok(!r.exits.some(x=>x.kind==='sl12'&&!x.cancelled));
 });
 test('unconfirmed tighter protection closes the position instead of retaining wider loss risk',async()=>{
- const f=await opened('BUY',false,true),r=f.e.owned(symbol);setTradeNet(f,-.4);f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;f.failProtection=true;
+ const f=await opened('BUY',false,true),r=f.e.owned(symbol);setTradeNet(f,-.4);f.e.entryPolicy=v181Policy();f.failProtection=true;
  await assert.rejects(()=>f.e.reconcile(),e=>e.code===-1111);assert.ok(r.closedAt);assert.equal(r.closeReason,'Loss protection failure');assert.equal(closes(f).length,1);
 });
 test('an ambiguous tight-stop close is journaled and not blindly duplicated',async()=>{
