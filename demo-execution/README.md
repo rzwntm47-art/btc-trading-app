@@ -1,3 +1,13 @@
+## V1.77 — additional trend-continuation entries
+
+The scanner previously considered only Bollinger/Williams %R rebounds. V1.76 diagnostics confirmed successful scanning but all preliminary setups were filtered. Add a separate continuation candidate for the same current gainers and losers: aligned closed 1m/5m trends, a directional 1m candle, relative volume, and no overextended candle. Keep all 14 Bollinger timeframes and their existing rules. Both paths share the existing candle datasets; a trend data failure does not suppress an otherwise valid band setup.
+
+Recheck fresh 1m and 5m candles for a selected trend entry and require the existing advancing bid/ask confirmation immediately before dispatch. Keep $300 margin, select lower leverage when needed for one 1m ATR plus spread and fees to fit the $6 entry-risk budget, and retain commission limits and at least $5 estimated net at the reference move. The trend reference is two observed 1m ATRs from the setup; it is a cost-screening scenario, not a forecast or a fixed take-profit.
+
+Both entry paths use the existing $2–$6 adverse-move exit, normal $6 loss decision, $12 exchange backup, $5/$8/$11/+3 net profit pullbacks, and $20 net session close/stop. Manual Stop, duplicate-order prevention, reconciliation and counter reset remain. Tests use simulated exchange responses and do not establish profitable performance.
+
+Install both `demo-execution` and `render-backend`, run `START-LAPTOP.cmd`, reconnect and use **Sync Binance → Start / Resume Demo**. Verify laptop engine and page show V1.77. The setup list and trade diagnostics identify which entry path was selected.
+
 ## V1.76 — release startup after confirmed flat Binance state
 
 A saved FILLED entry could still block startup forever in V1.75 when execution history did not show its complete closing fills. The scanner had checked zero coins, even while all Binance reads succeeded.

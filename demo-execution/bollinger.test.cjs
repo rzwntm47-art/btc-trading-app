@@ -192,7 +192,7 @@ for(const minutes of [2,3,4,6,7,8,9,10])test(minutes+'m complete aggregation cre
 test('all 14 frames share two reads, cache within the candle, and refresh on a new minute',async()=>{
  const f=bandFixture(),base=f.api.call,reads=[];f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')reads.push({...q});return base(m,p,q,s);};
  const mover={symbol,side:'BUY',change:12};let result=await f.e.scanCandidate(symbol,mover,f.e.stopEpoch);
- assert.deepEqual(result.checks.map(c=>c.minutes),BAND_TIMEFRAMES);assert.ok(result.signal);assert.deepEqual(reads.map(r=>[r.interval,r.limit]),[['1m',250],['5m',300]]);
+ assert.deepEqual(result.checks.filter(c=>c.setupType==='bollinger-wr').map(c=>c.minutes),BAND_TIMEFRAMES);assert.ok(result.signal);assert.deepEqual(reads.map(r=>[r.interval,r.limit]),[['1m',250],['5m',300]]);
  await f.e.scanCandidate(symbol,mover,f.e.stopEpoch);assert.equal(reads.length,2);
  f.api.offset=60000;await f.e.scanCandidate(symbol,mover,f.e.stopEpoch);assert.ok(reads.length>=3);
 });
@@ -201,7 +201,7 @@ for(const failed of ['1m','5m'])test('ordinary '+failed+' read failure does not 
   if(p==='/fapi/v1/klines'){reads.push(q.interval);if(q.interval===failed)throw new DemoError('temporary read',503);if(q.interval==='1m')return bandBars('BUY',Date.now(),1);}
   return base(m,p,q,s);
  };
- const result=await f.e.scanCandidate(symbol,{side:'BUY',change:12},f.e.stopEpoch);assert.ok(result.signal);assert.equal(result.signal.intervalMs,failed==='1m'?300000:60000);assert.equal(reads.filter(i=>i===failed).length,1);assert.equal(result.checks.length,14);assert.equal(f.e.auto,true);
+ const result=await f.e.scanCandidate(symbol,{side:'BUY',change:12},f.e.stopEpoch);assert.ok(result.signal);assert.equal(result.signal.intervalMs,failed==='1m'?300000:60000);assert.equal(reads.filter(i=>i===failed).length,1);assert.equal(result.checks.length,15);assert.equal(f.e.auto,true);
 });
 test('rate limits abort multi-frame scans and Stop during a read cannot return an entry',async()=>{
  const f=bandFixture(),base=f.api.call;f.api.call=async(m,p,q,s)=>{if(p==='/fapi/v1/klines')throw new DemoError('rate limit',429);return base(m,p,q,s);};
