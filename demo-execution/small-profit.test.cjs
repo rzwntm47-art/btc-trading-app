@@ -7,7 +7,7 @@ function trendBars(side,ms=60000){
  rows.forEach((b,i)=>{b[0]=end-(rows.length-i)*ms;b[6]=b[0]+ms-1;});return rows;
 }
 function setup(side='BUY',band=false){
- const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;f.signal.side=side;
+ const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy={...new DemoEngine({offset:0}).entryPolicy,...f.e.entryPolicy,profitExit:'small-net-profit',profitStart:1,profitStep:null,takeProfit:1,minimumNetAtTarget:1,entryDirection:'closed-candle-stable-quotes'};f.signal.side=side;
  const base=f.api.call;
  f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/klines'?trendBars(side,q.interval==='5m'?300000:60000):p==='/fapi/v1/commissionRate'&&band?{takerCommissionRate:'.00001'}:base(m,p,q,s);
  if(band){
@@ -23,7 +23,7 @@ const closes=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&
 test('current defaults select small net exits and retain the $20 session and loss controls',()=>{
  const p=new DemoEngine({offset:0}).entryPolicy;
  assert.equal(p.profitExit,'small-net-profit');assert.equal(p.profitStart,1);assert.equal(p.takeProfit,1);assert.equal(p.profitStep,null);assert.equal(p.minimumNetAtTarget,1);
- assert.equal(p.entryDirection,'closed-candle-stable-quotes');assert.equal(p.sessionTarget,20);assert.equal(p.earlyLossMin,2);assert.equal(p.lossLimit,6);assert.equal(p.maxLossLimit,12);assert.equal(p.margin,300);
+ assert.equal(p.entryDirection,'closed-candle-stable-quotes');assert.equal(p.sessionTarget,20);assert.equal(p.earlyLossMin,null);assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.margin,300);
 });
 for(const side of ['BUY','SELL']){
  for(const net of [1,2,3])test(side+' closes immediately at $'+net+' total net without a pullback',async()=>{
@@ -90,7 +90,7 @@ test('manual Stop stops entries while owned positions can still close at small p
 test('migration and restart preserve size, ownership, history and the $12 backup',async()=>{
  const f=await opened(),r=f.e.owned(symbol),quantity=f.position.positionAmt,leverage=r.leverage,orderId=r.orderId;
  r.rulesVersion=12;r.exitPolicy='stepped-net-trailing';r.profitFloor=8;r.trailPeak=9;setTradeNet(f,.7);
- const e=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});e.meta=f.e.meta;await e.refresh();await e.reconcile();const next=e.owned(symbol);
+ const e=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});e.entryPolicy={...f.e.entryPolicy};e.meta=f.e.meta;await e.refresh();await e.reconcile();const next=e.owned(symbol);
  assert.equal(next.rulesVersion,13);assert.equal(next.exitPolicy,'small-net-profit');assert.equal(next.previousExitPolicy.profitFloor,8);assert.equal(next.profitFloor,null);assert.equal(next.orderId,orderId);assert.equal(next.leverage,leverage);assert.equal(f.position.positionAmt,quantity);assert.equal(f.trades.length,1);assert.ok(next.exits.some(x=>x.kind==='sl12'&&x.confirmed&&!x.cancelled));
  setTradeNet(f,1);await e.refresh();await e.reconcile();assert.ok(next.closedAt);assert.equal(e.auto,false);
 });

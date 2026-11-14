@@ -107,7 +107,7 @@ test('a small stable loss is held and stale observations are discarded after res
  t.mock.timers.enable({apis:['Date'],now:Date.now()});const f=await opened(),r=f.e.owned(symbol);
  setTradeNet(f,-2.01);await f.e.reconcile();t.mock.timers.tick(1100);await f.e.reconcile();t.mock.timers.tick(1100);await f.e.reconcile();
  assert.ok(f.position);assert.equal(closes(f).length,0);
- t.mock.timers.tick(16000);const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.meta=f.e.meta;
+ t.mock.timers.tick(16000);const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.entryPolicy={...f.e.entryPolicy};restored.meta=f.e.meta;
  await restored.refresh();await restored.reconcile();assert.equal(restored.owned(symbol).earlyLossQuotes.length,1);assert.ok(f.position);
 });
 for(const side of ['BUY','SELL'])test(side+' opposing completed candle triggers the integrated early exit',async t=>{

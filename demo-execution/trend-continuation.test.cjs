@@ -94,5 +94,5 @@ test('a failed optional trend read does not suppress an independently valid band
 test('increased volatility at the final quote cancels a trend entry that no longer fits $6',async()=>{
  const f=setup(),base=f.api.call;let reads=0;
  f.api.call=async(m,p,q,s)=>{const result=await base(m,p,q,s);if(p==='/fapi/v1/klines'&&q.interval==='1m'&&++reads===2)for(const row of result){row[2]+=.1;row[3]-=.1;}return result;};
- await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/Fresh trend exposure exceeds/);assert.equal(f.e.auto,true);
+ await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.match(f.e.entryOutcome,/Fresh exposure exceeds/);assert.equal(f.e.auto,true);
 });
