@@ -1,3 +1,15 @@
+## V1.83 — remove discretionary entry gates
+
+The current entry policy uses recent 1m price direction and a fresh directional quote. Candle body/close-strength thresholds, minimum volume, moving-average alignment and the separate 0.75-ATR chase distance no longer reject current entries. Small pullbacks, spread changes and a fresh quote without a second advancing timestamp are allowed when executable-price sizing and protection still fit. The live price must remain on the intended side of the current candle open, or the latest completed candle open when forming data is absent.
+
+The hypothetical reference target is now advisory: there is no $1 reference-net minimum or 25% commission-to-reference cap. A position can qualify even if that reference estimate is smaller or the reference price has already been passed. This is not a profit prediction. Actual opening/closing fees, spread and adverse mark difference still determine size; their budget remains half the $1 normal loss trigger, and one recent 1m ATR plus costs must fit the $1.50 backup budget. Binance minimums and valid available funds still apply.
+
+The $1 net-loss trigger, fee-adjusted $1.50 exchange backup, uncapped profit trail from $1 net, flexible margin and $20 booked session goal remain. Protection must be confirmed for filled orders. Manual Stop, ownership checks and journaled reconciliation of uncertain orders remain active. The same filled candle is not replayed. These rules do not guarantee a fill, profit or maximum realized loss.
+
+Regression tests reproduce previously filtered BUY and SELL entries with small candle bodies, low volume, opposing averages, minor quote pullbacks, widened spreads, passed reference prices and reference net below $1. They also verify valid stop protection, stale/reversing quote rejection, invalid-data/minimum-size handling, manual Stop and uncertain-order deduplication. Tests simulate exchange responses and do not demonstrate profitability.
+
+Update both `demo-execution` and `render-backend`, restart `START-LAPTOP.cmd`, reconnect, then **Sync Binance → Start / Resume Demo**. Confirm the page and connected engine show **V1.83**. Publishing the website cannot update a running laptop connector. No reset or history deletion is needed.
+
 ## V1.82 — immediate 1m entries and uncapped net-profit trailing
 
 New entries first check recent 1m momentum and fresh executable quotes. A qualifying fast setup returns immediately without fetching 5m confirmation; it can submit while the current 1m candle is forming. The 24h gainers/losers list supplies candidates, but actual 1m direction determines BUY or SELL. If the fast path does not qualify, the existing 14 Bollinger frames and 1m / 5m continuation remain available. Per-symbol cooldown is 30 seconds after close, with a fresh untraded candle still required. Uncertain orders, existing positions, stale/reversing quotes and exchange constraints remain protected.

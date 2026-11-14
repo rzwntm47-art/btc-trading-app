@@ -60,7 +60,7 @@ test('the first $1 peak can close on its $0.50 pullback',async()=>{
 });
 test('fresh reversal or stale 1m evidence still prevents an entry',async()=>{
  const f=setup(),now=Date.now();assert.ok(entryConfirmation(entryBars('SELL',now),f.signal,now).reason);assert.equal(minuteMomentumSetup(entryBars('BUY',now-120000),'BUY',now),null);
- const base=f.api.call;f.api.call=async(m,p,q,s)=>{const out=await base(m,p,q,s);if(p==='/fapi/v1/ticker/bookTicker')return {...out,bidPrice:'99.99',askPrice:'99.99'};return out;};
+ const base=f.api.call;f.api.call=async(m,p,q,s)=>{const out=await base(m,p,q,s);if(p==='/fapi/v1/ticker/bookTicker')return {...out,bidPrice:'99.6',askPrice:'99.6'};return out;};
  await f.e.enter(symbol,f.signal);assert.equal(entries(f).length,0);assert.equal(f.e.auto,true);
 });
 test('Stop during fast scan cancels the candidate before entry',async()=>{

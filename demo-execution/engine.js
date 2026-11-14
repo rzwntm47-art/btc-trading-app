@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.82';
+const APP_VERSION='1.83';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -192,7 +192,22 @@ function trendContinuationSetup(minute,five,side,now,explain=()=>{}){
   if(!(referenceTarget>0))return reject('Invalid trend reference price');
   return {...setup,setupType:'trend-continuation',referenceTarget,referenceAtr:2,trendEvidence:{oneMinute:candleTrend(minute,now,60000),fiveMinute:candleTrend(five,now,300000),volumeRatio:setup.volumeRatio,body:setup.body,closeStrength:setup.closeStrength},referenceNote:'Two observed 1m ATRs are a cost-check reference, not a profit forecast or fixed take-profit'};
 }
-function minuteMomentumSetup(minute,side,now,explain=()=>{}){
+function minuteMomentumSetup(minute,side,now,explain=()=>{},{directionOnly=false}={}){
+  if(directionOnly){
+    // Candle shape, volume and moving-average alignment are descriptive here.
+    // Fresh direction plus execution/protection checks decide the entry.
+    breakout(minute,now,60000);
+    const bars=minute.filter(b=>number(b[6])<now),last=bars.at(-1),previous=bars.at(-2);
+    if(bars.length<21||now-number(last[6])>75000){explain('Latest closed 1m candle is unavailable or stale');return null;}
+    const open=number(last[1]),price=number(last[4]),change=price-open||price-number(previous[4]);
+    const direction=change>0?'BUY':change<0?'SELL':null;
+    if(!direction||(side&&direction!==side)){explain('Recent 1m price direction is flat or opposes the entry');return null;}
+    const observed=entryMomentum(minute,direction,now),atr=observed.atr;
+    if(!(atr>0)){explain('Valid recent volatility is required for order sizing');return null;}
+    const referenceTarget=price+(direction==='BUY'?1:-1)*2*atr;
+    if(!(referenceTarget>0)){explain('Invalid momentum reference price');return null;}
+    return {side:direction,price,close:number(last[6]),high:number(last[2]),low:number(last[3]),atr,stopDistance:1.5*atr,qualityConfirmed:true,strength:1,leverage:3,intervalMs:60000,setupType:'minute-momentum',invalidationPrice:open,referenceTarget,referenceAtr:2,trendEvidence:{oneMinute:{...observed,reason:null,advisoryReason:observed.reason||null}},referenceNote:'Recent price direction; candle shape, volume, moving averages and target estimates do not gate entry'};
+  }
   let reason;const setup=momentumSetup(minute,minute,now,60000,r=>reason=r,60000);
   if(!setup){explain(reason||'No confirmed 1m momentum');return null;}
   if(side&&setup.side!==side){explain('Fresh 1m momentum reversed before entry');return null;}
@@ -200,8 +215,9 @@ function minuteMomentumSetup(minute,side,now,explain=()=>{}){
   if(!(referenceTarget>0)){explain('Invalid momentum reference price');return null;}
   return {...setup,setupType:'minute-momentum',referenceTarget,referenceAtr:2,trendEvidence:{oneMinute:candleTrend(minute,now,60000)},referenceNote:'Recent 1m trend and live quotes; no 5m confirmation. Two ATRs are a cost reference, not a profit forecast.'};
 }
-function entryPriceReason(price,signal,{tolerant=false}={}){
+function entryPriceReason(price,signal,{tolerant=false,directionOnly=false}={}){
   if(!(Number.isFinite(price)&&price>0&&Number.isFinite(signal.price)&&signal.price>0&&Number.isFinite(signal.atr)&&signal.atr>0)||!['BUY','SELL'].includes(signal.side))return 'Invalid entry price or signal';
+  if(directionOnly)return null; // Current direction is checked with the latest executable quotes.
   if(Math.abs(price-signal.price)>(tolerant?.75:.5)*signal.atr)return 'Price moved too far from the confirmed candle';
   if(signal.setupType==='bollinger-wr'){
     const b=signal.bands;if(!b||![b.lower,b.middle,b.upper].every(Number.isFinite)||!(b.lower<b.middle&&b.middle<b.upper))return 'Invalid Bollinger targets';
@@ -221,7 +237,7 @@ function signalLeverageCeiling(signal,market,now){
   const fresh=market&&Number.isFinite(market.closedAt)&&now>=market.closedAt&&now-market.closedAt<=315000;
   return fresh&&market.side===signal.side?base:Math.min(3,base);
 }
-function selectEntryCandidate(primary,{price,fee,now,traded=()=>false,confirm=()=>null,intervals=[1,2,3,4,5,10,15,20,30,60],maxCandidates=intervals.length}){
+function selectEntryCandidate(primary,{price,fee,now,traded=()=>false,confirm=()=>null,intervals=[1,2,3,4,5,10,15,20,30,60],maxCandidates=intervals.length,directionOnly=false}){
   const choices=[primary,...(Array.isArray(primary.alternatives)?primary.alternatives:[])].slice(0,maxCandidates),checks=[];
   for(const candidate of choices){
     const {alternatives,...signal}=candidate,intervalMs=signal.intervalMs||300000;
@@ -229,10 +245,10 @@ function selectEntryCandidate(primary,{price,fee,now,traded=()=>false,confirm=()
     if(signal.side!==primary.side||!signal.qualityConfirmed||!(signal.strength>=1)||![3,5,8].includes(signal.leverage)||!(signal.stopDistance>0&&Number.isFinite(signal.stopDistance))||!(signal.atr>0&&Number.isFinite(signal.atr))||!Number.isFinite(signal.price))reason='Invalid or opposite-direction candidate';
     else if(!intervals.includes(intervalMs/60000)||!Number.isFinite(signal.close)||signal.close>=now||now-signal.close>intervalMs+15000)reason='Signal became stale';
     else if(traded(signal))reason='Already traded this candle';
-    else reason=entryPriceReason(price,signal,{tolerant:true});
-    if(!reason&&signal.setupType==='bollinger-wr'&&Math.abs(signal.bands.middle-price)<4*fee*(price+signal.bands.middle))reason='Commission exceeds 25% of the gross move to the middle-band reference target';
-    if(!reason&&['trend-continuation','minute-momentum'].includes(signal.setupType)&&Math.abs(signal.referenceTarget-price)<4*fee*(price+signal.referenceTarget))reason='Commission exceeds 25% of the trend reference move';
-    if(!reason&&!['bollinger-wr','trend-continuation','minute-momentum'].includes(signal.setupType)&&2*signal.atr<=3*(2*price*fee))reason='Estimated candle movement too small relative to round-trip commission';
+    else reason=entryPriceReason(price,signal,{tolerant:true,directionOnly});
+    if(!directionOnly&&!reason&&signal.setupType==='bollinger-wr'&&Math.abs(signal.bands.middle-price)<4*fee*(price+signal.bands.middle))reason='Commission exceeds 25% of the gross move to the middle-band reference target';
+    if(!directionOnly&&!reason&&['trend-continuation','minute-momentum'].includes(signal.setupType)&&Math.abs(signal.referenceTarget-price)<4*fee*(price+signal.referenceTarget))reason='Commission exceeds 25% of the trend reference move';
+    if(!directionOnly&&!reason&&!['bollinger-wr','trend-continuation','minute-momentum'].includes(signal.setupType)&&2*signal.atr<=3*(2*price*fee))reason='Estimated candle movement too small relative to round-trip commission';
     if(!reason)reason=confirm({...signal,intervalMs});
     checks.push({minutes:intervalMs/60000,side:signal.side,setupType:signal.setupType||'breakout',reason:reason||'Entry candidate selected'});
     if(!reason)return {signal:{...signal,intervalMs},checks};
@@ -242,8 +258,9 @@ function selectEntryCandidate(primary,{price,fee,now,traded=()=>false,confirm=()
 function bandEntryCosts(signal,entry,qty,fee,minimumNet=5){
   const target=Number(['trend-continuation','minute-momentum'].includes(signal.setupType)?signal.referenceTarget:signal.bands?.middle),gross=(target-entry)*(signal.side==='BUY'?1:-1)*qty;
   const commission=(entry+target)*qty*fee,net=gross-commission;
-  const reason=!(target>0&&entry>0&&qty>0&&fee>=0&&minimumNet>0&&Number.isFinite(minimumNet)&&Number.isFinite(gross)&&Number.isFinite(commission))?'Invalid target cost estimate':gross<=0?'Reference target is behind the entry price':commission>gross*.25+1e-8?'Opening + closing commission would consume more than 25% of the reference target move':net<minimumNet-1e-8?'Reference target leaves less than $'+minimumNet+' after estimated opening + closing commission':null;
-  return {referenceTarget:target,grossAtTarget:gross,commissionAtTarget:commission,netAtTarget:net,maxCommissionShare:.25,minimumNetAtTarget:minimumNet,reason};
+  const advisory=minimumNet===null;
+  const reason=!(target>0&&entry>0&&qty>0&&fee>=0&&(advisory||(minimumNet>0&&Number.isFinite(minimumNet)))&&Number.isFinite(gross)&&Number.isFinite(commission))?'Invalid target cost estimate':advisory?null:gross<=0?'Reference target is behind the entry price':commission>gross*.25+1e-8?'Opening + closing commission would consume more than 25% of the reference target move':net<minimumNet-1e-8?'Reference target leaves less than $'+minimumNet+' after estimated opening + closing commission':null;
+  return {referenceTarget:target,grossAtTarget:gross,commissionAtTarget:commission,netAtTarget:net,maxCommissionShare:advisory?null:.25,minimumNetAtTarget:minimumNet,...(advisory?{advisoryOnly:true}:{}),reason};
 }
 function experimentSignal(raw,now){
   breakout(raw,now,60000);
@@ -312,8 +329,12 @@ function earlyLossDecision(r,quote,now,observations=[],momentum=null){
   }
   return hold('No confirmed deterioration; existing exits remain active');
 }
-function entryConfirmation(raw,signal,now,trendRaw){
+function entryConfirmation(raw,signal,now,trendRaw,{directionOnly=false}={}){
   const current=entryMomentum(raw,signal.side,now),minutes=(signal.intervalMs||300000)/60000;
+  if(directionOnly){
+    let reason;const fresh=minuteMomentumSetup(raw,signal.side,now,r=>reason=r,{directionOnly:true});
+    return {...current,reason:fresh?null:reason,signalMinutes:minutes,confirmation:fresh?'Recent price direction agrees; fresh quotes and order protection decide entry':null};
+  }
   if(signal.setupType==='minute-momentum'){
     let reason;const fresh=minuteMomentumSetup(raw,signal.side,now,r=>reason=r);
     return {...current,reason:fresh?null:reason,signalMinutes:1,trendEvidence:fresh?.trendEvidence,confirmation:fresh?'Recent 1m momentum confirms '+signal.side+'; fresh live quotes required, no 5m wait':null};
@@ -348,11 +369,24 @@ function entryConfirmation(raw,signal,now,trendRaw){
   if(sharp||(opposing&&sustained))return {...current,reason:'Current 1m reversal opposes the '+minutes+'m '+signal.side+' setup'};
   return {...current,reason:null,signalMinutes:minutes,confirmation:'Small 1m pullback allowed; selected timeframe and price boundary remain valid'};
 }
-function bandEntryLiveCheck(before,quote,momentum,{symbol,side,tick,now,raw,checkpoint,allowStable=false}){
+function bandEntryLiveCheck(before,quote,momentum,{symbol,side,tick,now,raw,checkpoint,allowStable=false,directionOnly=false}){
   const sign=side==='BUY'?1:side==='SELL'?-1:0;
   const evidence={checkedAt:now,side,baseline:before,quote,oneMinute:momentum};
   const reject=reason=>({...evidence,reason});
   if(!sign||!(Number(tick)>0)||!momentum||momentum.reason||!(momentum.atr>0)||!Number.isFinite(momentum.closedAt)||momentum.closedAt>=now||now-momentum.closedAt>75000)return reject('Fresh aligned 1m evidence required before entry');
+  if(directionOnly){
+    if(!quote||quote.symbol!==symbol||![quote.bidPrice,quote.askPrice,quote.time].every(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)))||!(Number(quote.bidPrice)>0)||Number(quote.askPrice)<Number(quote.bidPrice))return reject('Fresh valid bid and ask required before entry');
+    if(Number(quote.time)>now||now-Number(quote.time)>5000)return reject('Latest executable quote is stale');
+    const price=(Number(quote.bidPrice)+Number(quote.askPrice))/2,last=raw?.at(-1);
+    let boundary=momentum.open;
+    if(last&&Number(last[6])>=now){
+      const [start,open,high,low,close,volume,end]=last.map(Number);
+      if(![start,open,high,low,close,volume,end].every(Number.isFinite)||start!==momentum.closedAt+1||start>now||end-start!==59999||!(low>0)||high<low||open<low||open>high||close<low||close>high||volume<0)return reject('Current forming 1m candle is invalid');
+      boundary=open;evidence.forming={start,open,high,low,close,end};
+    }
+    if(!Number.isFinite(boundary)||sign*(price-boundary)<=0)return reject('Current live price no longer supports '+side);
+    return {...evidence,directionOnly:true,comparisonPrice:price,comparisonBasis:'quote-midpoint',directionBoundary:boundary,reason:null,confirmation:'Fresh live price supports '+side+'; small pullbacks and spread changes are allowed within the stop budget'};
+  }
   for(const q of [before,quote])if(!q||q.symbol!==symbol||![q.bidPrice,q.askPrice,q.time].every(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)))||!(Number(q.bidPrice)>0)||Number(q.askPrice)<Number(q.bidPrice))return reject('Fresh valid bid and ask observations required before entry');
   const firstAt=Number(before.time),lastAt=Number(quote.time);
   if(firstAt>now||now-firstAt>10000||lastAt>now||now-lastAt>5000||lastAt<=firstAt)return reject('Waiting for two fresh market updates with advancing timestamps');
@@ -464,7 +498,7 @@ class DemoEngine {
   constructor(api,state,persist,notify=()=>{}){
     this.bandRules=true;
     this.resultResetSupported=true;
-    this.entryPolicy={margin:300,marginMode:'risk-capped',leverageMode:'highest-fee-compatible',maxLeverage:100,maxCommissionShare:.25,maxCommissionLossShare:.5,minimumNetAtTarget:1,strategy:'minute-momentum-with-band-fallback',strategies:['minute-momentum','bollinger-wr','trend-continuation'],trendTimeframes:[1],trendReferenceAtr:2,trendVolatilityLossLimit:1.5,reentryCooldownMs:30000,entryDirection:'closed-candle-stable-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:1,maxLossLimit:1.5,lossExit:'tight-net-stop',earlyLossExit:null,earlyLossMin:null,profitStart:1,profitStep:null,profitTrailMin:.5,profitTrailFraction:.1,takeProfit:null,profitExit:'flexible-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'trail-open-positions',sessionTargetBasis:'booked-net',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
+    this.entryPolicy={margin:300,marginMode:'risk-capped',leverageMode:'highest-fee-compatible',maxLeverage:100,entryFilters:'direction-and-protection',maxCommissionShare:null,maxCommissionLossShare:.5,minimumNetAtTarget:null,strategy:'minute-momentum-with-band-fallback',strategies:['minute-momentum','bollinger-wr','trend-continuation'],trendTimeframes:[1],trendReferenceAtr:2,trendVolatilityLossLimit:1.5,reentryCooldownMs:30000,entryDirection:'fresh-directional-quotes',timeframes:[...BAND_TIMEFRAMES],lossLimit:1,maxLossLimit:1.5,lossExit:'tight-net-stop',earlyLossExit:null,earlyLossMin:null,profitStart:1,profitStep:null,profitTrailMin:.5,profitTrailFraction:.1,takeProfit:null,profitExit:'flexible-net-trailing',lossReduction:0,sessionTarget:SESSION_TARGET,sessionExit:'trail-open-positions',sessionTargetBasis:'booked-net',bollingerPeriod:20,bollingerDeviations:2,williamsPeriod:14};
     this.scanAudit={startedAt:Date.now(),checked:0,qualified:0,submitted:0,skipped:0,entryErrors:0,dataErrors:0,lastCheckAt:null,lastSubmittedAt:null,lastResult:null};
     this.appVersion=APP_VERSION;this.newRules=true;this.experimentUntil=LEVERAGE_OVERRIDE_UNTIL;this.overrideUntil=LEVERAGE_OVERRIDE_UNTIL;this.api=api;this.state=state||{version:1,records:[],startedAt:0,goal:false};this.persist=persist;this.notify=notify;this.auto=false;this.connected=false;this.busy=false;this.stopEpoch=0;this.account=null;this.positions=[];this.orders=[];this.algos=[];this.symbols=[];this.meta=new Map();this.cursor=0;this.scanned=[];this.lastScan=0;this.lastIncome=0;this.income=[];this.events=[];this.block='';this.balance=null;
     if(this.state.version!==1||!Array.isArray(this.state.records))throw new DemoError('Invalid demo journal. Do not start; inspect Binance Demo positions.');
@@ -1073,7 +1107,7 @@ class DemoEngine {
     const experimental=this.experimentActive()&&signal.experimental===true;
     if(signal.experimental&&!experimental)return skip('Experiment expired; waiting for a normal signal');
     if(band&&!['bollinger-wr','trend-continuation','minute-momentum'].includes(signal.setupType))return skip('Old strategy candidate ignored; rechecking Bollinger or trend continuation');
-    const tight=band&&this.entryPolicy.lossExit==='tight-net-stop';
+    const tight=band&&this.entryPolicy.lossExit==='tight-net-stop',directionOnly=band&&this.entryPolicy.entryFilters==='direction-and-protection';
     const tiered=tight&&this.entryPolicy.marginMode==='leverage-targeted';
     const marginFor=leverage=>this.entryPolicy.preferredMargins?.find(t=>t.leverage===leverage)?.margin??this.entryPolicy.fallbackMargin;
     const lossLimit=band?this.entryPolicy.lossLimit:trial?null:this.newRules?5:signal.exitPolicy==='manual-profit-60s-loss'?5:9;
@@ -1092,7 +1126,7 @@ class DemoEngine {
     const m=this.meta.get(symbol),lot=m.filters.find(f=>f.filterType==='MARKET_LOT_SIZE'),normal=m.filters.find(f=>f.filterType==='LOT_SIZE'),priceFilter=m.filters.find(f=>f.filterType==='PRICE_FILTER');
     if(!lot||!normal||!priceFilter||!m.orderTypes.includes('MARKET'))return skip('Market-order filters unavailable');
     let momentum,minuteBars,trendBars,directionBaseline,directionCostQuote;
-    const hasTrendCandidate=band&&[signal,...(signal.alternatives||[])].some(c=>c.setupType==='trend-continuation');
+    const hasTrendCandidate=band&&!directionOnly&&[signal,...(signal.alternatives||[])].some(c=>c.setupType==='trend-continuation');
     if(this.newRules){
       progress('Reading current 1m movement for timeframe-aware entry checks');
       try{
@@ -1110,12 +1144,12 @@ class DemoEngine {
     const originalCandidates=signal;
     let candidateChecks;
     if(this.newRules){
-      const selection=selectEntryCandidate(signal,{price,fee,now:Date.now()+this.api.offset,...(band?{intervals:BAND_TIMEFRAMES,maxCandidates:BAND_TIMEFRAMES.length+2}:trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),confirm:candidate=>entryConfirmation(minuteBars,candidate,Date.now()+this.api.offset,trendBars).reason,traded:candidate=>this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&r.signalClose===candidate.close)});
+      const selection=selectEntryCandidate(signal,{price,fee,directionOnly,now:Date.now()+this.api.offset,...(band?{intervals:BAND_TIMEFRAMES,maxCandidates:BAND_TIMEFRAMES.length+2}:trial?{intervals:[1,3,5,15,30,60,120,240]}:{}),confirm:candidate=>entryConfirmation(minuteBars,candidate,Date.now()+this.api.offset,trendBars,{directionOnly}).reason,traded:candidate=>this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&r.signalClose===candidate.close)});
       candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
       if(!selection.signal)return skip('No entry-ready timeframe: '+candidateChecks.map(c=>(c.setupType==='trend-continuation'?'1m/5m trend':c.minutes+'m')+' '+c.reason).join(' | '));
       signal=selection.signal;progress('Selected '+signal.intervalMs/60000+'m '+(signal.setupType||'breakout')+' after price and commission checks');
       if(row){row.setupType=signal.setupType;row.intervalMs=signal.intervalMs;row.candleClosedAt=signal.close;}
-      momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset,trendBars);
+      momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset,trendBars,{directionOnly});
       if(momentum.reason)return skip(momentum.reason+'; scanning continues');
     }
     const usdt=this.account.assets.find(a=>a.asset==='USDT');if(!usdt)throw new DemoError('No USDT available for USDT cross-margin trades');
@@ -1173,8 +1207,8 @@ class DemoEngine {
       try{
         const [quote,currentMark]=await Promise.all([this.entryRead('/fapi/v1/ticker/bookTicker',{symbol},false),this.entryRead('/fapi/v1/premiumIndex',{symbol},false)]);
         const quotedPrice=number(signal.side==='BUY'?quote.askPrice:quote.bidPrice);
-        const selection=selectEntryCandidate(originalCandidates,{price:quotedPrice,fee,now:Date.now()+this.api.offset,intervals:BAND_TIMEFRAMES,maxCandidates:BAND_TIMEFRAMES.length+2,traded:c=>this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&r.signalClose===c.close),confirm:choice=>{
-          const confirmation=entryConfirmation(minuteBars,choice,Date.now()+this.api.offset,trendBars);if(confirmation.reason)return confirmation.reason;
+        const selection=selectEntryCandidate(originalCandidates,{price:quotedPrice,fee,directionOnly,now:Date.now()+this.api.offset,intervals:BAND_TIMEFRAMES,maxCandidates:BAND_TIMEFRAMES.length+2,traded:c=>this.state.records.some(r=>!r.rejected&&r.symbol===symbol&&r.signalClose===c.close),confirm:choice=>{
+          const confirmation=entryConfirmation(minuteBars,choice,Date.now()+this.api.offset,trendBars,{directionOnly});if(confirmation.reason)return confirmation.reason;
           let reason='No size leaves room for the $'+lossLimit+' after-fee stop';
           if(tight)tightSizing={quote,currentMark,atr:confirmation.atr,side:choice.side};
           for(const candidate of sizingLeverages){
@@ -1194,7 +1228,7 @@ class DemoEngine {
         }});
         candidateChecks=selection.checks;const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryCandidates=candidateChecks;
         if(!selection.signal)return skip((tight?'No size fits the tight-stop budget: ':'No fee-compatible leverage for $300 margin: ')+candidateChecks.map(c=>(c.setupType==='trend-continuation'?'1m/5m trend':c.minutes+'m')+' '+c.reason).join(' | ')+'; scanning continues');
-        signal=selection.signal;momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset,trendBars);
+        signal=selection.signal;momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset,trendBars,{directionOnly});
         directionCostQuote={...quote};
         if(row){row.setupType=signal.setupType;row.intervalMs=signal.intervalMs;row.candleClosedAt=signal.close;}
         progress('Selected '+signal.intervalMs/60000+'m after full cost and sizing checks');
@@ -1277,8 +1311,8 @@ class DemoEngine {
         if(band){
           // Uncached re-read after exchange settings: the candle can reverse or
           // roll over while leverage and margin checks are awaiting responses.
-          [minuteBars,trendBars]=await Promise.all([this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false),signal.setupType==='trend-continuation'?this.entryRead('/fapi/v1/klines',{symbol,interval:'5m',limit:30},false):null]);
-          momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset,trendBars);
+          [minuteBars,trendBars]=await Promise.all([this.entryRead('/fapi/v1/klines',{symbol,interval:'1m',limit:30},false),!directionOnly&&signal.setupType==='trend-continuation'?this.entryRead('/fapi/v1/klines',{symbol,interval:'5m',limit:30},false):null]);
+          momentum=entryConfirmation(minuteBars,signal,Date.now()+this.api.offset,trendBars,{directionOnly});
           if(momentum.reason)return skip('Final direction check: '+momentum.reason);
           if(!this.auto||this.entryHold||epoch!==this.stopEpoch||this.controlPending)return skip('Auto or manual action changed during final direction check');
         }
@@ -1291,7 +1325,7 @@ class DemoEngine {
         quoteEvidence=entryQuoteCheck(quote,currentMark,{symbol,side:signal.side,qty,fee,lossLimit,tick:priceFilter.tickSize,now:Date.now()+this.api.offset});
         if(quoteEvidence.reason)return skip(quoteEvidence.reason+'; scanning continues');
         if(band){
-          quoteEvidence.liveDirection=bandEntryLiveCheck(directionBaseline,quote,momentum,{symbol,side:signal.side,tick:priceFilter.tickSize,now:Date.now()+this.api.offset,raw:minuteBars,checkpoint:directionCostQuote,allowStable:this.entryPolicy.entryDirection==='closed-candle-stable-quotes'});
+          quoteEvidence.liveDirection=bandEntryLiveCheck(directionBaseline,quote,momentum,{symbol,side:signal.side,tick:priceFilter.tickSize,now:Date.now()+this.api.offset,raw:minuteBars,checkpoint:directionCostQuote,allowStable:this.entryPolicy.entryDirection==='closed-candle-stable-quotes',directionOnly});
           const row=this.scanned.find(s=>s.symbol===symbol);if(row)row.entryDirection=quoteEvidence.liveDirection;
           if(quoteEvidence.liveDirection.reason)return skip(quoteEvidence.liveDirection.reason+'; scanning continues');
         }
@@ -1300,7 +1334,7 @@ class DemoEngine {
         if(band&&(tight||signal.setupType==='trend-continuation')&&quoteEvidence.estimatedLossAtOneAtr>(tight?this.entryPolicy.maxLossLimit:lossLimit)+1e-8)return skip('Fresh exposure exceeds the $'+(tight?this.entryPolicy.maxLossLimit:lossLimit)+' sizing budget for one 1m ATR plus spread and fees');
         if(!band&&quoteEvidence.estimatedLossAtOneAtr>ENTRY_VOLATILITY_ALLOWANCE+1e-8)return skip('Fresh spread, mark movement and one recent 1m ATR exceed the entry sizing allowance; scanning continues');
         if(trial&&quoteEvidence.estimatedRoundTripFees>2+1e-8)return skip('Fresh quote exceeds the $2 estimated commission allowance; scanning continues');
-        const quoteReason=entryPriceReason(quotedPrice,signal,{tolerant:true});if(quoteReason)return skip('Executable quote: '+quoteReason+'; scanning continues');
+        const quoteReason=entryPriceReason(quotedPrice,signal,{tolerant:true,directionOnly});if(quoteReason)return skip('Executable quote: '+quoteReason+'; scanning continues');
         if(band){quoteEvidence.targetCosts=bandEntryCosts(signal,quotedPrice,qty,fee,this.entryPolicy.minimumNetAtTarget);if(quoteEvidence.targetCosts.reason)return skip('Fresh quote: '+quoteEvidence.targetCosts.reason+'; scanning continues');}
         if(qty<Math.max(number(lot.minQty),number(normal.minQty))||notional<minNotional||qty>number(lot.maxQty)||qty>number(normal.maxQty)||notional>number(leverage.maxNotionalValue))return skip('Fresh quote size exceeds Binance order limits; scanning continues');
         const units=qty/number(normal.stepSize);if(!Number.isFinite(units)||Math.abs(units-Math.round(units))>1e-7)return skip('Quantity is not valid for Binance lot step; scanning continues');
@@ -1829,7 +1863,7 @@ class DemoEngine {
         let reason,signal=null,dataError=false;
         try{
           const minute=await this.bandCandles(symbol,1,controller,datasets);
-          signal=minuteMomentumSetup(minute,null,Date.now()+this.api.offset,r=>reason=r);
+          signal=minuteMomentumSetup(minute,null,Date.now()+this.api.offset,r=>reason=r,{directionOnly:this.entryPolicy.entryFilters==='direction-and-protection'});
         }catch(error){
           if(controller?.signal.aborted||epoch!==this.stopEpoch||!this.auto||error.uncertain||ACCOUNT_BLOCKS.has(error.code))throw error;
           dataError=true;reason='1m data unavailable: '+error.message;

@@ -7,7 +7,7 @@ function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.82',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.83',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.bandRules=false;engine.entryPolicy={margin:300,maxLeverage:10,lossLimit:5,profitExit:'net-trailing',sessionExit:'close-bot-positions'};engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -111,7 +111,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.82');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.83');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -140,7 +140,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.82');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.83');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();
@@ -173,7 +173,7 @@ test('Stepped UI exposes current risk and profit floors and hides the old experi
  const collect=n=>n.textContent+' '+n.children.map(collect).join(' '),text=collect(node('positions'));assert.match(text,/Profit pullback floor/);assert.match(text,/\$8.00/);assert.match(text,/\$6 \/ \$12 targets/);assert.match(text,/No timer or partial reduction/);assert.ok(!text.includes('trim 25%'));
 });
 test('V1.81 UI shows $1 net closes, stable-quote entries and $20 session target',()=>{
- const {node,context,e}=fixture();e.bandRules=true;e.entryPolicy={...new DemoEngine({offset:0}).entryPolicy,profitExit:'small-net-profit',lossLimit:.5,maxLossLimit:1};
+ const {node,context,e}=fixture();e.bandRules=true;e.entryPolicy={...new DemoEngine({offset:0}).entryPolicy,profitExit:'small-net-profit',entryDirection:'closed-candle-stable-quotes',lossLimit:.5,maxLossLimit:1};
  e.positions=[{symbol:'BTCUSDT',positionAmt:'1',entryPrice:'100',markPrice:'101',unRealizedProfit:'1'}];e.state.records=[{id:'bd1_small',symbol:'BTCUSDT',side:'BUY',rulesVersion:14,exitPolicy:'small-net-profit',lossExit:'tight-net-stop',lossLimit:.5,maxLossLimit:1,netEstimate:.7,exits:[]}];
  vm.runInContext('renderActual()',context);assert.match(node('leverageWindow').textContent,/close at \$1 estimated net profit or more/);assert.match(node('leverageWindow').textContent,/stable or favorable quotes/);assert.match(node('sessionHeading').textContent,/\$20 target/);
  const collect=n=>n.textContent+' '+n.children.map(collect).join(' '),text=collect(node('positions'));assert.match(text,/Net profit close target/);assert.match(text,/\$1.00 or more/);assert.match(text,/Fresh fees and executable price/);assert.match(text,/\$0.50 \/ \$1.00 targets/);assert.match(text,/No recovery extension/);assert.ok(!text.includes('Profit pullback floor'));assert.ok(!text.includes('Early loss exit unavailable'));
@@ -185,7 +185,7 @@ test('an older V1.59 Bollinger laptop reports its actual $2 risk-sized policy ra
 test('current UI exposes fast entries, the net trail and actual $1/$1.50 loss targets',()=>{
  const {node,context,e}=fixture();e.bandRules=true;e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;
  e.positions=[{symbol:'BTCUSDT',positionAmt:'1',entryPrice:'100',markPrice:'120',unRealizedProfit:'20'}];e.state.records=[{id:'bd1_trail',symbol:'BTCUSDT',side:'BUY',rulesVersion:15,exitPolicy:'flexible-net-trailing',lossExit:'tight-net-stop',lossLimit:1,maxLossLimit:1.5,netEstimate:20,trailPeak:20,profitFloor:18,exits:[]}];
- vm.runInContext('renderActual()',context);assert.match(node('leverageWindow').textContent,/no 5m wait/);assert.match(node('leverageWindow').textContent,/trail from \$1 net/);assert.match(node('leverageWindow').textContent,/close at \$1 net loss; \$1.5 exchange backup/);assert.match(node('sessionNote').textContent,/\$20 booked net/);assert.match(node('syncNote').textContent,/every 1s/);
+ vm.runInContext('renderActual()',context);assert.match(node('leverageWindow').textContent,/no 5m wait/);assert.match(node('leverageWindow').textContent,/reference profit do not block entry/);assert.match(node('leverageWindow').textContent,/small pullbacks allowed/);assert.ok(!node('leverageWindow').textContent.includes('target net ≥'));assert.match(node('leverageWindow').textContent,/trail from \$1 net/);assert.match(node('leverageWindow').textContent,/close at \$1 net loss; \$1.5 exchange backup/);assert.match(node('sessionNote').textContent,/\$20 booked net/);assert.match(node('syncNote').textContent,/every 1s/);
  const collect=n=>n.textContent+' '+n.children.map(collect).join(' '),text=collect(node('positions'));assert.match(text,/\$1.00 \/ \$1.50 targets/);assert.match(text,/Profit pullback floor.*\$18.00/);assert.match(text,/No profit ceiling/);assert.ok(!text.includes('Net profit close target'));
  e.state.goalStopAt=Date.now();vm.runInContext('renderActual()',context);assert.match(node('sessionNote').textContent,/open positions keep trailing profit and loss exits/);
 });
