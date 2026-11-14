@@ -1,3 +1,13 @@
+## V1.76 — release startup after confirmed flat Binance state
+
+A saved FILLED entry could still block startup forever in V1.75 when execution history did not show its complete closing fills. The scanner had checked zero coins, even while all Binance reads succeeded.
+
+The existing exact-fill recovery remains. If closing history is incomplete, an entry settled for at least 60 seconds can also be archived after two fresh checks at least 5 seconds apart confirm the same FILLED order, zero exposure in both account and symbol-position responses, and no basic or conditional orders on that symbol. A final account/position/order recheck is required. Inconsistent, failed or slow reads reset confirmation; live positions retain their bot ownership and protection. No entry is replayed and no exchange order is canceled by this recovery.
+
+The journal retains the record with `closingHistoryConfirmed: false` and `closingTimeKnown: false`; its archival time starts the existing 10-minute same-symbol cooldown. No realized profit/loss is invented, and the result counter is not reset. Explicit Start resumes normal scanning after all checks pass; manual Stop remains stopped. Copy scan diagnostics now includes pending record reasons and recent recovery evidence.
+
+Install both `demo-execution` and `render-backend`, run `START-LAPTOP.cmd`, reconnect, then **Sync Binance → Start / Resume Demo**. Verify both page and laptop engine show V1.76. The $20 target, gainers/losers selection and all strategy/risk rules are unchanged.
+
 ## V1.75 — resolve a filled entry whose open position was never seen
 
 A fast-closing trade could fill and close before the first position snapshot. Its journal had FILLED but no observedOpen flag, so reconciliation repeatedly blocked all new entries even while positions and orders were empty. The new recovery reads the exact entry fills, follows execution history from that entry, and requires complete entry/closing quantities to balance exactly. It then rechecks current positions and the symbol’s basic/conditional orders before marking that historical record closed. No order is placed, replayed or cancelled by this recovery.

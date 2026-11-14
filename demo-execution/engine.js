@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='1.75';
+const APP_VERSION='1.76';
 const SESSION_TARGET=20;
 const BAND_TIMEFRAMES=Object.freeze([1,2,3,4,5,6,7,8,9,10,15,20,30,60]);
 const ENTRY_MARGIN=300,MAX_ENTRY_LEVERAGE=10;
@@ -621,7 +621,7 @@ class DemoEngine {
     else if(!this.symbols.length)status='No eligible markets have been loaded.';
     else if(elapsed!==null&&elapsed>90)status='No completed coin check for '+elapsed+' seconds. '+(this.block||this.entryOutcome||'Check connection and last scan times.');
     else status='Auto scanning. '+(audit?audit.checked+' completed coin checks; '+audit.qualified+' candle setups; '+audit.submitted+' confirmed order submissions; '+audit.skipped+' entry skips; '+(audit.entryErrors||0)+' entry errors; '+audit.dataErrors+' data errors. Reasons: '+(audit.appFiltered||0)+' app filters; '+(audit.readUnavailable||0)+' entry-data failures; '+(audit.exchangeRejected||0)+' Binance order rejections.':'Detailed counters unavailable from this engine.')+(audit?.lastResult?' Latest: '+audit.lastResult.symbol+' — '+audit.lastResult.reason:' Waiting for first completed check.');
-    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,entryHold:this.entryHold||null,lastRiskCheck:this.lastRiskCheck||null,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,entryResult:s.entryResult||null,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates,entryDirection:s.entryDirection||null})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
+    return {reportType:'scan-diagnostics',appVersion:this.appVersion||null,generatedAt:new Date(now).toISOString(),status,connected:this.connected,tradingReady:!!this.tradingReady,auto:this.auto,entryHold:this.entryHold||null,lastRiskCheck:this.lastRiskCheck||null,startPending:!!this.startPending,retryAt:this.retryAt||null,accountingUpdateRequired:!!this.accountingUpdateRequired,busy:this.busy,controlPending:!!this.controlPending,block:this.block||null,entryPolicy:this.entryPolicy||null,oneHourTrial:this.state.oneHourTrial||null,trialActive:this.trialActive(),marketCount:this.symbols.length,lastScanStartedAt:this.lastScan||null,lastCompletedCheckAt:lastCompleted,scanAudit:audit,scan:this.scanStats||null,marketContext:this.marketContext||null,pendingEntries:this.active().filter(r=>r.reconcileError).map(r=>({symbol:r.symbol,entryStatus:r.entryStatus,observedOpen:!!r.observedOpen,reason:r.reconcileError.message})),recentFlatRecoveries:this.state.records.filter(r=>r.flatRecovery).slice(-5).map(r=>({symbol:r.symbol,...r.flatRecovery})),localSnapshotOnly:true,note:'No trades or fresh account requests are required. Counts are checks since this engine loaded, not unique coins or profit predictions.',recentChecks:this.scanned.slice(0,30).map(s=>({symbol:s.symbol,at:s.at,side:s.side,source:s.source,phase:s.phase,reason:s.reason,entryResult:s.entryResult||null,scanMs:s.scanMs,entryMs:s.entryMs,checks:s.checks,entryCandidates:s.entryCandidates,entryDirection:s.entryDirection||null})),requests:(this.api.timings||[]).slice(-30).map(r=>({at:r.at,method:r.method,path:r.path,ms:r.ms,ok:r.ok,code:r.code}))};
   }
   tradeReport(){
     const now=Date.now(),incomeReady=!!this.lastIncome&&this.incomeWindowStart===this.state.startedAt;
@@ -772,6 +772,39 @@ class DemoEngine {
   }
   async again(){if(this.active().length||this.positions.some(p=>number(p.positionAmt)!==0)||this.orders.length||this.algos.length)throw new DemoError('Close positions and clear pending orders before another session');this.syncDaily();this.state.startedAt=Date.now()+this.api.offset;this.state.resetAt=this.state.startedAt;this.state.dayOpenPnl=0;this.state.goal=false;delete this.state.goalStopAt;delete this.state.goalNet;this.income=[];this.lastIncome=0;this.save();await this.start();}
   async queryEntry(r){return this.api.call('GET','/fapi/v1/order',{symbol:r.symbol,origClientOrderId:r.id});}
+  unseenFlatPosition(rows,symbol,{scoped=false}={}){
+    if(!Array.isArray(rows)||rows.some(p=>!p||typeof p.symbol!=='string'||(scoped&&p.symbol!==symbol)||p.positionSide!=='BOTH'||!['string','number'].includes(typeof p.positionAmt)||!/^[-]?\d+(?:\.\d{1,18})?$/.test(String(p.positionAmt))))throw new DemoError('Fresh account/position confirmation is incomplete or inconsistent');
+    return rows.find(p=>p.symbol===symbol&&!/^-?0+(?:\.0+)?$/.test(String(p.positionAmt)));
+  }
+  async confirmUnseenFlat(r,order,history){
+    this.flatConfirmations??=new Map();
+    const wait=reason=>{this.flatConfirmations.delete(r.id);throw new DemoError(r.symbol+' filled entry: '+reason+'; new entries wait for confirmation.');};
+    const now=Date.now()+this.api.offset,updated=order.updateTime;
+    // A recently acknowledged fill can precede position visibility. Elapsed
+    // time alone never clears a record: corroborated live reads are required.
+    if(!Number.isSafeInteger(updated)||updated<=0||now-updated<60000)wait('closing fills are not confirmed; the entry must settle before flat-state recovery');
+    if(r.pendingClose||r.lossReduction?.status==='PENDING')wait('an existing close or reduction still needs reconciliation');
+    const startedAt=Date.now();
+    const [account,positions,orders,algos,entry]=await Promise.all([
+      this.api.call('GET','/fapi/v3/account'),this.api.call('GET','/fapi/v3/positionRisk',{symbol:r.symbol}),
+      this.api.call('GET','/fapi/v1/openOrders',{symbol:r.symbol}),this.api.call('GET','/fapi/v1/openAlgoOrders',{symbol:r.symbol}),this.queryEntry(r)
+    ]);
+    if(Date.now()-startedAt>15000)wait('fresh confirmation took too long; retrying');
+    if(!account||!Array.isArray(account.assets))wait('fresh account confirmation is unavailable');
+    const accountPosition=this.unseenFlatPosition(account.positions,r.symbol),position=this.unseenFlatPosition(positions,r.symbol,{scoped:true});
+    if(position){this.flatConfirmations.delete(r.id);this.positions=[...this.positions.filter(p=>p.symbol!==r.symbol),...positions];this.positionAt=Date.now();return null;}
+    if(accountPosition)wait('account and position snapshots disagree');
+    if(!Array.isArray(orders)||!Array.isArray(algos))wait('fresh order inventory is unavailable');
+    if(orders.length||algos.length)wait('Binance still reports open orders on this symbol');
+    if(!entry||entry.symbol!==r.symbol||entry.clientOrderId!==r.id||entry.side!==r.side||entry.status!=='FILLED'||String(entry.orderId)!==String(order.orderId)||String(entry.executedQty)!==String(order.executedQty)||entry.updateTime!==updated)wait('entry identity or settled quantity changed during verification');
+    const checkedAt=Date.now(),identity=[String(order.orderId),String(order.executedQty),updated].join(':'),previous=this.flatConfirmations.get(r.id);
+    if(!previous||previous.identity!==identity||checkedAt-previous.checkedAt>60000||checkedAt<previous.checkedAt){
+      this.flatConfirmations.set(r.id,{identity,checkedAt,exchangeAt:checkedAt+this.api.offset});
+    }else if(startedAt-previous.checkedAt>=5000){
+      return {kind:'repeated-flat-snapshots',entryOrderId:String(order.orderId),executedQty:String(order.executedQty),entryUpdatedAt:updated,firstConfirmedAt:previous.exchangeAt,secondConfirmedAt:checkedAt+this.api.offset,closedAt:checkedAt+this.api.offset,closingHistoryConfirmed:false,closingTimeKnown:false,...history};
+    }
+    const error=new DemoError(r.symbol+' filled entry: closing fills are not confirmed; Binance account, position and orders are flat (check 1 of 2). Rechecking automatically before releasing startup.');error.flatConfirmationPending=true;throw error;
+  }
   async recoverUnseenFill(r,order){
     this.unseenFillChecks??=new Map();const cached=this.unseenFillChecks.get(r.id);
     if(cached&&Date.now()<cached.retryAt)throw cached.error;
@@ -788,7 +821,7 @@ class DemoEngine {
       // A late position snapshot may now show the fill. In that case normal
       // reconciliation below must protect it, not retire its journal record.
       await this.refresh({inventory:false,valuation:false});
-      if(this.position(r.symbol)){this.unseenFillChecks.delete(r.id);return false;}
+      if(this.position(r.symbol)){this.unseenFillChecks.delete(r.id);this.flatConfirmations?.delete(r.id);return false;}
       if(order.status!=='FILLED'||order.symbol!==r.symbol||order.clientOrderId!==r.id||order.side!==r.side)wait('entry identity is not confirmed');
       const entryId=id(order.orderId),executed=units(order.executedQty);if(executed<=0n)wait('filled quantity is unavailable');
       const entryRows=await this.api.call('GET','/fapi/v1/userTrades',{symbol:r.symbol,orderId:order.orderId,limit:1000});
@@ -817,23 +850,30 @@ class DemoEngine {
           }
         }
         if(proof)break;
-        if(chunk.length<1000)wait('closing fills are not confirmed yet');
+        if(chunk.length<1000){
+          proof=await this.confirmUnseenFlat(r,order,{firstTradeId:first,tradeCount:count,matchedEntryFills:matched.size,expectedEntryFills:entryFills.size});
+          if(!proof){this.unseenFillChecks.delete(r.id);return false;}break;
+        }
         if(largest<BigInt(fromId))wait('execution history pagination is incomplete');fromId=(largest+1n).toString();
       }
       if(!proof)wait('execution history exceeds the verification limit');
-      // Recheck live state AFTER the historical proof. A flat screen by itself
-      // is never permission to forget an entry or send it again.
+      // Recheck AFTER either proof, including an account cross-check for the
+      // missing-history path. Recovery never replays the old entry.
+      const finalReadStartedAt=Date.now();
       const [,orders,algos]=await Promise.all([this.refresh({inventory:false,valuation:false}),this.api.call('GET','/fapi/v1/openOrders',{symbol:r.symbol}),this.api.call('GET','/fapi/v1/openAlgoOrders',{symbol:r.symbol})]);
-      if(this.position(r.symbol)){this.unseenFillChecks.delete(r.id);return false;}
+      if(Date.now()-finalReadStartedAt>15000)wait('final position/order confirmation took too long; retrying');
+      if(this.position(r.symbol)){this.unseenFillChecks.delete(r.id);this.flatConfirmations?.delete(r.id);return false;}
+      const liveRecovery=proof.kind==='repeated-flat-snapshots';
+      if(liveRecovery&&(this.unseenFlatPosition(this.account.positions,r.symbol)||this.unseenFlatPosition(this.positions,r.symbol)))wait('account and position snapshots disagree');
       if(!Array.isArray(orders)||!Array.isArray(algos))wait('fresh order inventory is unavailable');
       if(orders.length||algos.length)wait('Binance still reports open orders on this symbol');
       this.orders=this.orders.filter(o=>o.symbol!==r.symbol);this.algos=this.algos.filter(o=>o.symbol!==r.symbol);
       const previous={...r},verifiedAt=Date.now()+this.api.offset;
-      r.closedAt=proof.closedAt;r.closeReason='Closed fills verified after the initial open-position snapshot was missed';r.flatRecovery={...proof,verifiedAt};
-      r.exits=(r.exits||[]).map(e=>({...e,cancelled:true,confirmed:false,reconciledAt:verifiedAt,recoveryReason:'Closed fills and no open Binance orders confirmed'}));
+      r.closedAt=proof.closedAt;r.closeReason=liveRecovery?'Repeated live Binance checks confirm no position or open orders; closing history remains unconfirmed':'Closed fills verified after the initial open-position snapshot was missed';r.flatRecovery={...proof,verifiedAt};
+      r.exits=(r.exits||[]).map(e=>({...e,cancelled:true,confirmed:false,reconciledAt:verifiedAt,recoveryReason:liveRecovery?'Repeated flat Binance snapshots and no open orders confirmed':'Closed fills and no open Binance orders confirmed'}));
       try{this.save();}catch(error){for(const key of Object.keys(r))delete r[key];Object.assign(r,previous);throw error;}
-      this.unseenFillChecks.delete(r.id);this.event(r.symbol+' closed trade reconciled from execution history; entry hold can clear after remaining checks.');return true;
-    }catch(error){error.unseenFill=true;if(!error.message.startsWith(r.symbol))error.message=r.symbol+' fill reconciliation: '+error.message;this.unseenFillChecks.set(r.id,{retryAt:Date.now()+5000,error});throw error;}
+      this.unseenFillChecks.delete(r.id);this.flatConfirmations?.delete(r.id);this.event(r.symbol+(liveRecovery?' verified flat twice; saved entry archived with closing history unconfirmed.':' closed trade reconciled from execution history; entry hold can clear after remaining checks.'));return true;
+    }catch(error){if(!error.flatConfirmationPending)this.flatConfirmations?.delete(r.id);error.unseenFill=true;if(!error.message.startsWith(r.symbol))error.message=r.symbol+' fill reconciliation: '+error.message;this.unseenFillChecks.set(r.id,{retryAt:Date.now()+5000,error});throw error;}
   }
   exitOwner(e){return this.state.records.find(r=>(r.exits||[]).includes(e));}
   exitReference(e){
@@ -1569,6 +1609,7 @@ class DemoEngine {
       if(!p){if(r.observedOpen||(['CANCELED','EXPIRED','REJECTED'].includes(order.status)&&Number(order.executedQty)===0)){await this.cancelExits(r);r.closedAt=Date.now()+this.api.offset;this.save();continue;}throw new DemoError(r.symbol+' entry awaiting position confirmation; no new orders');}
       if((number(p.positionAmt)>0)!==(r.side==='BUY'))throw new DemoError('Position direction changed outside bot');
       this.unseenFillChecks?.delete(r.id);
+      this.flatConfirmations?.delete(r.id);
       r.openedAt=r.openedAt||Number(order.updateTime)||r.at;r.observedOpen=true;r.entry=number(p.entryPrice);r.filledQty=Math.abs(number(p.positionAmt));
       if(r.pendingClose){await this.close(r.symbol,r.closeReason);continue;}
       if(this.exitsSuspended(r)){r.netEstimate=number(p.unRealizedProfit)-r.fee*r.filledQty*(r.entry+number(p.markPrice));r.protected=false;this.save();continue;}
@@ -1604,6 +1645,7 @@ class DemoEngine {
       }
       }catch(error){
         if(!this.bandRules)throw error;
+        if(!error.flatConfirmationPending)this.flatConfirmations?.delete(r.id);
         failures.push(error);r.reconcileError={at:Date.now(),message:error.message};this.save();
         if(ACCOUNT_BLOCKS.has(error.code))break;
       }

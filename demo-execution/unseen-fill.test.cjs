@@ -87,3 +87,86 @@ test('an already-closed record remains reconciled after a restart without deleti
 test('repeated pending-fill checks do not flood the stopped bot activity log',async()=>{
  const f=fixture();f.trades.pop();f.e.auto=false;await f.e.tick();const events=f.e.events.length;await f.e.tick();await f.e.tick();assert.equal(f.e.events.length,events);assert.match(f.e.events[0].text,/MEGAUSDT.*closing fills/);assert.equal(f.e.auto,false);
 });
+test('missing closing history releases startup only after two fresh flat confirmations',async t=>{
+ let now=Date.now();t.mock.method(Date,'now',()=>now);
+ const f=fixture();f.trades.pop();f.e.startPending=true;let scans=0;f.e.scan=async()=>scans++;
+ await f.e.tick();assert.equal(f.r.closedAt,undefined);assert.equal(scans,0);assert.equal(f.e.startPending,true);
+ now+=6000;await f.e.tick();
+ assert.ok(f.r.closedAt);assert.equal(f.r.flatRecovery.kind,'repeated-flat-snapshots');assert.equal(f.r.flatRecovery.closingHistoryConfirmed,false);
+ assert.equal(f.e.startPending,false);assert.equal(f.e.entryHold,'');assert.equal(f.e.auto,true);assert.equal(scans,1);
+ assert.equal(f.e.state.records.length,1);assert.ok(f.calls.every(c=>c.method==='GET'));
+ assert.ok(f.calls.filter(c=>c.path==='/fapi/v3/positionRisk'&&c.p.symbol===symbol).length>=2);
+ assert.equal(f.r.tradeAccounting,undefined);assert.equal(f.r.flatRecovery.closingTradeId,undefined);
+});
+function clock(t){let now=Date.now();t.mock.method(Date,'now',()=>now);return ms=>{now+=ms;};}
+async function pendingFlat(f){await assert.rejects(()=>f.e.reconcile(),/check 1 of 2/);assert.equal(f.r.closedAt,undefined);}
+test('SELL missing history can reconcile while manually stopped without enabling Auto',async t=>{
+ const advance=clock(t),f=fixture('SELL');f.trades.pop();f.e.pause('Manual Stop');await pendingFlat(f);advance(6000);await f.e.tick();
+ assert.ok(f.r.closedAt);assert.equal(f.e.auto,false);assert.equal(f.r.flatRecovery.closingTimeKnown,false);assert.equal(f.r.closedAt,Date.now());
+ const restored=new DemoEngine(f.e.api,structuredClone(f.e.state),()=>{});assert.equal(restored.active().length,0);assert.equal(restored.auto,false);assert.equal(restored.state.records.length,1);
+});
+test('recent fills cannot be archived just because current position reads are empty',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();f.order.updateTime=Date.now();
+ for(let i=0;i<3;i++){await assert.rejects(()=>f.e.reconcile(),/entry must settle/);advance(6000);assert.equal(f.r.closedAt,undefined);}
+ advance(60000);await pendingFlat(f);advance(6000);await f.e.reconcile();assert.ok(f.r.closedAt);
+});
+test('flat confirmation must be repeated after five seconds and expires after one minute',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();await pendingFlat(f);advance(4000);await pendingFlat(f);assert.equal(f.r.closedAt,undefined);
+ advance(61000);await pendingFlat(f);advance(6000);await f.e.reconcile();assert.ok(f.r.closedAt);
+});
+test('flat confirmation is not restored across a restart',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);
+ f.e=new DemoEngine(f.e.api,structuredClone(f.e.state),()=>{});await pendingFlat({...f,r:f.e.state.records[0]});assert.equal(f.e.active().length,1);
+});
+for(const field of ['orders','algos'])test('a new '+field+' inventory on the second flat check blocks and resets confirmation',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);f[field]=[{symbol}];
+ await assert.rejects(()=>f.e.reconcile(),/still reports open orders/);assert.equal(f.r.closedAt,undefined);assert.equal(f.e.flatConfirmations.size,0);
+ f[field]=[];advance(6000);await pendingFlat(f);
+});
+test('a position appearing only in the symbol-specific read is kept and protected',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);let protectedCount=0;const base=f.e.api.call;
+ f.e.api.call=async(m,p,q)=>p==='/fapi/v3/positionRisk'&&q?.symbol?[{symbol,positionSide:'BOTH',positionAmt:'100',entryPrice:'1',markPrice:'1',unRealizedProfit:'0'}]:base(m,p,q);
+ f.e.reconcileBandExits=async()=>protectedCount++;await f.e.reconcile();assert.equal(f.r.closedAt,undefined);assert.equal(f.r.observedOpen,true);assert.equal(protectedCount,1);assert.equal(f.e.flatConfirmations.size,0);
+});
+test('account exposure or malformed position data never qualifies as a second flat check',async t=>{
+ const advance=clock(t);
+ for(const rows of [undefined,null,{},[{symbol,positionSide:'BOTH',positionAmt:'100'}],[{symbol,positionSide:'BOTH',positionAmt:'0.000000000000000001'}],[{symbol,positionSide:'BOTH',positionAmt:null}],[{symbol,positionSide:'BOTH',positionAmt:''}],[{symbol,positionSide:'BOTH',positionAmt:'bad'}],[{symbol,positionSide:'LONG',positionAmt:'0'}],[{positionSide:'BOTH',positionAmt:'0'}]]){
+  const f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);const base=f.e.api.call;
+  f.e.api.call=async(m,p,q)=>p==='/fapi/v3/account'?{assets:[],positions:rows}:base(m,p,q);
+  await assert.rejects(()=>f.e.reconcile(),/disagree|incomplete/);assert.equal(f.r.closedAt,undefined);assert.equal(f.e.flatConfirmations.size,0);
+ }
+});
+test('explicit zero positions corroborated by account and symbol reads are accepted',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();f.positions=[{symbol,positionSide:'BOTH',positionAmt:'0.0000',entryPrice:'0',markPrice:'1',unRealizedProfit:'0'}];await pendingFlat(f);advance(6000);await f.e.reconcile();assert.ok(f.r.closedAt);
+});
+test('changed entry identity during the second flat check keeps the original record',async t=>{
+ const advance=clock(t);
+ for(const change of [{symbol:'OTHERUSDT'},{clientOrderId:'other'},{orderId:999},{side:'SELL'},{status:'NEW'},{executedQty:'99'},{updateTime:Date.now()}]){
+  const f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);const base=f.e.api.call;let reads=0;
+  f.e.api.call=async(m,p,q)=>{const result=await base(m,p,q);return p==='/fapi/v1/order'&&++reads===2?{...result,...change}:result;};
+  await assert.rejects(()=>f.e.reconcile(),/changed during verification/);assert.equal(f.r.closedAt,undefined);assert.equal(f.e.flatConfirmations.size,0);
+ }
+});
+test('failed second flat reads clear the evidence and do not silently accept the old check',async t=>{
+ const advance=clock(t);
+ for(const endpoint of ['/fapi/v3/account','/fapi/v3/positionRisk','/fapi/v1/openOrders','/fapi/v1/openAlgoOrders','/fapi/v1/userTrades']){
+  const f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);const base=f.e.api.call;
+  f.e.api.call=async(m,p,q)=>{if(p===endpoint)throw new DemoError('Read unavailable',503);return base(m,p,q);};
+  await assert.rejects(()=>f.e.reconcile(),/Read unavailable/);assert.equal(f.r.closedAt,undefined);assert.equal(f.e.flatConfirmations.size,0);
+  f.e.api.call=base;advance(6000);await pendingFlat(f);
+ }
+});
+test('slow flat reads are rejected instead of combining snapshots too far apart',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();const base=f.e.api.call;
+ f.e.api.call=async(m,p,q)=>{const result=await base(m,p,q);if(p==='/fapi/v3/positionRisk'&&q?.symbol)advance(16000);return result;};
+ await assert.rejects(()=>f.e.reconcile(),/took too long/);assert.equal(f.r.closedAt,undefined);assert.equal(f.e.flatConfirmations.size,0);
+});
+test('account exposure appearing in the final recheck prevents archive',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);const base=f.e.api.call;let reads=0;
+ f.e.api.call=async(m,p,q)=>{const result=await base(m,p,q);return p==='/fapi/v3/account'&&++reads===3?{...result,positions:[{symbol,positionSide:'BOTH',positionAmt:'100'}]}:result;};
+ await assert.rejects(()=>f.e.reconcile(),/disagree/);assert.equal(f.r.closedAt,undefined);assert.equal(f.e.flatConfirmations.size,0);
+});
+test('fallback archive is rolled back if journal persistence fails',async t=>{
+ const advance=clock(t),f=fixture();f.trades.pop();await pendingFlat(f);advance(6000);f.e.persist=()=>{throw Error('Disk unavailable');};
+ await assert.rejects(()=>f.e.reconcile(),/Disk unavailable/);assert.equal(f.r.closedAt,undefined);assert.equal(f.r.flatRecovery,undefined);assert.equal(f.r.exits[0].confirmed,true);assert.equal(f.e.flatConfirmations.size,0);
+});
