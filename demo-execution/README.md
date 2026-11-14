@@ -1,3 +1,9 @@
+## Direct phone link — V1.83.1 interface update
+
+After connecting normally, click **Create phone link** beside Connect or in the toolbar, then Copy phone link and open it on the phone. The existing laptop browser remains the single order writer; keep its trading tab open and laptop awake. This avoids the background-connector upgrade/port-10000 pairing route. API keys and local tokens stay on the laptop. New random phone permissions, application-layer encryption, command expiry/deduplication, account-change invalidation and explicit revocation protect the controller. Existing V1.83.1 strategy/sizing/exit settings are unchanged.
+
+See `render-backend/MOBILE-SETUP.md` for lifetime and network limits. Direct WebRTC uses PeerJS signaling and Google STUN; some networks require both devices on the same Wi-Fi. The existing private Tailscale controller remains an advanced option. Regression tests cover crypto tampering/reflection, stale/replayed actions, remote Stop failures, full snapshot accounting, and the browser link flow with simulated data channels. No live exchange orders are used in validation.
+
 ## V1.83.1 — $150 minimum total position value; V1.83 strategy retained
 
 This is a sizing-only patch. Each new order must have a **planned total position value of at least $150 after leverage**, calculated as quantity × final executable entry price. It is not a $150 margin requirement: $3 margin at 50× or $1.50 margin at 100× both represent $150 before trading costs. Orders already larger than $150 remain eligible; the exchange minimum takes precedence if higher.

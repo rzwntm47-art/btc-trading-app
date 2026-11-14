@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'"><title>Phone link connection check</title><style>body{max-width:680px;margin:40px auto;padding:20px;background:#181a20;color:#eaecef;font:16px system-ui;line-height:1.6}button{padding:12px 20px;background:#fcd535;color:#181a20;border:0;border-radius:8px;font:inherit}pre{white-space:pre-wrap}a{color:#89caff}</style></head><body><h1>Phone link connection check</h1><p>This checks browser connections using simulated data. It does not connect to Binance, read any credentials or place orders.</p><button id="test">Run connection check</button><pre id="result" role="status">Ready</pre><p><a href="../demo-connect.html">Back to trading dashboard</a></p><script src="vendor/peerjs-1.5.5.min.js"></script><script src="phone-link-core.js"></script><script>
+const result=document.getElementById('result'),button=document.getElementById('test');
+button.onclick=async()=>{
+ button.disabled=true;result.textContent='Checking encrypted browser connection…';const peers=[];let timer;
+ try{
+  const check=(async()=>{
+   const options={host:'0.peerjs.com',port:443,secure:true,debug:0,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'}]}};
+   const open=()=>new Promise((resolve,reject)=>{const p=new Peer('btc-check-'+crypto.randomUUID(),options);peers.push(p);p.on('open',()=>resolve(p));p.on('error',reject);});
+   const [laptop,phone]=await Promise.all([open(),open()]);
+   const secret=PhoneLinkCore.random(),[sender,receiver]=await Promise.all([PhoneLinkCore.codec(secret,'laptop'),PhoneLinkCore.codec(secret,'phone')]);
+   const engine={connected:true,appVersion:'connection-test',state:{records:[]},account:{assets:[]}},host=PhoneLinkCore.host({engine,getEngine:()=>engine});
+   laptop.on('connection',c=>{c.on('data',async packet=>{try{const request=await sender.open(packet),value=host.handle(request.path);c.send(await sender.seal({id:request.id,value}));}catch(error){result.textContent='Check failed: '+error.message;}});});
+   await new Promise((resolve,reject)=>{
+    const c=phone.connect(laptop.id,{serialization:'binary',reliable:true}),id=crypto.randomUUID();
+    c.on('error',reject);c.on('open',async()=>{try{c.send(await receiver.seal({id,path:'/status'}));}catch(error){reject(error);}});
+    c.on('data',async packet=>{try{const reply=await receiver.open(packet);if(reply.id!==id||reply.value.engine.appVersion!=='connection-test')throw Error('Unexpected reply');resolve();}catch(error){reject(error);}});
+   });
+   return 'PASS — signaling, browser data channel, encrypted request and authenticated response work in this browser.\n\nYour laptop-to-phone network still needs to allow the connection. If it does not, try both devices on the same Wi-Fi.';
+  })();
+  result.textContent=await Promise.race([check,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Connection timed out. This network may block direct browser connections.')),25000);})]);
+ }catch(error){result.textContent='CHECK FAILED — '+error.message;}
+ finally{clearTimeout(timer);for(const p of peers)p.destroy();button.disabled=false;}
+};
+</script></body></html>

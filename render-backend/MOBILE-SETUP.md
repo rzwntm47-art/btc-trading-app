@@ -1,4 +1,18 @@
-# Same account on mobile — V1.72
+# Phone link from your connected dashboard
+
+The normal flow is now **Connect & Start Demo → Create phone link → Copy phone link**. Open the copied link on your phone. The button also appears in the main toolbar after the connection form collapses. It uses the browser session already connected on the laptop, including an existing basic relay. This flow does not require START-LAPTOP, ENABLE-MOBILE, a separate background engine, Tailscale, a second token entry or copying Binance keys to the phone.
+
+Keep the **laptop trading tab open**, laptop awake, and its existing relay running if used. Closing the tab, disconnecting, switching the account, **Revoke phone link**, or the eight-hour expiry ends access. The same link can reconnect while that session remains active; a phone-tab refresh uses session storage to recover the phone permission. The phone runs a controller, never a second trading engine. Start, Stop, Sync, owned-position Close, New session, Reset result and reports go to the original engine, with command IDs and expiry checks. Strategy V1.83, its $150 minimum planned position value, and the existing loss/profit rules are unchanged.
+
+The link grants control of this Demo session; share it only with your own phone. Binance keys, HMAC secrets and the local relay token never appear in it. A fresh random secret in the URL fragment derives direction-specific AES-GCM keys; snapshots and commands are encrypted before entering the WebRTC channel. Phone replies are matched to request IDs. Commands expire after 15 seconds, are checked again when a busy engine is ready, and cannot execute twice under the same command ID. Lost replies are not automatically replayed. Disconnecting a phone does not stop the laptop bot.
+
+PeerJS 1.5.5 is bundled under its MIT license. Only opening/creating a phone link contacts the free PeerJS signaling service and Google STUN service. Those services receive network/connection metadata, not API credentials or decrypted trading snapshots. Direct connections may fail across restrictive networks; use the same Wi-Fi and Reconnect phone. No retired free TURN service is assumed. An optional [connection check](https://rzwntm47-art.github.io/btc-trading-app/demo-execution/phone-link-check.html) tests the signaling/data-channel/encryption path with simulated data and no Binance connection.
+
+The website update needs a refresh to load the new button; it does not modify an already-open page. Sync and wait for pending actions before refreshing, then reconnect with the normal saved credentials. No connector replacement is needed for this direct-link feature if the existing dashboard already connects and trades. A page refresh clears memory-only credentials as before; do not reset history or clear saved storage.
+
+The older private/background setup remains under **Advanced laptop setup**, for users who need to close the laptop browser while the connector runs. Its steps are below and are not required for the new direct link.
+
+## Advanced: private background controller
 
 The laptop runs one Binance Demo bot. The phone displays that same account, balances, positions, scan results and controls. API keys are entered only on the laptop. The phone does not start a second bot.
 

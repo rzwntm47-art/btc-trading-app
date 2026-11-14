@@ -1,6 +1,7 @@
 'use strict';
 // Remote views receive snapshots and explicit commands only. They never execute DemoAPI calls.
-const onPhoneController=location.pathname==='/mobile';
+const onLinkPhone=new URLSearchParams(location.search||'').get('phone')==='1';
+const onPhoneController=location.pathname==='/mobile'||onLinkPhone;
 let remoteTransport=null,remotePollPromise=null,pairExpiryTimer;
 const PHONE_ORIGIN_KEY='btc_demo_phone_origin';
 function phoneOrigin(value){
@@ -24,6 +25,7 @@ function restorePhoneDashboard(){
 }
 function pairMessage(text){$('pairStatus').textContent=text;}
 async function remoteRequest(transport,path,data){
+  if(transport.peerLink)return transport.request(path,data);
   const headers={},options={method:data===undefined?'GET':'POST',headers,cache:'no-store',credentials:transport.mobile?'same-origin':'omit',redirect:'error',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(15000)};
   if(transport.token)headers.Authorization='Bearer '+transport.token;
   if(data!==undefined){headers['Content-Type']='application/json';options.body=JSON.stringify({...data,...(transport.mobile?{csrf:transport.csrf}:{})});}
@@ -50,7 +52,7 @@ class RemoteDemo extends DemoEngine{
     const reconnectNote=onPhoneController?'Laptop connector is ready. Reconnect Binance on the laptop; this phone remains paired.':'Laptop connector is ready. Open Mobile — same account, unlock saved keys or enter them in Connect Binance Demo, then click Connect laptop / reconnect controls. After connection, click Start / Resume Demo.';
     if(!this.connected)status(snapshot.restarting?'Laptop connector is restarting. Wait for its new window, then reconnect Binance on the laptop.':snapshot.connecting?'Laptop is connecting to Binance Demo. Please wait…':snapshot.error||reconnectNote);
     else status('LAPTOP BACKGROUND BOT · '+$('status').textContent);
-    $('backgroundNote').textContent='Laptop engine '+(this.appVersion?'V'+this.appVersion:'version unavailable — update the laptop connector for the latest fixes')+'. Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
+    $('backgroundNote').textContent=this.transport.peerLink?'PHONE LINK · Same laptop account · engine V'+this.appVersion+'. Keep the laptop trading tab open and laptop awake. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.':'Laptop engine '+(this.appVersion?'V'+this.appVersion:'version unavailable — update the laptop connector for the latest fixes')+'. Trading runs on the laptop. You may close this dashboard. Keep the laptop awake and its connector window open. Last contact: '+new Date(this.lastContact).toLocaleTimeString()+'.';
     if(!onPhoneController){if(snapshot.remoteOrigin&&!$('mobileOrigin').value)$('mobileOrigin').value=snapshot.remoteOrigin;pairMessage(snapshot.restarting?'Connector restart in progress…':snapshot.connecting?'Connecting in the background…':this.connected?'Same laptop bot connected · '+snapshot.pairedDevices+' remembered phone(s). Open the saved phone app, or create a one-time link for a new phone.':snapshot.error||reconnectNote);}
   }
   async command(action,extra={}){
@@ -180,7 +182,7 @@ $('revokePhones').onclick=async()=>{
 };
 setInterval(()=>{if(remoteTransport)pollRemote();},3000);
 restorePhoneDashboard();
-if(onPhoneController){
+if(onPhoneController&&!onLinkPhone){
   $('credentials').hidden=true;$('pairMobile').hidden=true;$('pairPanel').hidden=true;$('resetDemo').hidden=true;
   const paper=document.querySelector('a[href="./"]');if(paper)paper.hidden=true;
   $('backgroundNote').hidden=false;$('backgroundNote').textContent='Connecting to your laptop…';
