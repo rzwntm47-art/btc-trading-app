@@ -4,7 +4,7 @@ const {DemoEngine,DemoError,trendContinuationSetup,bollingerSetup}=require('./en
 const {fixture,entryBars,setTradeNet,symbol}=require('./test-fixture.cjs');
 function bars(side,ms=60000){const rows=entryBars(side),end=Math.floor(Date.now()/ms)*ms;rows.forEach((b,i)=>{b[0]=end-(rows.length-i)*ms;b[6]=b[0]+ms-1;});return rows;}
 function setup(side='BUY',band=false,legacy=false){
- const f=fixture(),prior=f.e.entryPolicy;f.e.newRules=f.e.bandRules=true;f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;f.signal.side=side;
+ const f=fixture(),prior=f.e.entryPolicy;f.e.newRules=f.e.bandRules=true;f.e.entryPolicy={...new DemoEngine({offset:0}).entryPolicy,marginMode:'risk-capped',leverageMode:'highest-fee-compatible',maxLeverage:150};f.signal.side=side;
  if(legacy)f.e.entryPolicy={...f.e.entryPolicy,...prior,profitExit:'small-net-profit',profitStart:1,profitStep:null,takeProfit:1,minimumNetAtTarget:1,entryDirection:'closed-candle-stable-quotes'};
  const base=f.api.call;f.api.call=async(m,p,q={},s)=>p==='/fapi/v1/klines'?bars(side,q.interval==='5m'?300000:60000):base(m,p,q,s);
  if(band){const rows=bars('BUY',300000);rows.forEach(b=>{b[1]=104;b[2]=105.3;b[3]=103.7;b[4]=105;});Object.assign(rows.at(-2),{1:104,2:104.3,3:95,4:96});Object.assign(rows.at(-1),{1:96,2:100.3,3:95.8,4:100});f.signal=bollingerSetup(side==='BUY'?rows:rows.map(b=>[b[0],200-b[1],200-b[3],200-b[2],200-b[4],b[5],b[6]]),side,Date.now());}
@@ -15,7 +15,7 @@ async function opened(side='BUY',band=false,legacy=false){const f=setup(side,ban
 const entries=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);
 const closes=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&c.p.reduceOnly);
 test('tight defaults retain entry strategies, $1 profit and the $20 session target',()=>{
- const p=new DemoEngine({offset:0}).entryPolicy;assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.earlyLossExit,null);assert.equal(p.marginMode,'risk-capped');assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);assert.deepEqual(p.strategies,['bollinger-wr','trend-continuation']);assert.equal(p.entryDirection,'closed-candle-stable-quotes');
+ const p=new DemoEngine({offset:0}).entryPolicy;assert.equal(p.lossExit,'tight-net-stop');assert.equal(p.lossLimit,.5);assert.equal(p.maxLossLimit,1);assert.equal(p.earlyLossExit,null);assert.equal(p.marginMode,'leverage-targeted');assert.equal(p.takeProfit,1);assert.equal(p.sessionTarget,20);assert.deepEqual(p.strategies,['bollinger-wr','trend-continuation']);assert.equal(p.entryDirection,'closed-candle-stable-quotes');
 });
 for(const side of ['BUY','SELL']){
  for(const band of [false,true])test(side+' '+(band?'band':'trend')+' uses a smaller position that fits fees, spread and volatility',async()=>{

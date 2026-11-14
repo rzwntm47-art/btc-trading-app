@@ -28,7 +28,7 @@ test('definitely rejected entry does not consume a candle; retry waits and reche
 });
 function atPrice(f,price){closingQuote(f,price);f.position.markPrice=String(price);f.position.unRealizedProfit=String((price-100)*Math.abs(Number(f.position.positionAmt))*(f.signal.side==='BUY'?1:-1));}
 test('defaults select stepped after-fee exits and supersede the old one-hour experiment',async()=>{
- const e=new DemoEngine({offset:0},null,()=>{});assert.equal(e.entryPolicy.lossLimit,.5);assert.equal(e.entryPolicy.profitExit,'small-net-profit');assert.equal(e.entryPolicy.maxLeverage,150);
+ const e=new DemoEngine({offset:0},null,()=>{});assert.equal(e.entryPolicy.lossLimit,.5);assert.equal(e.entryPolicy.profitExit,'small-net-profit');assert.equal(e.entryPolicy.maxLeverage,100);
  e.state.oneHourTrial={startedAt:Date.now(),until:Date.now()+3600000};assert.equal(e.trialActive(),false);await assert.rejects(()=>e.startTrial(),/replaced/);
 });
 test('Bollinger uses 20-close population deviation and Williams uses the last 14 highs/lows',()=>{

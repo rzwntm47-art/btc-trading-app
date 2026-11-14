@@ -1,3 +1,15 @@
+## V1.80 — requested margin with leverage fallback
+
+New entries try **$15 margin at 100×**, then **$25 at 50×**, within the exchange leverage ceiling. If those sizes do not fit costs or volatility, try **$25 margin at lower integer leverage below 50×**. Do not select intermediate 51–99× leverage or exceed 100×. Retain the requested margin when checking exchange capacity and available funds; skip if no valid order fits. Round to the exchange quantity step and revalidate final quotes; actual fills may change the displayed margin.
+
+The user delegated the fee/stop conflict decision. Preserve the **$0.50 total net-loss target including fees**, the **$1 exchange backup**, $1 net-profit exits and the $20 session target. Estimated immediate costs remain limited to $0.25; one 1m ATR plus costs must fit $1. At a hypothetical 0.05% taker fee each way, the requested high tiers would cost roughly $1.25 or $1.50 for opening plus closing, so the bot must select lower leverage or skip. It does not silently expand the stop or send a smaller-margin order. Increasing allocated margin can leave exposure similar when leverage falls and cannot guarantee $20 within minutes.
+
+Both entry signal paths and quote confirmation remain. Existing positions are managed under their current exits and are not topped up or releveraged. Position cards show actual initial margin, trade value, recorded entry leverage and requested margin. Reports retain the requested margin separately from the estimated filled margin. Stop/Resume, unknown-order journaling, protection recovery and reset behavior remain.
+
+Install both `demo-execution` and `render-backend`, run `START-LAPTOP.cmd`, reconnect, then **Sync Binance → Start / Resume Demo**. Verify both page and laptop engine show **V1.80**. Updating the website alone does not update a running connector. No history reset is needed. Tests use simulated exchange responses, not a profitability backtest.
+
+Fee reference: [Binance Futures fee calculations](https://www.binance.com/en-AE/support/faq/detail/360033544231). Actual signed commission-rate responses remain authoritative for entry sizing.
+
 ## V1.79 — $0.50 net-loss exit and $1 exchange backup
 
 Keep both Bollinger/Williams %R and trend-continuation entry paths, fresh stable-quote confirmation, the $1 net-profit close and the $20 account-wide session target. Replace the $6 loss decision and recovery extension toward $12 with a normal close at **-$0.50 total trade net** and a **-$1 fee-adjusted exchange backup target**. Re-read position, matched execution fees and the executable quote before a normal close. If price recovers above the threshold, keep monitoring; do not research or grant recovery extensions below it.
