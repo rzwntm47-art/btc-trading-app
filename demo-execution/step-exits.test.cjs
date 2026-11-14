@@ -77,7 +77,7 @@ test('a loss crossing $12 during recovery checks closes even when candles suppor
 });
 test('restarting preserves the highest net and never lowers an armed floor',async()=>{
  const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,21);await f.e.reconcile();assert.equal(r.profitFloor,20);
- const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.meta=f.e.meta;setTradeNet(f,20.5);await restored.refresh();await restored.reconcile();const again=restored.owned(symbol);assert.equal(again.trailPeak,21);assert.equal(again.profitFloor,20);
+ const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.entryPolicy={...f.e.entryPolicy};restored.meta=f.e.meta;setTradeNet(f,20.5);await restored.refresh();await restored.reconcile();const again=restored.owned(symbol);assert.equal(again.trailPeak,21);assert.equal(again.profitFloor,20);
  setTradeNet(f,20);await restored.refresh();await restored.reconcile();assert.ok(again.closedAt);
 });
 test('migration resets obsolete peaks without changing quantity, fees, history or leverage',async()=>{
@@ -101,4 +101,5 @@ test('an ambiguous profit close is journaled and never blindly submitted again',
 test('profit checks still close owned positions while Auto entries are manually stopped',async()=>{
  const f=await opened(),r=f.e.owned(symbol);setTradeNet(f,9);await f.e.reconcile();f.e.pause('Manual Stop');setTradeNet(f,8);await f.e.reconcile();assert.ok(r.closedAt);assert.equal(f.e.auto,false);
 });
+
 

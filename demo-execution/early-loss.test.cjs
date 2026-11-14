@@ -100,7 +100,7 @@ test('unknown early close response is journaled and never blindly resubmitted',a
 test('restart preserves existing armed profit floors',async t=>{
  t.mock.timers.enable({apis:['Date'],now:Date.now()});const f=await opened(),r=f.e.owned(symbol);
  setTradeNet(f,9);await f.e.reconcile();assert.equal(r.profitFloor,8);
- r.earlyLossQuotes=inputs().samples;const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.meta=f.e.meta;
+ r.earlyLossQuotes=inputs().samples;const restored=new DemoEngine(f.api,structuredClone(f.e.state),()=>{});restored.entryPolicy={...f.e.entryPolicy};restored.meta=f.e.meta;
  await restored.refresh();await restored.reconcile();assert.equal(restored.owned(symbol).profitFloor,8);
 });
 test('a small stable loss is held and stale observations are discarded after restart',async t=>{
@@ -131,3 +131,4 @@ test('final after-fee recovery above -$2 cancels an early close even when price 
  };
  await deteriorate(f,t);assert.ok(f.position);assert.equal(closes(f).length,0);assert.equal(r.earlyLossReview.exit,false);assert.match(r.earlyLossReview.reason,/at least \$2/);
 });
+

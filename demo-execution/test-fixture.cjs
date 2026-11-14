@@ -63,7 +63,9 @@ function fixture(){
     }
     throw Error('Unmocked '+method+' '+path);
   }};
-  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.newRules=false;e.bandRules=false;e.overrideUntil=0;e.experimentUntil=0;
+  let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.newRules=false;e.bandRules=false;
+  // Historical-policy fixtures; small-profit tests explicitly restore current defaults.
+  Object.assign(e.entryPolicy,{minimumNetAtTarget:5,entryDirection:'closed-1m-and-live-quotes',profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing'});e.overrideUntil=0;e.experimentUntil=0;
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
   const signal={qualityConfirmed:true,strength:2,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   e.marketContext={side:'BUY',closedAt:Date.now()-1000};e.marketCheckedAt=Date.now();

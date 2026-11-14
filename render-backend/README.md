@@ -1,3 +1,13 @@
+## V1.78 — small net profits toward the $20 session target
+
+The V1.77 report showed 962 checks, 102 preliminary setups, 102 app-filter skips and no entry submissions. A recorded TAKEUSDT candidate reached the final live-quote check but failed because bid and ask stayed unchanged over a few seconds. This version accepts two fresh, timestamp-advancing quote updates that are stable or favorable when the closed candle confirms direction. It still rejects reversals, widening spreads, stale data, opposing forming candles and late price chases. Compare the candle trade price with the quote midpoint; all order economics still use executable prices. This removes that recorded filter failure without treating every gainer or loser as an entry.
+
+Both entry paths now close the remaining position at **$1 estimated total trade net or more**; $2/$3 seen on a later check also trigger a close. There is no wait for a $5 profit or a pullback. Re-read current position, matched fills/fees and executable closing price before submission; hold if the fresh estimate falls below $1. Paid commissions, realized partial results, funding, depth when required and expected closing fees remain included. The reference-target minimum net is reduced from $5 to $1. Fee-ratio, margin, leverage and volatility limits remain.
+
+Existing bot positions migrate to `rulesVersion: 13`, `exitPolicy: 'small-net-profit'` on reconciliation without changing size, ownership or leverage. Keep $2–$6 adverse-move exits, the normal $6 loss decision, $12 exchange backup, the $20 session close/stop, counter reset and order-recovery protections. Unknown close results remain journaled and cannot be blindly repeated. The engine must stay running for small-profit exits. Estimates and market fills can differ; tests do not demonstrate profitable performance.
+
+Install both `demo-execution` and `render-backend`, run `START-LAPTOP.cmd`, reconnect, then **Sync Binance → Start / Resume Demo**. Check both page and laptop engine show **V1.78**. Publishing this update does not replace files in an already-running laptop connector. No trade history deletion or counter reset is required to install it.
+
 ## V1.77 — additional trend-continuation entries
 
 The scanner previously considered only Bollinger/Williams %R rebounds. V1.76 diagnostics confirmed successful scanning but all preliminary setups were filtered. Add a separate continuation candidate for the same current gainers and losers: aligned closed 1m/5m trends, a directional 1m candle, relative volume, and no overextended candle. Keep all 14 Bollinger timeframes and their existing rules. Both paths share the existing candle datasets; a trend data failure does not suppress an otherwise valid band setup.
