@@ -4,7 +4,8 @@ const {DemoEngine,minuteMomentumSetup}=require('./engine.js');
 const {fixture,entryBars,symbol}=require('./test-fixture.cjs');
 const entries=f=>f.calls.filter(c=>c.method==='POST'&&c.path==='/fapi/v1/order'&&!c.p.reduceOnly);
 function setup({side='BUY',strict=false,scale=1,shape='normal',fee=.0005,capacity=1000000,quotes='normal'}={}){
- const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;f.signal.side=side;
+ // V1.83 signal regressions use its original size floor; the $150 patch has a separate suite.
+ const f=fixture();f.e.newRules=f.e.bandRules=true;f.e.entryPolicy={...new DemoEngine({offset:0}).entryPolicy,minimumPositionNotional:0};f.signal.side=side;
  if(strict)Object.assign(f.e.entryPolicy,{entryFilters:'full-confirmation',entryDirection:'closed-candle-stable-quotes',maxCommissionShare:.25,minimumNetAtTarget:1});
  const rows=()=>{
   const r=entryBars(side,Date.now(),scale),last=r.at(-1),sign=side==='BUY'?1:-1;

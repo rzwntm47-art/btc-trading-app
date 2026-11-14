@@ -7,7 +7,7 @@ function fixture(){
  class FakeNode{constructor(){this.disabled=false;this.hidden=false;this.textContent='';this.children=[];this.classList={add(){},remove(){}};}append(...items){this.children.push(...items);}replaceChildren(){this.children=[];}}
  const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,new FakeNode());return nodes.get(id);};
  const intervals=[],events={};const paperLink={};const messages=[];const parent={postMessage:(...args)=>messages.push(args)};
- const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.83',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
+ const context=vm.createContext({Node:FakeNode,DemoEngine,SESSION_TARGET,APP_VERSION:'1.83.1',console,parent,setTimeout,setInterval(fn){intervals.push(fn);},document:{getElementById:node,createElement(){return new FakeNode();},querySelector(){return paperLink;},addEventListener(type,fn){events[type]=fn;}},window:{addEventListener(){}},location:{origin:'http://test'},localStorage:{getItem(){return null;}}});
  vm.runInContext(fs.readFileSync(__dirname+'/ui.js','utf8'),context);
  vm.runInContext(`const renderActual=render;render=()=>{};engine=new DemoEngine({offset:0,key:'test'},null,()=>{});engine.bandRules=false;engine.entryPolicy={margin:300,maxLeverage:10,lossLimit:5,profitExit:'net-trailing',sessionExit:'close-bot-positions'};engine.connected=true;engine.tick=async()=>{};engine.state.startedAt=Date.now()-1000;engine.refresh=async()=>{engine.positionAt=Date.now();};engine.reconcile=async()=>{};engine.updateIncome=async()=>{engine.lastIncome=Date.now();engine.incomeWindowStart=engine.state.startedAt;};`,context);
  return {node,context,intervals,events,paperLink,messages,e:vm.runInContext('engine',context)};
@@ -111,7 +111,7 @@ test('Copy trade report uses connected snapshots and excludes API credentials',a
 test('Copy trade report provides selectable text when clipboard access fails',async()=>{
  const {node,context}=fixture();context.navigator={clipboard:{writeText:async()=>{throw Error('Unavailable');}}};
  node('tradeReportText').focus=()=>{};node('tradeReportText').select=()=>{};
- await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.83');
+ await node('copyTradeReport').onclick();assert.equal(node('tradeReportText').hidden,false);assert.equal(JSON.parse(node('tradeReportText').value).appVersion,'1.83.1');
 });
 test('Copy report waits for engine work and refreshes positions and income before export',async()=>{
  const {node,context,e}=fixture();let copied;const order=[];
@@ -140,7 +140,7 @@ test('Copy scan diagnostics works with zero trades while busy and disconnected w
 test('Copy scan diagnostics works before creating a connection and has a selectable fallback',async()=>{
  const {node,context}=fixture();vm.runInContext('engine=null;',context);context.navigator={clipboard:{writeText:async()=>{throw Error('Denied');}}};
  node('scanDiagnosticsText').focus=()=>{};node('scanDiagnosticsText').select=()=>{};
- await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.83');assert.match(node('entryStatus').textContent,/No trades are required/);
+ await node('copyScanDiagnostics').onclick();assert.equal(node('scanDiagnosticsText').hidden,false);assert.equal(JSON.parse(node('scanDiagnosticsText').value).appVersion,'1.83.1');assert.match(node('entryStatus').textContent,/No trades are required/);
 });
 test('position cards separate Binance gross PnL, closing net, and once-only reduction status',()=>{
  const {context,e,node}=fixture();e.tradingReady=true;e.accountAt=e.positionAt=Date.now();
@@ -194,6 +194,13 @@ test('requested margin, actual margin, leverage and trade value remain distinct 
  e.positions=[{symbol:'BTCUSDT',positionAmt:'15',positionInitialMargin:'15.01',entryPrice:'100',markPrice:'100',unRealizedProfit:'0'}];e.state.records=[{id:'bd1_margin',symbol:'BTCUSDT',side:'BUY',rulesVersion:14,exitPolicy:'small-net-profit',lossExit:'tight-net-stop',lossLimit:.5,maxLossLimit:1,leverage:100,requestedEntryMargin:15,exits:[]}];
  vm.runInContext('renderActual()',context);assert.match(node('leverageWindow').textContent,/flexible margin up to \$300; no \$15\/\$25 minimum/);assert.match(node('budgetValue').textContent,/size adapts to funds/);
  const collect=n=>n.textContent+' '+n.children.map(collect).join(' '),text=collect(node('positions'));assert.match(text,/Initial margin.*15.01/);assert.match(text,/Trade value.*1,500\.00/);assert.match(text,/Entry leverage.*100×/);assert.match(text,/Requested entry margin.*15.00/);
+});
+test('minimum position value is shown after leverage without labelling it as margin',()=>{
+ const {node,context,e}=fixture();e.bandRules=true;e.entryPolicy=new DemoEngine({offset:0}).entryPolicy;
+ e.positions=[{symbol:'BTCUSDT',positionAmt:'1.5',positionInitialMargin:'3',entryPrice:'100',markPrice:'100',unRealizedProfit:'0'}];e.state.records=[{id:'bd1_min',symbol:'BTCUSDT',side:'BUY',leverage:50,minimumEntryNotional:150,estimatedEntryNotional:150,exits:[]}];
+ vm.runInContext('renderActual()',context);assert.match(node('budgetValue').textContent,/minimum planned position value \$150 after leverage \(margin × leverage\)/);assert.match(node('leverageWindow').textContent,/minimum planned position value \$150/);
+ const collect=n=>n.textContent+' '+n.children.map(collect).join(' '),text=collect(node('positions'));assert.match(text,/Initial margin.*3/);assert.match(text,/Trade value.*150.00/);assert.match(text,/Entry leverage.*50×/);assert.match(text,/Minimum entry value.*150.00/);assert.match(text,/Planned entry value.*150.00/);
+ e.remote=true;e.appVersion='1.83';delete e.entryPolicy.minimumPositionNotional;vm.runInContext('renderActual()',context);assert.equal(node('connectorUpdate').hidden,false);assert.ok(!node('budgetValue').textContent.includes('minimum planned position value $150'));
 });
 
 test('Sync read failure keeps running Auto in retry mode and Stop cancels that intent',async()=>{

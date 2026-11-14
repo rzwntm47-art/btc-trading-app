@@ -1,3 +1,13 @@
+## V1.83.1 — $150 minimum total position value; V1.83 strategy retained
+
+This is a sizing-only patch. Each new order must have a **planned total position value of at least $150 after leverage**, calculated as quantity × final executable entry price. It is not a $150 margin requirement: $3 margin at 50× or $1.50 margin at 100× both represent $150 before trading costs. Orders already larger than $150 remain eligible; the exchange minimum takes precedence if higher.
+
+Apply the floor during initial sizing, leverage/capacity fallback and the final quote check. The existing fee, spread, volatility, available-funds and exchange limits remain; if no valid size reaches the floor, explain the sizing conflict and continue scanning without sending a smaller order or widening the stops. Actual market fills may differ from the planned value. Do not top up existing positions or alter their leverage.
+
+The V1.83 signal rules, removed discretionary filters, $1 net-loss trigger, $1.50 backup, uncapped net-profit trail and $20 booked session goal are unchanged. Tests compare the complete policy against V1.83 with only the new minimum added, and verify both directions, leverage/margin arithmetic, fees, lot rounding, capacity fallback, final quote/volatility changes and existing-position handling.
+
+Update both `demo-execution` and `render-backend`, restart `START-LAPTOP.cmd`, then **Sync Binance → Start / Resume Demo**. Confirm connected engine **V1.83.1** and **minimum planned position value $150 after leverage**. The patch version distinguishes the updated connector; the trading strategy remains V1.83. No reset or history deletion is needed.
+
 ## V1.83 — remove discretionary entry gates
 
 The current entry policy uses recent 1m price direction and a fresh directional quote. Candle body/close-strength thresholds, minimum volume, moving-average alignment and the separate 0.75-ATR chase distance no longer reject current entries. Small pullbacks, spread changes and a fresh quote without a second advancing timestamp are allowed when executable-price sizing and protection still fit. The live price must remain on the intended side of the current candle open, or the latest completed candle open when forming data is absent.

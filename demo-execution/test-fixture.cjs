@@ -65,7 +65,7 @@ function fixture(){
   }};
   let saved=[];const e=new DemoEngine(api,null,s=>saved.push(JSON.parse(JSON.stringify(s))));e.newRules=false;e.bandRules=false;
   // Historical-policy fixtures; small-profit tests explicitly restore current defaults.
-  Object.assign(e.entryPolicy,{entryFilters:'full-confirmation',maxCommissionShare:.25,strategies:['bollinger-wr','trend-continuation'],trendTimeframes:[1,5],reentryCooldownMs:600000,sessionExit:'close-bot-positions',maxLeverage:150,leverageMode:'highest-fee-compatible',lossExit:'adaptive-recovery',lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,marginMode:'fixed',trendVolatilityLossLimit:6,minimumNetAtTarget:5,entryDirection:'closed-1m-and-live-quotes',profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing'});e.overrideUntil=0;e.experimentUntil=0;
+  Object.assign(e.entryPolicy,{minimumPositionNotional:0,entryFilters:'full-confirmation',maxCommissionShare:.25,strategies:['bollinger-wr','trend-continuation'],trendTimeframes:[1,5],reentryCooldownMs:600000,sessionExit:'close-bot-positions',maxLeverage:150,leverageMode:'highest-fee-compatible',lossExit:'adaptive-recovery',lossLimit:6,maxLossLimit:12,earlyLossExit:'confirmed-adverse-move',earlyLossMin:2,marginMode:'fixed',trendVolatilityLossLimit:6,minimumNetAtTarget:5,entryDirection:'closed-1m-and-live-quotes',profitStart:5,profitStep:3,takeProfit:null,profitExit:'stepped-net-trailing'});e.overrideUntil=0;e.experimentUntil=0;
   e.meta.set(symbol,{orderTypes:['MARKET'],filters:[{filterType:'MARKET_LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'LOT_SIZE',stepSize:'.001',minQty:'.001',maxQty:'100000'},{filterType:'PRICE_FILTER',tickSize:'.01'},{filterType:'MIN_NOTIONAL',notional:'5'}]});e.metaAt=Date.now();e.connected=true;e.auto=true;e.state.startedAt=now-1000;
   const signal={qualityConfirmed:true,strength:2,leverage:3,stopDistance:3,side:'BUY',close:now-1000,price:100,high:99,low:90,atr:2};
   e.marketContext={side:'BUY',closedAt:Date.now()-1000};e.marketCheckedAt=Date.now();
@@ -84,6 +84,6 @@ function setTradeNet(f,target,{mark=true}={}){
  return price;
 }
 
-function v181Policy(){return {...new DemoEngine({offset:0}).entryPolicy,entryFilters:'full-confirmation',entryDirection:'closed-candle-stable-quotes',maxCommissionShare:.25,minimumNetAtTarget:1,strategy:'bollinger-wr-and-trend-continuation',strategies:['bollinger-wr','trend-continuation'],trendTimeframes:[1,5],trendVolatilityLossLimit:1,reentryCooldownMs:600000,lossLimit:.5,maxLossLimit:1,takeProfit:1,profitExit:'small-net-profit',sessionExit:'close-bot-positions'};}
+function v181Policy(){return {...new DemoEngine({offset:0}).entryPolicy,minimumPositionNotional:0,entryFilters:'full-confirmation',entryDirection:'closed-candle-stable-quotes',maxCommissionShare:.25,minimumNetAtTarget:1,strategy:'bollinger-wr-and-trend-continuation',strategies:['bollinger-wr','trend-continuation'],trendTimeframes:[1,5],trendVolatilityLossLimit:1,reentryCooldownMs:600000,lossLimit:.5,maxLossLimit:1,takeProfit:1,profitExit:'small-net-profit',sessionExit:'close-bot-positions'};}
 module.exports={v181Policy,fixture,entryBars,continuationBars,lowVolatility,closingQuote,reductionPosts,setTradeNet,now,symbol};
 
